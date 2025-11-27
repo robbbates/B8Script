@@ -1,7 +1,7 @@
 User Manual  
 https://docs.google.com/document/d/1eimhjkDaAAPlWn8xI9OvveptNmMWlAgCIEwEcPNM6b0/edit?tab=t.0  
   
-B8Script.ASM - Source code
+B8Script.ASM - Source code  
 B8Script.COM - 2k CP/M executable  
 LANDER.B8S - Simple lunar lander turn based text based game.  Land with velocity low enough so you don't crash  
 CHAR.B8X - Plugin.  Pops value off the stack and print the ASCII character of the lower byte  

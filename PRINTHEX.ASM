@@ -9,15 +9,16 @@
 ; IX points to top of data stack.  IY points to top of control stack
 
 ; CALL self modifying code for CALLing functions listed below from within the plugin
-PLUGIN_CALL         EQU $0103   ; Load CALL_PLUG_ADDR with address to be called
-PLUGIN_CALL_ADDR    EQU $0104   ; and CALL PLUGIN_CALL
+CALL_PLUG           EQU $0103   ; Load CALL_PLUG_ADDR with address to be called
+CALL_PLUG_ADDR      EQU $0104   ; and CALL CALL_PLUG
 
 ; STACK_JUMP_TABLE              ; Pointers to stack and process functions
-PROCESS_SCRIPT_CHAR	EQU $0106   ; Load A with script command and call this to process a command. Be aware some commands modify the script program counter
+PROCESS_SCRIPT_CHAR	EQU $0106   ; Load A with script command to process
 PLUGIN_BASE         EQU $0108   ; Points to the first address of loaded plugin
-SCRIPT_PC           EQU $010A   ; Points to the next character being processed by the program (after plugin filename when plugin is called)
-STACK_PUSH          EQU $010C   ; Pushes HL to top of stack
-STACK_POP           EQU $010E   ; Pops HL from top of stack
+SCRIPT_PC           EQU $010A   ; Points to current location of the script program counter which is at the last character of the plugin filename when plugin is executed
+SCRIPT_START        EQU $010C   ; Points to the start of the script
+STACK_PUSH          EQU $010E   ; Pushes HL to top of stack
+STACK_POP           EQU $0110   ; Pops HL from top of stack
 
 ORG $0000                       ; This allows all labels to be used as offsets from the start of the plugin to calculate the absolute address of those labels
 PLUGIN_START:
@@ -25,8 +26,8 @@ PLUGIN_START:
 
 
 	LD DE,(STACK_POP)	; Get a value off the stack
-    LD (PLUGIN_CALL_ADDR),DE
-    CALL PLUGIN_CALL
+    LD (CALL_PLUG_ADDR),DE
+    CALL CALL_PLUG
 	LD B,4				; Set for four nibbles
 HEXLOOP:
 	LD A,H				; Push H into A

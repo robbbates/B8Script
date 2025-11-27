@@ -106,6 +106,7 @@ PLUGIN_JUMP_TABLE:			; Indirect jump addresses to plugin accessible functions
 PLUGIN_BASE:				; Points to the first address of loaded plugin
 	DW 0
 SCRIPT_PC:					; Points to the next character being processed by the program (after plugin filename when plugin is called)
+	DW 0
 	DW SCRIPT_START			; Defaults to start of script
 	DW STACK_PUSH			; Address of STACK_PUSH function
 	DW STACK_POP			; Address of STACK_POP function

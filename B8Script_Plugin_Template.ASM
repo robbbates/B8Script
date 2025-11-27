@@ -24,8 +24,8 @@ ORG $0000                       ; This allows all labels to be used as offsets f
 PLUGIN_START:
     DW PLUGIN_END       ; Calculates the plugin size for loading. Loader grabs this word to know how much to load. Plugins are called to address right after this.  Don't delete this or plugin won't work.
 
-;   LD DE,0-2
-;   ADD HL,DE
+;   DEC HL
+;   DEC HL
 ;   LD (PLUGIN_BASE),HL         ; Do this first to capture HL which contains the address of the plugin when called which can be used as an offset for CALLS and JPs within the plugin
 ;
 ; To CALL internal subroutine

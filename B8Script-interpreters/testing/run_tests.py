@@ -1,4 +1,4 @@
-import sys, os
+import sys, os, re
 sys.path.insert(0, os.path.dirname(__file__))
 from ref import Ref
 from tests import SUITE, MC, ERRS
@@ -29,13 +29,19 @@ def check(runner, name, cpu, cpm, checked, retbyte, games=True, verbose=False):
             fails += 1
             print(f'  FAIL tinybasic: ended={ended}\n    got {out[-300:]!r}\n    exp {exp[-300:]!r}')
     if checked:
-        for n, p, word in ERRS:
+        for n, p, code, at in ERRS:
             out, ended = runner(p, b'')
-            if word not in out.split(b'\n')[-1] or b'no' in out:
+            # (after a wrecked return stack the place is garbage, and the 6502
+            # prints it signed, so a minus sign is allowed)
+            m = re.search(rb'(.) @ (-?\d+)$', out)
+            if (not m or m.group(1) != code or b'no' in out or ended != 'exit'
+                    or (at is not None and int(m.group(2)) != at)):
                 fails += 1
                 print(f'  FAIL {n}: got {out[-80:]!r} ended={ended}')
+            elif verbose:
+                print('  ok', n, out[-12:])
         out, ended = runner(b'1( 1)', b'', brk=0)
-        if b'break' not in out:
+        if not re.search(rb'^B @ \d+$', out):
             fails += 1
             print(f'  FAIL e_break: got {out[-80:]!r} ended={ended}')
     print(f'{name}: {"PASS" if not fails else str(fails)+" FAILED"}')

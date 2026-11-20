@@ -1,7 +1,8 @@
 """Run a Z80 or 8080 B8Script build in an emulator.
 
 generic: the image is ROM at 0000h, the program text is loaded at PROG (taken
-from the listing) and NUL-terminated, and CONIN/CONOUT/CONST/EXIT are traps.
+from the listing) and NUL-terminated, and KEY/CONOUT/EXIT are traps. KEY
+returns a waiting key in A, or 0, with the zero flag matching A.
 cpm: the image is a .COM at 0100h; BDOS 6, 10, 15, 20 and 26 are emulated,
 and the program is the 'file' that fn 15/20 read.
 """
@@ -10,6 +11,7 @@ import z80
 
 TRAP = 0xFFF0          # BDOS lives here in the cpm runs
 WBOOT = 0xFFE0
+IDLE = 20000         # empty KEY polls in a row before a run counts as waiting for input
 
 
 def load_hex(path):
@@ -54,10 +56,11 @@ class Run:
         self.maxticks = maxticks
         self.ended = None
         self.brk_at = brk_at   # inject Ctrl-C once the output reaches this many bytes
+        self.idle = 0          # empty key polls in a row (CP/M runs)
         if mode == 'generic':
             p = self.sy['PROG']
             self.m.set_memory_block(p, prog + b'\0')
-            for k in ('CONIN', 'CONOUT', 'CONST', 'EXIT'):
+            for k in ('KEY', 'CONOUT', 'EXIT'):
                 self.m.set_breakpoint(self.sy[k])
             self.m.pc = 0
         else:
@@ -92,6 +95,7 @@ class Run:
     def run(self):
         m = self.m
         total = 0
+        idle = 0
         while True:
             m.ticks_to_stop = 20_000_000
             m.run()
@@ -103,13 +107,18 @@ class Run:
             if self.mode == 'generic':
                 sy = self.sy
                 if pc == sy['CONOUT']:
-                    self.out.append(m.a); self.ret()
-                elif pc == sy['CONST']:
-                    m.a = 0xFF if self.key_ready() else 0; self.ret()
-                elif pc == sy['CONIN']:
-                    if not self.key_ready():
-                        self.ended = 'needkey'; break
-                    m.a = self.inp.pop(0); self.ret()
+                    self.out.append(m.a); idle = 0; self.ret()
+                elif pc == sy['KEY']:
+                    if self.key_ready():
+                        m.a = self.inp.pop(0); idle = 0
+                    else:
+                        # a program polling for a key that will never come
+                        m.a = 0; idle += 1
+                        if idle > IDLE:
+                            self.ended = 'needkey'; break
+                    # the host routine's contract: Z (and S) follow A
+                    m.f = (m.f & 0x3F) | (0x40 if m.a == 0 else 0) | (m.a & 0x80)
+                    self.ret()
                 elif pc == sy['EXIT']:
                     self.ended = 'exit'; break
                 # anything else: the tick budget ran out; carry on
@@ -128,9 +137,15 @@ class Run:
         f = m.c
         if f == 6:
             if m.e == 0xFF:
-                m.a = self.inp.pop(0) if self.key_ready() else 0
+                if self.key_ready():
+                    m.a = self.inp.pop(0); self.idle = 0
+                else:
+                    # a program polling for a key that will never come
+                    m.a = 0; self.idle += 1
+                    if self.idle > IDLE:
+                        self.ended = 'needkey'; return False
             else:
-                self.out.append(m.e)
+                self.out.append(m.e); self.idle = 0
         elif f == 10:
             de = m.de
             mx = self.mem(de)

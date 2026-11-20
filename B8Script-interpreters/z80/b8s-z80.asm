@@ -6,11 +6,12 @@
 ;        The string escape is '/' (it was '>').
 ;
 ;  Two switches, set in the two EQU lines below:
-;    CPM      0 = generic ROM build (CONIN/CONOUT/CONST at fixed addresses)
+;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
 ;    CHECKED  0 = no checks (spec: "B8Script checks nothing")
 ;             1 = stops on stack overrun, Ctrl-C, heap past the limit, a store
-;                 outside the program's own space, and a bad character after [
+;                 outside the program's own space, and a bad character after [,
+;                 printing a letter and the place, like  S @ 245
 ;
 ;  Assembler: asm80 (https://maly.github.io/asm80-node/), Z80 mode.
 ; =============================================================================
@@ -59,11 +60,12 @@ BDOS    EQU     0005h
         ENDIF
         IFN     CPM
 ; ---- generic machine: edit these to suit -----------------------------------
-CONIN   EQU     0FF00h          ; wait for a key, return it in A
+KEY     EQU     0FF06h          ; a waiting key in A, or A = 0 if none is
+                                ;   waiting. The zero flag must match A
+                                ;   (end the routine with OR A / RET).
 CONOUT  EQU     0FF03h          ; print the character in A
-CONST   EQU     0FF06h          ; A = 0 if no key is waiting, else nonzero
 EXIT    EQU     0FF09h          ; where to go when the program ends
-;   All three console routines must preserve BC, DE, HL and HL'.
+;   KEY and CONOUT must preserve BC, DE, HL and HL'.
 RSPAGE  EQU     80h             ; 8000h return stack
 DSPAGE  EQU     81h             ; 8100h data stack
 LETPAGE EQU     82h             ; 8200h letter cells and line buffer
@@ -74,7 +76,6 @@ HEAPLIM EQU     0F0h            ; the heap must stay below F000h (a page)
 MSLOOP  EQU     40              ; n? inner loop count for about 1 ms: each pass
                                 ; calls getk once, so tune it for your clock
                                 ; and your CONST routine
-CAP     EQU     127             ; -n? reads at most this many characters
 
 ; letter-page layout (offsets inside LETPAGE)
 LET     EQU     LETPAGE*256
@@ -348,52 +349,32 @@ mul2:   DEC     A
         POP     BC
         RST     10h
 
-; '/' ( a b -- q r ): truncates toward zero; r takes a's sign.
-; b = 0 gives q = 0, r = a. The spec requires dividing by 2 to be fast, so
-; |b| = 2 takes a one-bit shift instead of the 16-round loop; the signs are
-; handled once, for both paths: divide |a| by |b|, then q gets the sign of
-; a XOR b and r the sign of a.
+; '/' ( a b -- r q ): the quotient is on top. Truncates toward zero; r takes
+; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
+; of a. Dividing by zero is not checked: it returns two cells of no meaning.
 h_div:  POP     DE              ; DE = a, HL = b
-        LD      A,H
-        OR      L
-        JR      NZ,div1
-        PUSH    HL              ; b = 0: q = 0
-        EX      DE,HL           ;        r = a
-        RST     10h
-div1:   PUSH    BC              ; free BC for udiv
+        PUSH    BC              ; free BC for udiv
+        LD      A,D
+        XOR     H
+        PUSH    AF              ; S flag = sign of q
         LD      A,D
         OR      A
         PUSH    AF              ; S flag = sign of a (for r)
-        XOR     H
-        PUSH    AF              ; S flag = sign of q
         BIT     7,H
         CALL    NZ,neg16        ; HL = |b|
         EX      DE,HL
         BIT     7,H
         CALL    NZ,neg16        ; HL = |a|, DE = |b|
-        LD      A,E
-        XOR     2
-        OR      D
-        JR      NZ,div2
-        SRL     H               ; |b| = 2: q = |a| >> 1 ...
-        RR      L
-        LD      B,H
-        LD      C,L
-        LD      HL,0            ; ... and r = the bit shifted out
-        ADC     HL,HL
-        JR      div3
-div2:   CALL    udiv            ; BC = q, HL = r
-div3:   POP     AF
-        PUSH    HL
-        LD      H,B
-        LD      L,C
-        CALL    M,neg16         ; q's sign
-        POP     DE              ; DE = r
+        CALL    udiv            ; BC = q, HL = r
         POP     AF
-        EX      DE,HL           ; HL = r, DE = q
         CALL    M,neg16         ; r's sign
+        EX      DE,HL           ; DE = r
+        LD      H,B
+        LD      L,C             ; HL = q
+        POP     AF
+        CALL    M,neg16         ; q's sign
         POP     BC
-        PUSH    DE              ; q under r
+        PUSH    DE              ; r under q
         RST     10h
 
 ; udiv: unsigned HL / DE. Returns BC = quotient, HL = remainder.
@@ -743,7 +724,9 @@ h_cfetch:LD     A,(HL)          ; ',' shares '?'s ending: A becomes TOS
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
 ;   n = 0: wait for a key
-;   n < 0: read a line of at most -n characters (capped at CAP) with echo
+;   n < 0: read a line of at most -n characters, with echo. n is not
+;          checked: the buffer holds 127 characters and the CR, so a
+;          program must ask for 127 or fewer.
 h_key:  BIT     7,H
         JR      NZ,line
 kt1:    LD      DE,MSLOOP       ; one millisecond, roughly
@@ -764,18 +747,11 @@ kt3:    LD      L,A
         LD      H,0
         RST     10h
 
-line:   CALL    neg16           ; HL = the count
-        LD      A,H
-        OR      A
-        JR      NZ,ln0
-        LD      A,L
-        CP      CAP+1
-        JR      C,ln1
-ln0:    LD      A,CAP
-ln1:
         IF      CPM
         ; CP/M: BDOS 10 does the editing (the spec allows the platform's
         ; own line editor). It doesn't store the CR, so it is added here.
+line:   XOR     A
+        SUB     L               ; A = the count (TOS is minus the count)
         LD      (LBHDR),A
         PUSH    BC
         EXX
@@ -799,11 +775,14 @@ ln1:
         RST     10h
         ENDIF
         IFN     CPM
-        ; Generic: Backspace and DEL erase, CR ends (stored, not echoed),
-        ; other control keys are ignored, and a full line takes only those.
-        PUSH    BC
-        LD      C,A             ; C = max
-        LD      B,0             ; B = length
+        ; Generic: Backspace takes the last character back (and is echoed as
+        ; it is), CR ends (stored, not echoed), every other key is stored and
+        ; echoed until the line is full. The line buffer starts at offset 80h
+        ; of its page, so L alone is the place in the line: D holds the L of
+        ; a full line.
+line:   LD      A,LINEBUF & 0FFh
+        SUB     L               ; (TOS is minus the count)
+        LD      D,A             ; D = the L of a full line
         LD      HL,LINEBUF
 ln2:    CALL    getk
         JR      Z,ln2
@@ -811,35 +790,21 @@ ln2:    CALL    getk
         JR      Z,ln5
         CP      8
         JR      Z,ln4
-        CP      7Fh
-        JR      Z,ln4
-        CP      ' '
-        JR      C,ln2
         LD      E,A
-        LD      A,B
-        CP      C
-        JR      NC,ln2          ; full
+        LD      A,L
+        CP      D
+        JR      Z,ln2           ; full
         LD      (HL),E
-        INC     HL
-        INC     B
+        INC     L
         LD      A,E
-        CALL    putc
+ln3:    CALL    putc
         JR      ln2
-ln4:    LD      A,B
-        OR      A
-        JR      Z,ln2
-        DEC     B
-        DEC     HL
-        LD      A,8
-        CALL    putc
-        LD      A,' '
-        CALL    putc
-        LD      A,8
-        CALL    putc
+ln4:    DEC     L               ; Backspace: one back, and echo it,
+        JP      M,ln3           ;   unless the line was empty (L left the
+        INC     L               ;   upper half of the page)
         JR      ln2
-ln5:    LD      (HL),13
-        POP     BC
-        LD      HL,LINEBUF
+ln5:    LD      (HL),A          ; the CR
+        LD      L,LINEBUF & 0FFh
         RST     10h
         ENDIF
 
@@ -906,11 +871,14 @@ hexval: SUB     '0'
 ; =============================================================================
 ;  Console layer: getk returns a waiting key in A (zero flag clear), or
 ;  A = 0 with the zero flag set when none is waiting. putc prints A.
-;  Both keep BC, DE, HL and HL'.
+;  Both keep BC, DE, HL and HL'. In the generic build they are the host's
+;  KEY and CONOUT routines themselves.
 ; =============================================================================
-getk:
+        IF      (1-CPM)*(1-CHECKED)
+getk    EQU     KEY             ; the host's routine does the whole job
+        ENDIF
         IF      CHECKED
-        LD      A,(KEYBUF)      ; a key held back by the break check
+getk:   LD      A,(KEYBUF)      ; a key held back by the break check
         OR      A
         JR      Z,gk1
         PUSH    AF
@@ -918,10 +886,15 @@ getk:
         LD      (KEYBUF),A
         POP     AF
         RET
-gk1:
+        ENDIF
+        IF      (1-CPM)*CHECKED
+gk1:    JP      KEY
+        ENDIF
+        IF      CPM*(1-CHECKED)
+getk:
         ENDIF
         IF      CPM
-        LD      A,0FFh          ; BDOS 6 with E = FFh: a key, or 0
+gk1:    LD      A,0FFh          ; BDOS 6 with E = FFh: a key, or 0
         CALL    putc
         OR      A
         RET
@@ -945,12 +918,6 @@ putc:   PUSH    BC
         RET
         ENDIF
         IFN     CPM
-        CALL    CONST
-        OR      A
-        RET     Z
-        CALL    CONIN
-        OR      A
-        RET
 putc    EQU     CONOUT
         ENDIF
 
@@ -970,49 +937,33 @@ chkbrk: LD      A,(KEYBUF)
         LD      (KEYBUF),A
         RET
 
-e_stack:CALL    error
-        DB      "stac", 'k'+80h
-e_rstack:CALL   error
-        DB      "retur", 'n'+80h
-e_break:CALL    error
-        DB      "brea", 'k'+80h
-e_heap: CALL    error
-        DB      "hea", 'p'+80h
-e_store:CALL    error
-        DB      "stor", 'e'+80h
-e_brack:CALL    error
-        DB      '['+80h
-; error: print CR LF, the word after the CALL (last character has bit 7
-; set), " at " and the offset of the reading position in the program.
-error:  POP     HL              ; HL -> the word
-        LD      SP,DSTOP        ; the stacks may be wrecked: start clean
-        LD      A,13
+; Error entries. Each loads its letter and then hides the next entry inside
+; a 3-byte LD HL,nn (the 21h), so they all fall through to `error`.
+e_stack:LD      A,'S'           ; data stack over or under
+        DB      21h
+e_rstack:LD     A,'R'           ; return stack over or under
+        DB      21h
+e_break:LD      A,'B'           ; Ctrl-C
+        DB      21h
+e_heap: LD      A,'H'           ; heap past the limit
+        DB      21h
+e_store:LD      A,'W'           ; write outside the program's space
+        DB      21h
+e_brack:LD      A,'D'           ; bad character after [
+; error: print the letter in A, " @ " and the offset in the program of the
+; character just read, then end. For example: S @ 245
+error:  LD      SP,DSTOP        ; the stacks may be wrecked: start clean
         CALL    putc
-        LD      A,10
+        LD      A,' '
         CALL    putc
-er1:    LD      A,(HL)
-        INC     HL
-        PUSH    AF
-        AND     7Fh
+        LD      A,'@'
         CALL    putc
-        POP     AF
-        RLA
-        JR      NC,er1
-        LD      HL,er2
-er3:    LD      A,(HL)
-        INC     HL
-        OR      A
-        JR      Z,er4
+        LD      A,' '
         CALL    putc
-        JR      er3
-er4:    LD      H,B
-        LD      L,C
-        LD      DE,PROG+1       ; the character just read
-        OR      A
-        SBC     HL,DE
+        LD      HL,(0-PROG-1)&0FFFFh ; minus the address of the character
+        ADD     HL,BC           ;   just read: HL = its offset
         CALL    pdec
         JP      endprog
-er2:    DB      " at ",0
         ENDIF
 
 

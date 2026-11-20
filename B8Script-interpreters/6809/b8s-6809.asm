@@ -10,7 +10,8 @@
 ;  has no CP/M; the line is kept only so that build.sh works):
 ;    CHECKED  0 = no checks (spec: "B8Script checks nothing")
 ;             1 = stops on stack overrun, Ctrl-C, heap past the limit, a store
-;                 outside the program's own space, and a bad character after [
+;                 outside the program's own space, and a bad character after [,
+;                 printing a letter and the place, like  S @ 245
 ;
 ;  Assembler: asm80, M6809 mode.
 ; =============================================================================
@@ -51,20 +52,21 @@ CHECKED EQU     0               ; 1 = checked build
 ;                 after the NUL and grows to HEAPLIM*256 (F000h)
 ;    F000h-       this image (ROM). The reset vector (FFFEh) must point to
 ;                 `start` (F003h); the image does not contain it.
-;    FF00h-FF0Bh  the console routines (CONIN, CONOUT, CONST, EXIT) are
-;                 supplied by the system and need no space here.
+;    FF03h-FF0Bh  the console routines (CONOUT, KEY) and EXIT are supplied
+;                 by the system and need no space here.
 ;
 ;  The stacks sit below the letter page, so "the program's own space" (what
 ;  the checked build lets ! and . write) is the single range LET..HEAPLIM*256.
 ; -----------------------------------------------------------------------------
 
 ; ---- generic machine: edit these to suit -----------------------------------
-CONIN   EQU     0FF00h          ; wait for a key, return it in A
+KEY     EQU     0FF06h          ; a waiting key in A, or A = 0 if none is
+                                ;   waiting. The Z flag must match A (end the
+                                ;   routine with TSTA / RTS, or a plain LDA).
 CONOUT  EQU     0FF03h          ; print the character in A
-CONST   EQU     0FF06h          ; A = 0 if no key is waiting, else nonzero
 EXIT    EQU     0FF09h          ; where to go when the program ends
-;   All three console routines are called with JSR. They may change A and CC
-;   and must preserve B, X, Y, U and DP.
+;   Both are called with JSR. They may change A and CC and must preserve
+;   B, X, Y, U and DP.
 RSPAGE  EQU     80h
 DSPAGE  EQU     81h
 LETPAGE EQU     82h
@@ -72,14 +74,12 @@ PROG    EQU     8300h           ; where the loader puts the program text
 HEAPLIM EQU     0F0h            ; the heap must stay below F000h (a page)
 
 MSLOOP  EQU     20              ; n? inner loop count for about 1 ms; tune it
-                                ; for your clock and CONST (about 50 cycles each)
-CAP     EQU     127             ; -n? reads at most this many characters
+                                ; for your clock and your KEY routine
 
 ; letter-page layout (direct-page offsets inside LETPAGE)
 LET     EQU     LETPAGE*256
 HEAP    EQU     7Ch             ; z10+, the heap pointer (little-endian)
 KEYBUF  EQU     34h             ; gap after Z: a key held back by the break check
-MAXV    EQU     35h             ; the line length limit during -n?
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
 RSTOP   EQU     RSPAGE*256+100h ; empty return stack
 DSTOP   EQU     DSPAGE*256+100h ; empty data stack
@@ -392,13 +392,10 @@ negx:   LDD     ,X
         STD     ,X
 ab9:    RTS
 
-; '/' ( a b -- q r ): truncates toward zero; r takes a's sign.
-; b = 0 gives q = 0, r = a. b = 2 takes a fast shift, as the spec requires.
-h_div:  LDD     ,U
-        BEQ     div0
-        CMPD    #2
-        BEQ     div2
-        LDA     2,U
+; '/' ( a b -- r q ): the quotient is on top. Truncates toward zero; r takes
+; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
+; of a. Dividing by zero is not checked: it returns two cells of no meaning.
+h_div:  LDA     2,U
         PSHS    A               ; a's sign: for r
         EORA    ,U
         PSHS    A               ; a xor b: for q
@@ -406,35 +403,16 @@ h_div:  LDD     ,U
         BSR     absx            ; |a|
         TFR     U,X
         BSR     absx            ; |b|
-        BSR     udiv
-        LEAX    2,U
+        BSR     udiv            ; NOS = q, TOS = r
+        JSR     h_swap          ; NOS = r, TOS = q
+        TFR     U,X
         TST     ,S+
         BPL     dv1
         BSR     negx            ; q's sign
-dv1:    TFR     U,X
+dv1:    LEAX    2,U
         TST     ,S+
         BPL     ab9
         BRA     negx            ; r's sign
-div0:   LDD     2,U             ; q = 0, r = a
-        STD     ,U
-        CLR     2,U
-        CLR     3,U
-        RTS
-div2:   LDD     2,U             ; a / 2: add 1 if a is negative, then shift
-        PSHS    D               ; a, for the remainder
-        BPL     d2a
-        ADDD    #1
-d2a:    ASRA
-        RORB
-        STD     2,U             ; q
-        ASLB
-        ROLA                    ; 2q
-        NEGA
-        NEGB
-        SBCA    #0              ; -2q
-        ADDD    ,S++            ; r = a - 2q
-        STD     ,U
-        RTS
 
 
 ; udiv: unsigned divide, in place. The dividend is the NOS cell and the
@@ -648,22 +626,19 @@ drop:   LEAU    2,U             ; ';'
 ; =============================================================================
 ;  Console layer: getk returns a waiting key in A (zero flag clear), or
 ;  A = 0 with the zero flag set when none is waiting. It keeps B, X, Y, U.
+;  In the unchecked build getk is the host's KEY routine itself.
 ; =============================================================================
-getk:
+        IF      1-CHECKED
+getk    EQU     KEY             ; the host's routine does the whole job; it
+        ENDIF                   ;   is too far for BSR, so it is called by JSR
         IF      CHECKED
-        LDA     <KEYBUF         ; a key held back by the break check
+getk:   LDA     <KEYBUF         ; a key held back by the break check
         BEQ     gk1
         CLR     <KEYBUF
         TSTA
         RTS
-gk1:
+gk1:    JMP     KEY
         ENDIF
-        JSR     CONST
-        TSTA
-        BEQ     gk9
-        JSR     CONIN
-        TSTA
-gk9:    RTS
         IF      CHECKED
 ; chkbrk: a waiting key is read now; Ctrl-C stops the program, anything
 ; else is held for the next '?'.
@@ -682,11 +657,19 @@ putc:   JMP     CONOUT
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
 ;   n = 0: wait for a key
-;   n < 0: read a line of at most -n characters (capped at CAP) with echo
+;   n < 0: read a line of at most -n characters, with echo. n is not
+;          checked: the buffer holds 127 characters and the CR, so a
+;          program must ask for 127 or fewer.
 h_key:  LDX     ,U
         BMI     line
 kt1:    LDB     #MSLOOP         ; one millisecond, roughly
-kt2:    BSR     getk
+kt2:
+        IF      1-CHECKED
+        JSR     getk
+        ENDIF
+        IF      CHECKED
+        BSR     getk
+        ENDIF
         BNE     kt3
         DECB
         BNE     kt2
@@ -698,44 +681,36 @@ kt3:    CLR     ,U
         STA     1,U
         RTS
 
-line:   CLRA
-        CLRB
-        SUBD    ,U              ; D = the count
-        CMPD    #CAP
-        BLS     ln1
-        LDB     #CAP
-ln1:    STB     <MAXV
+; Backspace takes the last character back (and is echoed as it is), CR ends
+; (stored, not echoed), every other key is stored and echoed until the line
+; is full. B = the length so far; the low byte of the top cell becomes the
+; most allowed (it holds minus the count on entry).
+line:   NEG     1,U
         LDX     #LINEBUF
-        CLRB                    ; B = length
-        ; Backspace and DEL erase, CR ends (stored, not echoed), other
-        ; control keys are ignored, and a full line takes only those.
-ln2:    BSR     getk
+        CLRB
+ln2:
+        IF      1-CHECKED
+        JSR     getk
+        ENDIF
+        IF      CHECKED
+        BSR     getk
+        ENDIF
         BEQ     ln2
         CMPA    #13
         BEQ     ln5
         CMPA    #8
         BEQ     ln4
-        CMPA    #7Fh
-        BEQ     ln4
-        CMPA    #' '
-        BLO     ln2
-        CMPB    <MAXV
+        CMPB    1,U
         BHS     ln2             ; full
         STA     ,X+
         INCB
-        BSR     putc
+ln3:    BSR     putc
         BRA     ln2
-ln4:    TSTB
+ln4:    TSTB                    ; Backspace: nothing to take back?
         BEQ     ln2
         DECB
         LEAX    -1,X
-        LDA     #8
-        BSR     putc
-        LDA     #' '
-        BSR     putc
-        LDA     #8
-        BSR     putc
-        BRA     ln2
+        BRA     ln3             ; echo it
 ln5:    STA     ,X              ; A = 13
         LDD     #LINEBUF
         STD     ,U
@@ -804,45 +779,35 @@ hv9:    RTS
 ; =============================================================================
         IF      CHECKED
 
-e_stack:BSR     error
-        FCB     "stac", 'k'+80h
-e_rstack:BSR    error
-        FCB     "retur", 'n'+80h
-e_break:BSR     error
-        FCB     "brea", 'k'+80h
-e_heap: BSR     error
-        FCB     "hea", 'p'+80h
-e_store:BSR     error
-        FCB     "stor", 'e'+80h
-e_brack:BSR     error
-        FCB     '['+80h
-; error: print CR LF, the word after the BSR (last character has bit 7
-; set), " at " and the offset of the reading position in the program.
-error:  PULS    X               ; X -> the word
-        LDS     #RSTOP          ; the stacks may be wrecked: start clean
+; Error entries. Each loads its letter and then hides the next entry inside
+; a 3-byte CMPX # (the 8Ch), so they all fall through to `error`.
+e_stack:LDA     #'S'            ; data stack over or under
+        FCB     8Ch
+e_rstack:LDA    #'R'            ; return stack over or under
+        FCB     8Ch
+e_break:LDA     #'B'            ; Ctrl-C
+        FCB     8Ch
+e_heap: LDA     #'H'            ; heap past the limit
+        FCB     8Ch
+e_store:LDA     #'W'            ; write outside the program's space
+        FCB     8Ch
+e_brack:LDA     #'D'            ; bad character after [
+; error: print the letter in A, " @ " and the offset in the program of the
+; character just read, then end. For example: S @ 245
+error:  LDS     #RSTOP          ; the stacks may be wrecked: start clean
         LDU     #DSTOP
-        PSHS    X
-        LDX     #crlf
-        BSR     puts7
-        PULS    X
-        BSR     puts7
-        LDX     #aat
-        BSR     puts7
+        JSR     CONOUT
+        LDA     #' '
+        JSR     CONOUT
+        LDA     #'@'
+        JSR     CONOUT
+        LDA     #' '
+        JSR     CONOUT
         TFR     Y,D
         SUBD    #PROG+1         ; the character just read
         PSHU    D
         JSR     pdec
         JMP     EXIT
-; puts7: print the characters at X up to one with bit 7 set (inclusive)
-puts7:  LDA     ,X+
-        PSHS    A
-        ANDA    #7Fh
-        JSR     CONOUT
-        TST     ,S+
-        BPL     puts7
-        RTS
-crlf:   FCB     13, 10+80h
-aat:    FCB     " at", ' '+80h
         ENDIF
 imgend:
 

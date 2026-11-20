@@ -2,9 +2,9 @@ import os
 """Run a 6502 B8Script build in py65.
 
 The image is ROM at E000h (the reset entry is `start`), the program text is
-loaded at PROG (from the listing) and NUL-terminated, and CONIN/CONOUT/CONST/
-EXIT are traps: pc is checked before each step, and the routine is simulated
-and an RTS performed.
+loaded at PROG (from the listing) and NUL-terminated, and KEY/CONOUT/EXIT are
+traps: pc is checked before each step, and the routine is simulated and an RTS
+performed. KEY returns a waiting key in A, or 0, with the Z flag matching A.
 """
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -50,8 +50,8 @@ class Run:
     def run(self):
         m = self.m
         sy = self.sy
-        cin, cout, cst, ext = sy['CONIN'], sy['CONOUT'], sy['CONST'], sy['EXIT']
-        traps = {cin, cout, cst, ext}
+        key, cout, ext = sy['KEY'], sy['CONOUT'], sy['EXIT']
+        traps = {key, cout, ext}
         step = m.step
         out = self.out
         n = 0
@@ -61,20 +61,18 @@ class Run:
             if pc in traps:
                 if pc == cout:
                     out.append(m.a); idle = 0; self.ret()
-                elif pc == cst:
+                elif pc == key:
                     if self.key_ready():
-                        m.a = 0xFF; idle = 0
+                        m.a = self.inp.pop(0); idle = 0
                     else:
                         # a program polling for a key that will never come
                         # (e.g. Tiny BASIC's 0? after its input ran out)
                         m.a = 0; idle += 1
-                        if idle > 100000:
+                        if idle > 20000:
                             self.ended = 'needkey'; break
+                    # the host routine's contract: Z (and N) follow A
+                    m.p = (m.p & 0x7D) | (0x02 if m.a == 0 else 0) | (m.a & 0x80)
                     self.ret()
-                elif pc == cin:
-                    if not self.key_ready():
-                        self.ended = 'needkey'; break
-                    m.a = self.inp.pop(0); self.ret()
                 else:
                     self.ended = 'exit'; break
                 continue

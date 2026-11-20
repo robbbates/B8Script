@@ -1,5 +1,5 @@
 """Reference B8Script interpreter (spec of 2026-10-09 plus the 2026-11-20 changes,
-including '/' as the string escape).
+including '/' as the string escape and ( a b -- r q ) for the divide).
 
 Used only to produce expected output for the test suite. It models memory, the
 letter cells (packed layout: A at LET, a at LET+64, heap pointer at z+10), the
@@ -16,7 +16,7 @@ class NeedKey(Exception):
 
 class Ref:
     def __init__(self, prog, inp=b'', prog_at=0x9000, let=0x8000, linebuf=0x8100,
-                 heaplim=0xE000, retbyte=0xC9, cpm=False, cap=127):
+                 heaplim=0xE000, retbyte=0xC9, cpm=False):
         self.m = bytearray(65536)
         self.m[prog_at:prog_at + len(prog)] = prog
         self.m[prog_at + len(prog)] = 0
@@ -27,7 +27,6 @@ class Ref:
         self.heaplim = heaplim
         self.retbyte = retbyte
         self.cpm = cpm
-        self.cap = cap
         self.heapcell = let + 2 * (ord('z') - 0x41) + 10
         self.w(self.heapcell, prog_at + len(prog) + 1)
         self.ds = []
@@ -98,17 +97,32 @@ class Ref:
         return self.inp.pop(0)
 
     def readline(self, n):
-        n = min(n, self.cap)
+        """-n?: read a line of at most n characters; n is not checked.
+        Generic builds: Backspace takes one character back and is echoed as
+        it is; every other key but CR is stored and echoed while there is
+        room. CP/M builds: BDOS 10 does the editing (Backspace and DEL erase
+        with BS, space, BS; other control keys are ignored; a full line ends
+        by itself; CR is echoed)."""
         buf = bytearray()
         while True:
             c = self.key()
             if c == CR:
                 break
-            if c in (8, 127):
+            if self.cpm:
+                if c in (8, 127):
+                    if buf:
+                        buf.pop()
+                        self.out += b'\x08 \x08'
+                elif c >= 32:
+                    buf.append(c)
+                    self.emit(c)
+                    if len(buf) == n:   # BDOS 10 ends a full line by itself
+                        break
+            elif c == 8:
                 if buf:
                     buf.pop()
-                    self.out += b'\x08 \x08'
-            elif c >= 32 and len(buf) < n:
+                    self.emit(8)
+            elif len(buf) < n:
                 buf.append(c)
                 self.emit(c)
         if self.cpm:
@@ -164,13 +178,13 @@ class Ref:
         elif C == '/':
             b = self.s(p()); a = self.s(p())
             if b == 0:
-                q, r = 0, a
+                q, r = 0, a     # undefined in the interpreters: tests must not rely on it
             else:
                 q = abs(a) // abs(b)
                 if (a < 0) != (b < 0):
                     q = -q
                 r = a - q * b
-            P(q); P(r)
+            P(r); P(q)          # ( a b -- r q ): the quotient is on top
         elif C == '&':
             b = p(); a = p(); P(a & b)
         elif C == '|':

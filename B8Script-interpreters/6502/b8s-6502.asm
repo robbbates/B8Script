@@ -10,7 +10,8 @@
 ;    CPM      always 0 (there is no CP/M here; the line exists for build.sh)
 ;    CHECKED  0 = no checks (spec: "B8Script checks nothing")
 ;             1 = stops on stack overrun, Ctrl-C, heap past the limit, a store
-;                 outside the program's own space, and a bad character after [
+;                 outside the program's own space, and a bad character after [,
+;                 printing a letter and the place, like  S @ 245
 ;
 ;  Assembler: asm80, C6502 mode.
 ; =============================================================================
@@ -76,11 +77,12 @@ R1      EQU     0Bh
 ;  The stacks sit below the letter page, so "the program's own space" (what
 ;  the checked build lets ! and . write) is the page range LETPAGE..HEAPLIM-1.
 ; -----------------------------------------------------------------------------
-CONIN   EQU     0FF00h          ; wait for a key, return it in A
+KEY     EQU     0FF06h          ; a waiting key in A, or A = 0 if none is
+                                ;   waiting. The Z flag must match A (it does
+                                ;   if the routine ends with LDA / RTS).
 CONOUT  EQU     0FF03h          ; print the character in A
-CONST   EQU     0FF06h          ; A = 0 if no key is waiting, else nonzero
 EXIT    EQU     0FF09h          ; where to go when the program ends
-;   All three console routines must preserve X and Y.
+;   KEY and CONOUT must preserve X and Y.
 DSL     EQU     0200h
 DSH     EQU     0300h
 LETPAGE EQU     04h
@@ -94,7 +96,6 @@ LINEBUF EQU     LET+80h         ; -n? text, ending in CR
 DSE     EQU     0FCh            ; X when the data stack is empty
 RSLIM   EQU     20h             ; lowest S allowed (checked build)
 MSLOOP  EQU     40              ; n? inner loop count for about 1 ms; tune it
-CAP     EQU     127             ; -n? reads at most this many characters
 
         ORG     0E000h
 
@@ -186,10 +187,10 @@ ign:    RTS                     ; RTS trick: goes to the handler. Reached
                                 ; directly, it just ends an ignored character.
 endprog:JMP     EXIT
         IF      CHECKED
-e_stack:JSR     error
-        DB      "stac", 'k'+80h
-e_rstack:JSR    error
-        DB      "retur", 'n'+80h
+e_stack:LDA     #'S'            ; data stack over or under
+        DB      2Ch             ; (BIT abs: hides the next instruction)
+e_rstack:LDA    #'R'            ; return stack over or under
+        JMP     error
         ENDIF
 
 ; Digits: the first one is in A; read the rest of the number.
@@ -477,12 +478,10 @@ h_swap: LDY     DSL,X           ; '%'
         STY     TH
         RTS
 
-; '/' ( a b -- q r ): truncates toward zero; r takes a's sign.
-; b = 0 gives q = 0, r = a: that is just a swap. |b| = 2 takes a fast shift.
-h_div:  LDA     TL
-        ORA     TH
-        BEQ     h_swap
-        LDA     DSH,X
+; '/' ( a b -- r q ): the quotient is on top. Truncates toward zero; r takes
+; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
+; of a. Dividing by zero is not checked: it returns two cells of no meaning.
+h_div:  LDA     DSH,X
         PHA                     ; r's sign
         EOR     TH
         PHA                     ; q's sign
@@ -499,33 +498,22 @@ dv1:    LDA     TL
         STA     TH
         BPL     dv2
         JSR     neg             ; TOS = |a|
-dv2:    LDA     D1
-        BNE     dv3
-        LDA     D0
-        CMP     #2
-        BNE     dv3
-        LDA     #0              ; |a| / 2: shift; the bit out is the remainder
-        STA     R1
-        LSR     TH
-        ROR     TL
-        ROL
-        STA     R0
-        BPL     dv4             ; always: A is 0 or 1
-dv3:    JSR     udiv
-dv4:    PLA
+dv2:    JSR     udiv
+        PLA
         BPL     dv5
         JSR     neg             ; q's sign
 dv5:    LDA     TL
         STA     DSL,X
         LDA     TH
-        STA     DSH,X
+        STA     DSH,X           ; q waits in NOS while r gets its sign
         LDA     R0
         STA     TL
         LDA     R1
         STA     TH
         PLA
-        BMI     neg             ; r's sign
-        RTS
+        BPL     dv6
+        JSR     neg             ; r's sign
+dv6:    JMP     h_swap          ; r under q
 
 
 ; neg: TOS = -TOS
@@ -646,8 +634,8 @@ h_alloc:LDA     HEAP
         STY     TH
         RTS
         IF      CHECKED
-e_heap: JSR     error
-        DB      "hea", 'p'+80h
+e_heap: LDA     #'H'            ; heap past the limit
+        JMP     error
         ENDIF
 
         IF      CHECKED
@@ -658,8 +646,8 @@ chkst:  CMP     #LETPAGE
         CMP     #HEAPLIM
         BCS     e_store
         RTS
-e_store:JSR     error
-        DB      "stor", 'e'+80h
+e_store:LDA     #'W'            ; write outside the program's space
+        JMP     error
         ENDIF
 
 ; =============================================================================
@@ -745,8 +733,8 @@ def2:
         JSR     puship          ; an anonymous block: push its address
         JMP     skip
         IF      CHECKED
-e_brack:JSR     error
-        DB      '['+80h
+e_brack:LDA     #'D'            ; bad character after [
+        JMP     error
         ENDIF
 
 ; =============================================================================
@@ -821,7 +809,9 @@ pn3:    PLA
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
 ;   n = 0: wait for a key
-;   n < 0: read a line of at most -n characters (capped at CAP) with echo
+;   n < 0: read a line of at most -n characters, with echo. n is not
+;          checked: the buffer holds 127 characters and the CR, so a
+;          program must ask for 127 or fewer.
 h_key:  LDA     TH
         BMI     line
         ORA     TL
@@ -846,43 +836,28 @@ kt4:    DEC     TL
         BNE     kt1
         BEQ     kt3             ; A = 0: the time ran out
 
-; Backspace and DEL erase, CR ends (stored, not echoed), other control keys
-; are ignored, and a full line takes only those. Y = length, T0 = max.
-line:   JSR     neg             ; TOS = the count
-        LDA     TH
-        BNE     ln0
-        LDA     TL
-        CMP     #CAP+1
-        BCC     ln1
-ln0:    LDA     #CAP
-ln1:    STA     T0
+; Backspace takes the last character back (and is echoed as it is), CR ends
+; (stored, not echoed), every other key is stored and echoed until the line
+; is full. Y = the length so far; TL = the most allowed.
+line:   JSR     neg             ; TL = the count
         LDY     #0
+        BEQ     ln2             ; always
+ln3:    JSR     CONOUT
 ln2:    JSR     getk
         BEQ     ln2
         CMP     #13
         BEQ     ln5
         CMP     #8
         BEQ     ln4
-        CMP     #7Fh
-        BEQ     ln4
-        CMP     #' '
-        BCC     ln2
-        CPY     T0
+        CPY     TL
         BCS     ln2             ; full
         STA     LINEBUF,Y
         INY
-        JSR     CONOUT
-        JMP     ln2
-ln4:    TYA
-        BEQ     ln2
-        DEY
-        LDA     #8
-        JSR     CONOUT
-        LDA     #' '
-        JSR     CONOUT
-        LDA     #8
-        JSR     CONOUT
-        JMP     ln2
+        BNE     ln3             ; always: echo it
+ln4:    DEY                     ; Backspace: one back, and echo it,
+        BPL     ln3
+        INY                     ;   unless the line was empty
+        BEQ     ln2             ; always
 ln5:    STA     LINEBUF,Y       ; A = CR
         LDA     #<LINEBUF
         STA     TL
@@ -954,25 +929,21 @@ rh9:    RTS
 ; =============================================================================
 ;  Console layer: getk returns a waiting key in A (zero flag clear), or
 ;  A = 0 with the zero flag set when none is waiting. CONOUT prints A.
-;  Both keep X and Y.
+;  Both keep X and Y. In the unchecked build getk is the host's KEY itself.
 ; =============================================================================
-getk:
+        IF      1-CHECKED
+getk    EQU     KEY             ; the host's routine does the whole job
+        ENDIF
         IF      CHECKED
-        LDA     KEYBUF          ; a key held back by the break check
+getk:   LDA     KEYBUF          ; a key held back by the break check
         BEQ     gk1
         PHA
         LDA     #0
         STA     KEYBUF
         PLA
         RTS
-gk1:
+gk1:    JMP     KEY
         ENDIF
-        JSR     CONST
-        CMP     #0
-        BEQ     gk9
-        JSR     CONIN
-        CMP     #0
-gk9:    RTS
 
 ; =============================================================================
 ;  Checked build: break key and error reports
@@ -988,44 +959,25 @@ chkbrk: LDA     KEYBUF
         BEQ     e_break
         STA     KEYBUF
 cb9:    RTS
-e_break:JSR     error
-        DB      "brea", 'k'+80h
-
-; error: print CR LF, the word after the JSR (last character has bit 7
-; set), " at " and the offset of the reading position in the program.
-error:  PLA
-        STA     T0
-        PLA
-        STA     T1              ; (T0) + 1 = the word
-        LDX     #0FFh
-        TXS                     ; the stacks may be wrecked: start clean
-        LDX     #DSE
-        LDA     #13
+e_break:LDA     #'B'            ; Ctrl-C
+; error: print the letter in A, " @ " and the offset in the program of the
+; character just read, then end. For example: S @ 245
+; The stacks are left as they are: the hardware stack wraps inside its page,
+; so the calls below work whatever state it is in.
+error:  JSR     CONOUT
+        LDA     #' '
         JSR     CONOUT
-        LDA     #10
+        LDA     #'@'
         JSR     CONOUT
-        LDY     #1
-er1:    LDA     (T0),Y
-        INY
-        PHA
-        AND     #7Fh
+        LDA     #' '
         JSR     CONOUT
-        PLA
-        BPL     er1
-        LDY     #0
-er3:    LDA     er2,Y
-        JSR     CONOUT
-        INY
-        CPY     #4
-        BNE     er3
         LDA     IP
         SEC
-        SBC     #<PROG1      ; the character just read
+        SBC     #<PROG1         ; the character just read
         STA     TL
         LDA     IP+1
         SBC     #>PROG1
         STA     TH
         JSR     h_num
         JMP     endprog
-er2:    DB      " at "
         ENDIF

@@ -1,9 +1,10 @@
 """Run a 6809 B8Script build in the MC6809 emulator (pure Python, slow).
 
 The image is ROM at F000h (taken from the hex file), the program text is
-loaded at PROG (from the listing) and NUL-terminated. CONIN, CONOUT, CONST
-and EXIT are traps: when the PC reaches one, the harness does the job and
-simulates an RTS. Execution starts at the symbol `start`.
+loaded at PROG (from the listing) and NUL-terminated. KEY, CONOUT and EXIT
+are traps: when the PC reaches one, the harness does the job and simulates
+an RTS. KEY returns a waiting key in A, or 0, with the Z flag matching A.
+Execution starts at the symbol `start`.
 """
 import os, sys, logging
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -57,8 +58,9 @@ class Run:
         step = cpu.get_and_call_next_op
         pc = cpu.program_counter
         a = cpu.accu_a
-        traps = {sy['CONIN']: 'in', sy['CONOUT']: 'out', sy['CONST']: 'st', sy['EXIT']: 'exit'}
+        traps = {sy['KEY']: 'key', sy['CONOUT']: 'out', sy['EXIT']: 'exit'}
         n = 0
+        idle = 0
         while n < self.maxops:
             step()
             n += 1
@@ -66,13 +68,19 @@ class Run:
             if t is None:
                 continue
             if t == 'out':
-                self.out.append(a.value); self.rts()
-            elif t == 'st':
-                a.set(0xFF if self.key_ready() else 0); self.rts()
-            elif t == 'in':
-                if not self.key_ready():
-                    self.ended = 'needkey'; break
-                a.set(self.inp.pop(0)); self.rts()
+                self.out.append(a.value); idle = 0; self.rts()
+            elif t == 'key':
+                if self.key_ready():
+                    a.set(self.inp.pop(0)); idle = 0
+                else:
+                    # a program polling for a key that will never come
+                    a.set(0); idle += 1
+                    if idle > 20000:
+                        self.ended = 'needkey'; break
+                # the host routine's contract: Z (and N) follow A
+                v = a.value
+                cpu.set_cc((cpu.get_cc_value() & 0xF3) | (0x04 if v == 0 else 0) | (0x08 if v & 0x80 else 0))
+                self.rts()
             else:
                 self.ended = 'exit'; break
         else:

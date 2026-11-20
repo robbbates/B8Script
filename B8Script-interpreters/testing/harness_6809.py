@@ -28,6 +28,10 @@ class Run:
         cfg = Cfg({"verbosity": None, "trace": None})
         self.mem = Memory(cfg)
         self.cpu = CPU(self.mem, cfg)
+        # MC6809 0.9.0 gets SEX wrong: it clears A for a positive B but never
+        # sets it to FFh for a negative one. Put the real instruction in.
+        cycles, _ = self.cpu.opcode_dict[0x1D]
+        self.cpu.opcode_dict[0x1D] = (cycles, self._sex)
         org, img = load_hex(hexf)
         self.img_size = len(img)
         self.mem.load(org, img)
@@ -38,6 +42,12 @@ class Run:
         self.maxops = maxops
         self.brk_at = brk_at    # inject Ctrl-C once the output reaches this many bytes
         self.cpu.program_counter.set(self.sy['START'])
+
+    def _sex(self, opcode):
+        cpu = self.cpu
+        cpu.accu_a.set(0xFF if cpu.accu_b.value & 0x80 else 0x00)
+        cpu.clear_NZ()
+        cpu.update_NZ_16(cpu.accu_d.value)
 
     def key_ready(self):
         if self.brk_at is not None and len(self.out) >= self.brk_at:

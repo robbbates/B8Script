@@ -4,17 +4,19 @@ from harness_6502 import Run
 import tests
 from run_tests import check
 
-# Machine-code tests (6502 contract: TOS in zero page $02/$03, data stack
-# through X at $0200,X / $0300,X, ends in RTS = 60h which the loader writes).
+# Machine-code tests (6502 contract: TOS in zero page $02/$03, ends in RTS = 60h
+# which the loader writes; the loader reads hex pairs only, so no spaces).
 #  mcdouble: ASL $02 / ROL $03: doubles TOS.
-#  mcpush:   DEX / LDA $02 / STA $0200,X / LDA $03 / STA $0300,X /
+#  mcpush:   DEX / LDA $02 / STA DSL,X / LDA $03 / STA DSH,X /
 #            LDA #7 / STA $02 / LDA #0 / STA $03: pushes 7 over TOS.
-tests.MC['6502'] = [
-    ('mcdouble', b'8_:d! `06022603 ; 21 d@` #', b'', b'42'),
-    ('mcpush', b'20_:d! `CA A502 9D0002 A503 9D0003 A907 8502 A900 8503 ; 5 d@` # #', b'', b'75'),
-]
-# the loader reads hex pairs only, so no spaces inside the pair stream
-tests.MC['6502'][1] = ('mcpush', b'20_:d! `CAA5029D0002A5039D0003A9078502A9008503 ; 5 d@` # #', b'', b'75')
+# The data stack is at $0200,X / $0300,X, or at $10,X / $80,X in the builds
+# with the stack in zero page (the -zp ones), so mcpush has two forms.
+MC = {
+    False: [('mcdouble', b'8_:d! `06022603 ; 21 d@` #', b'', b'42'),
+            ('mcpush', b'20_:d! `CAA5029D0002A5039D0003A9078502A9008503 ; 5 d@` # #', b'', b'75')],
+    True: [('mcdouble', b'8_:d! `06022603 ; 21 d@` #', b'', b'42'),
+           ('mcpush', b'20_:d! `CAA5029510A5039580A9078502A9008503 ; 5 d@` # #', b'', b'75')],
+}
 
 games = '--nogames' not in sys.argv
 verbose = '-v' in sys.argv
@@ -23,6 +25,7 @@ total = 0
 for hexf in sorted(glob.glob(d + '/*.hex')):
     base = hexf[:-4]
     checked = base.endswith('-chk')
+    tests.MC['6502'] = MC['-zp' in os.path.basename(base)]
     def runner(p, i, brk=None, base=base):
         r = Run(base + '.hex', base + '.lst', p, i, brk_at=brk)
         o = r.run()

@@ -1,4 +1,5 @@
-"""Reference B8Script interpreter (spec of 2026-10-09 plus the 2026-11-20 changes).
+"""Reference B8Script interpreter (spec of 2026-10-09 plus the 2026-11-20 changes,
+including '/' as the string escape).
 
 Used only to produce expected output for the test suite. It models memory, the
 letter cells (packed layout: A at LET, a at LET+64, heap pointer at z+10), the
@@ -69,7 +70,7 @@ class Ref:
             c = self.ch()
             if c == 0:
                 raise StopIteration
-            if c == ord('>'):
+            if c == ord('/'):
                 self.ch()
             elif c == ord('"'):
                 return
@@ -237,7 +238,7 @@ class Ref:
                 c = self.m[a]; a += 1
                 if c == ord('"'):
                     break
-                if c == ord('>'):
+                if c == ord('/'):
                     c = self.m[a]; a += 1
                     if c >= 0x40:
                         c &= 0xBF

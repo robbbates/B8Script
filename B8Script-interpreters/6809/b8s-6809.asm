@@ -3,6 +3,7 @@
 ;  Spec: docs/b8script.md (2026-10-09) plus the 2026-11-20 changes:
 ;        [x stores in a variable, "[ " pushes an anonymous block, any other
 ;        character after [ is an error, the heap pointer lives at z10+.
+;        The string escape is '/' (it was '>').
 ;  Follows the design of the Z80 interpreter (z80/b8s-z80.asm).
 ;
 ;  Two builds, selected by the CHECKED line below (CPM is always 0: the 6809
@@ -135,10 +136,10 @@ sk3:    INCB
 
 ; 22h pushes the address of the text after it and skips the string.
 h_str:  PSHU    Y
-; skipstr: IP is inside a string; step past its closing quote. '>' escapes
-; the next character, so '>"' does not end it.
+; skipstr: IP is inside a string; step past its closing quote. '/' escapes
+; the next character, so '/"' does not end it.
 skipstr:LDA     ,Y+
-        CMPA    #'>'
+        CMPA    #'/'
         BNE     ss1
         LEAY    1,Y
         BRA     skipstr
@@ -622,14 +623,14 @@ chkst:  CMPX    #LET
 ; =============================================================================
 
 
-; '$' prints the string at TOS, decoding escapes: '>' plus a character from
-; 40h-7Fh clears its bit 6 (>M is CR, >` is space); plus anything lower gives
+; '$' prints the string at TOS, decoding escapes: '/' plus a character from
+; 40h-7Fh clears its bit 6 (/M is CR, /` is space); plus anything lower gives
 ; that character itself.
 h_print:LDX     ,U
 pr0:    LDA     ,X+
         CMPA    #22h
         BEQ     drop
-        CMPA    #'>'
+        CMPA    #'/'
         BNE     pr1
         LDA     ,X+
         CMPA    #40h

@@ -4,7 +4,7 @@ Everything here runs from this folder.
 
 ## Setup
 
-- `npm install -g asm80`. Or set `ASM80=/path/to/asm80.js`.
+- `npm install -g asm80@1.11.14`. Or set `ASM80=/path/to/asm80.js`. Version 0.9.x does not work: it assembles the inside of a false `IF`.
 - `pip install z80 py65 MC6809`. The `z80` package includes an 8080 machine.
 
 ## Build and test
@@ -36,5 +36,7 @@ python3 sizes.py out/z80                           # bytes per variant
 | `harness_z80.py` | Z80/8080 emulator wrapper. In generic builds it traps CONIN/CONOUT/CONST/EXIT; in CP/M builds it emulates BDOS 6, 10, 15, 20 and 26 and loads the program as a file |
 | `harness_6502.py`, `harness_6809.py` | The same wrapper for py65 and MC6809 |
 | `games/` | Your programs. `TINYBAS.B8S` is part of the suite |
+| `esc2slash.py` | Converts programs from the old `>` string escape to `/` |
+| `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM` and `.lst` files next to each source |
 
 A harness finds `PROG`, `CONIN` and the other addresses in the assembler listing (`.lst`), so a source must keep those symbol names.

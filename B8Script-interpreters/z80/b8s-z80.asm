@@ -3,6 +3,7 @@
 ;  Spec: docs/b8script.md (2026-10-09) plus the 2026-11-20 changes:
 ;        [x stores in a variable, "[ " pushes an anonymous block, any other
 ;        character after [ is an error, the heap pointer lives at z10+.
+;        The string escape is '/' (it was '>').
 ;
 ;  Two switches, set in the two EQU lines below:
 ;    CPM      0 = generic ROM build (CONIN/CONOUT/CONST at fixed addresses)
@@ -667,11 +668,11 @@ sk4:    INC     D
 sk3:    INC     D
         JR      sk1
 
-; skipstr: IP is inside a string; step past its closing quote. '>' escapes
-; the next character, so '>"' does not end it.
+; skipstr: IP is inside a string; step past its closing quote. '/' escapes
+; the next character, so '/"' does not end it.
 skipstr:LD      A,(BC)
         INC     BC
-        CP      '>'
+        CP      '/'
         JR      NZ,ss1
         INC     BC
         JR      skipstr
@@ -690,14 +691,14 @@ h_str:  PUSH    HL
         CALL    skipstr
         RST     10h
 
-; '$' prints the string at TOS, decoding escapes: '>' plus a character from
-; 40h-7Fh clears its bit 6 (>M is CR, >` is space); plus anything lower gives
+; '$' prints the string at TOS, decoding escapes: '/' plus a character from
+; 40h-7Fh clears its bit 6 (/M is CR, /` is space); plus anything lower gives
 ; that character itself.
 h_print:LD      A,(HL)
         INC     HL
         CP      22h
         JR      Z,prdone
-        CP      '>'
+        CP      '/'
         JR      NZ,pr1
         LD      A,(HL)
         INC     HL

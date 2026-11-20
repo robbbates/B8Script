@@ -29,8 +29,8 @@ The spec changes they implement (newer than the spec file):
 - the heap pointer is a RAM cell at z10+
 - letter cells: cell(c) = LET + 2*(c-41h)
 - CP/M builds: -n? uses BDOS 10 (appends CR); every character uses BDOS 6
-- NOT YET DONE in this code: the string escape character changes from '>'
-  to '/' (see prompt 3 in PROMPTS.md)
+- the string escape character is '/' (it was '>'); testing/esc2slash.py
+  converts older programs
 
 Assembler: asm80 from npm. Its quirks:
 - no nested IF and no ELSE (write combined conditions as arithmetic)
@@ -111,7 +111,7 @@ that paid off, and the ones you tried that didn't.
 
 ---
 
-## 3. Change the string escape from `>` to `/` (do this before prompt 2)
+## 3. Change the string escape from `>` to `/` (DONE; kept for the record)
 
 ```
 Read README.md and testing/README.md in this folder. Spec change from Robb:

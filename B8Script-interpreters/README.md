@@ -71,6 +71,7 @@ Everything in the spec, plus the 2026-11-20 changes:
 - `[` followed by a space pushes an anonymous block.
 - Any other character after `[` is an error.
 - The heap pointer lives at `z10+`.
+- The string escape is `/` (it was `>`): `/M` is CR, `/"` a quote, `//` a slash. `>` is an ordinary character inside strings.
 
 Interpretations to be aware of:
 - **CP/M line input.** `-n?` uses BDOS 10, which brings its own editing keys, ends a full line by itself, and echoes a CR. The interpreter appends the CR to the stored text. Every other character goes through BDOS 6, because BDOS 2 can swallow typed keys.
@@ -101,4 +102,8 @@ Every build runs, in an emulator, against a reference interpreter written from t
 - a machine-code test per CPU;
 - for checked builds, every error plus Ctrl-C.
 
-The test setup is in `testing/` (see its README). One spec change is not in this code yet: the string escape becomes `/` instead of `>`. Prompt 3 in `PROMPTS.md` covers it.
+The test setup is in `testing/` (see its README).
+
+## Converting older programs to the `/` escape
+
+`testing/esc2slash.py FILE...` rewrites B8Script sources that still use `>` as the escape. Printed strings (`"..."$`) get the full conversion, so they print what they did before. Comments (`"...";`) and data strings are only touched where the closing quote would move. It lists every data string that holds a `/` or `>`, so you can check those by hand. `-n` reports without changing anything.

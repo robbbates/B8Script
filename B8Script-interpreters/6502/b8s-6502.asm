@@ -3,6 +3,7 @@
 ;  Spec: docs/b8script.md (2026-10-09) plus the 2026-11-20 changes:
 ;        [x stores in a variable, "[ " pushes an anonymous block, any other
 ;        character after [ is an error, the heap pointer lives at z10+.
+;        The string escape is '/' (it was '>').
 ;  Design follows the Z80 interpreter; see b8s-z80.asm for the common ideas.
 ;
 ;  Two builds, set in the two EQU lines below:
@@ -754,16 +755,16 @@ e_brack:JSR     error
 
 ; 22h pushes the address of the text after it and skips the string.
 h_str:  JSR     puship
-; skipstr: IP is inside a string; step past its closing quote. '>' escapes
-; the next character, so '>"' does not end it. Returns with Z set.
+; skipstr: IP is inside a string; step past its closing quote. '/' escapes
+; the next character, so '/"' does not end it. Returns with Z set.
 skipstr:JSR     getc
-        CMP     #'>'
+        CMP     #'/'
         BEQ     ss0
         CMP     #22h
         BNE     skipstr
         RTS
 ss0:    JSR     incip
-        BNE     skipstr         ; A is '>' here
+        BNE     skipstr         ; A is '/' here
 
 ; tosget: A = the byte at TOS, and TOS moves on
 tosget: LDY     #0
@@ -773,13 +774,13 @@ tosget: LDY     #0
         INC     TH
 tg1:    RTS
 
-; '$' prints the string at TOS, decoding escapes: '>' plus a character from
-; 40h-7Fh clears its bit 6 (>M is CR, >` is space); plus anything lower gives
+; '$' prints the string at TOS, decoding escapes: '/' plus a character from
+; 40h-7Fh clears its bit 6 (/M is CR, /` is space); plus anything lower gives
 ; that character itself.
 h_print:JSR     tosget
         CMP     #22h
         BEQ     pdrop
-        CMP     #'>'
+        CMP     #'/'
         BNE     pr1
         JSR     tosget
         CMP     #40h

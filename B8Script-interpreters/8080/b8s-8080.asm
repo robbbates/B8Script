@@ -3,6 +3,7 @@
 ;  Spec: docs/b8script.md (2026-10-09) plus the 2026-11-20 changes:
 ;        [x stores in a variable, "[ " pushes an anonymous block, any other
 ;        character after [ is an error, the heap pointer lives at z10+.
+;        The string escape is '/' (it was '>').
 ;  A port of the Z80 interpreter (z80/b8s-z80.asm); same behaviour, same
 ;  memory map, same switches.
 ;
@@ -717,12 +718,12 @@ sk3:    INR     D               ; an opener: one deeper (the DCR below makes
         INR     D               ;   it +1 net, and can't reach zero)
         JMP     sk4
 
-; skipstr: IP is inside a string; step past its closing quote. '>' escapes
-; the next character, so '>"' does not end it.
+; skipstr: IP is inside a string; step past its closing quote. '/' escapes
+; the next character, so '/"' does not end it.
 ss0:    INX     B
 skipstr:LDAX    B
         INX     B
-        CPI     '>'
+        CPI     '/'
         JZ      ss0
         CPI     22h
         JNZ     skipstr
@@ -739,14 +740,14 @@ h_str:  PUSH    H
         CALL    skipstr
         RST     2
 
-; '$' prints the string at TOS, decoding escapes: '>' plus a character from
-; 40h-7Fh clears its bit 6 (>M is CR, >` is space); plus anything lower gives
+; '$' prints the string at TOS, decoding escapes: '/' plus a character from
+; 40h-7Fh clears its bit 6 (/M is CR, /` is space); plus anything lower gives
 ; that character itself.
 h_print:MOV     A,M
         INX     H
         CPI     22h
         JZ      prdone
-        CPI     '>'
+        CPI     '/'
         JNZ     pr1
         MOV     A,M
         INX     H

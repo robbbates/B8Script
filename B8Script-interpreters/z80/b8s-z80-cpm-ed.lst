@@ -1,21 +1,17 @@
 0000                             ; =============================================================================
 0000                             ;  B8Script interpreter for the Z80
-0000                             ;  Spec: docs/b8script.md (2026-10-09) plus the 2026-11-20 changes:
-0000                             ;        [x stores in a variable, "[ " pushes an anonymous block, any other
-0000                             ;        character after [ is an error, the heap pointer lives at z10+.
-0000                             ;        The string escape is "/" (it was ">").
-0000                             ;        Dividing by zero is not checked. -n? does no more editing than
-0000                             ;        Backspace.
+0000                             ;  Spec: docs/b8script.md (2026-11-21).
 0000                             ; 
 0000                             ;  Three switches, set in the EQU lines below:
 0000                             ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 0000                             ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
 0000                             ;    EDITOR   1 = with a small line editor built in (see the end of this
 0000                             ;                 file). It goes with either setting of the other two.
-0000                             ;    CHECKED  0 = no checks (spec: "B8Script checks nothing")
-0000                             ;             1 = stops on stack overrun, Ctrl-C, heap past the limit, a store
-0000                             ;                 outside the program's own space, and a bad character after [,
-0000                             ;                 printing a letter and the place, like  S @ 245
+0000                             ;    CHECKED  0 = no checks (spec: the programmer is responsible)
+0000                             ;             1 = starts with every variable at 0 and every word undefined,
+0000                             ;                 and stops on every error in the spec's table (and Ctrl-C)
+0000                             ;                 with a four-line report: the letter and the place as line
+0000                             ;                 and column, the text there, and both stacks. See `error`.
 0000                             ; 
 0000                             ;  Assembler: asm80 (https://maly.github.io/asm80-node/), Z80 mode.
 0000                             ; =============================================================================
@@ -61,19 +57,20 @@
 0000                             ;  Memory map. Everything the interpreter writes is in four RAM pages:
 0000                             ; 
 0000                             ;    RSPAGE   return stack, 112 entries (the pointer stays inside this page)
-0000                             ;    DSPAGE   data stack, 127 cells (SP stays inside this page)
+0000                             ;    DSPAGE   data stack, 127 cells (the top four bytes of the page are spare,
+0000                             ;             so a full stack runs two bytes into the page below)
 0000                             ;    LETPAGE  letter cells: A..Z at +00h..+33h, a..z at +40h..+73h (so a word
 0000                             ;             cell is always 64 bytes below its variable), the heap pointer at
-0000                             ;             +7Ch (= z10+), interpreter variables in the gaps, and the -n?
-0000                             ;             line buffer at +80h..+FFh
+0000                             ;             +7Ch, interpreter variables in the gaps, and the -n? line buffer
+0000                             ;             at +80h..+FFh
 0000                             ;    PROG     the program text, NUL-terminated; the heap starts after the NUL
 0000                             ; 
 0000                             ;  The stacks sit below the letter page, so "the program's own space" (what
 0000                             ;  the checked build lets ! and . write) is the single range from the letter
-0000                             ;  page up to the heap limit. Each stack's page has a guard band: the data
-0000                             ;  stack can overrun by a cell or two (and the calls made while it is full)
-0000                             ;  into the top 32 bytes of the return-stack page, which are never used, and
-0000                             ;  the return stack by one entry into the page below it.
+0000                             ;  page up to the heap limit. Each stack has a guard band: the data stack can
+0000                             ;  overrun by a cell or two (and the calls made while it is full, the error
+0000                             ;  report's included) into the top 32 bytes of the return-stack page, which
+0000                             ;  are never used, and the return stack by one entry into the page below it.
 0000                             ; -----------------------------------------------------------------------------
 0000                          IF   CPM   
 0000                BDOS:     EQU   0005h   
@@ -107,15 +104,20 @@
 0000                             ; your clock and your KEY routine
 0000                             ; letter-page layout (offsets inside LETPAGE)
 0000                LET:      EQU   LETPAGE*256   
-0000                HEAP:     EQU   LET+7Ch   ; z10+, the heap pointer
+0000                HEAP:     EQU   LET+7Ch   ; the heap pointer
 0000                RSAVE:    EQU   LET+34h   ; gap after Z: return stack pointer, saved
 0000                KEYBUF:   EQU   LET+36h   ;   around machine code; a held-back key;
-0000                SPTMP:    EQU   LET+38h   ;   scratch for the SP check
+0000                NPEND:    EQU   LET+38h   ;   minus the address of the program's end
+0000                             ;   (the heap"s first byte), for the checked "_'
 0000                LBHDR:    EQU   LET+7Eh   ; CP/M BDOS 10 header: max, count
 0000                LINEBUF:   EQU   LET+80h   ; -n? text, ending in CR
 0000                RSTOP:    EQU   RSPAGE*256+0E0h   ; empty return stack: the 32 bytes above it
 0000                             ; take calls made while the data stack is full
-0000                DSTOP:    EQU   DSPAGE*256+0FEh   ; empty data stack
+0000                DSTOP:    EQU   DSPAGE*256+0FCh   ; empty data stack. The four bytes above it
+0000                             ; are spare: a character can pop two cells
+0000                             ; too many before the checked build sees it,
+0000                             ; and the next call must not land on the
+0000                             ; letter cells.
 0000                             ; =============================================================================
 0000                             ;  The first 49 bytes: the entry, then the RST routines, with small handlers
 0000                             ;  and routines filling the gaps between them. Generic: this IS page zero.
@@ -123,12 +125,19 @@
 0000                             ;  page zero (see the header).
 0000                             ; =============================================================================
 0100                          .ORG   BASE   
+0100                          IF   (1-CPM)*(1-EDITOR)*CHECKED   
+                              XOR   A   ; 00  reset. (This byte, AFh, is also what an
+0100                          ENDIF      ;     undefined word runs into: see e_hi.)
 0100                          IF   1-EDGEN   
-0100   31 FE 06               LD   SP,DSTOP   ; 00  reset, or the start of the .COM file
+0100   31 FC 06               LD   SP,DSTOP   ; 00  reset, or the start of the .COM file
 0103                          ENDIF      
-0103                          IF   (1-CPM)*(1-EDITOR)   
+0103                          IF   (1-CPM)*(1-EDITOR)*(1-CHECKED)   
                               LD   BC,PROG   ; 03  the IP
                               JR   st0   ; 06  (the rest of the startup is close by)
+0103                          ENDIF      
+0103                          IF   (1-CPM)*(1-EDITOR)*CHECKED   
+                              JR   init   ; 04  (the rest of the startup is close by)
+                              DW   0   ; 06  spare
 0103                          ENDIF      
 0103                          IF   EDGEN   
                               XOR   A   ; 00  reset: no program yet
@@ -230,7 +239,13 @@
 0152   FE 3A                  CP   3Ah   
 0154   38 4C                  JR   C,lower   ; 61h-7Ah: A = 20h-39h (cell +64 bytes)
 0156   FE 3E                  CP   3Eh   
+0158                          IF   1-CHECKED   
 0158   30 DA                  JR   NC,next0   ; 7Fh-FFh: ignored
+015A                          ENDIF      
+015A                          IF   CHECKED   
+                              JR   Z,next0   ; 7Fh, DEL: ignored
+                              JP   NC,e_hi   ; 80h-FFh: reserved
+015A                          ENDIF      
 015A   D6 1A                  SUB   1Ah   ; 7Bh-7Eh: -1Eh in all, index 28-31
 015C   D6 09        P5B:      SUB   9   ; 5Bh-60h: -4 in all, index 22-27
 015E   C6 05        P3A:      ADD   A,5   ; 3Ah-40h: index 15-21
@@ -295,6 +310,16 @@
 0170                             ; The rest of the startup: here so that the generic reset code can reach it
 0170                             ; with JR. st0: find the program's NUL; the heap starts after it.
 0170                             ; (The editor build has its own copy of this, next to the editor.)
+0170                             ; A checked build first clears the lower half of the letter page (A = 0):
+0170                             ; every variable starts at 0, every word cell holds 0000h, the address an
+0170                             ; undefined word is caught at (see e_hi), and no key is held back.
+0170                          IF   (1-CPM)*(1-EDITOR)*CHECKED   
+                    INIT:     LD   HL,LET   
+                    INI1:     LD   (HL),A   
+                              INC   L   
+                              JP   P,ini1   ; +00h to +7Fh
+                              LD   BC,PROG   ; the IP
+0170                          ENDIF      
 0170                          IF   (1-CPM)*(1-EDITOR)   
                     ST0:      LD   H,B   
                               LD   L,C   
@@ -305,15 +330,15 @@
 0170                          ENDIF      
 0170                          IF   1-EDITOR   
                     ST2:      LD   (HEAP),HL   
+0170                          ENDIF      
+0170                          IF   CHECKED*(1-EDITOR)   
+                              RST   20h   ; minus the heap"s first address: "_' may not
+                              LD   (NPEND),HL   ;   release below it
+0170                          ENDIF      
+0170                          IF   1-EDITOR   
                               EXX      
                               LD   HL,RSTOP   ; the return stack is empty
                               EXX      
-0170                          ENDIF      
-0170                          IF   CHECKED*(1-EDITOR)   
-                              XOR   A   
-                              LD   (KEYBUF),A   ; no key held back
-0170                          ENDIF      
-0170                          IF   1-EDITOR   
                               RST   30h   ; (its return address is thrown away)
 0170                          ENDIF      
 0170                             ; In the unchecked generic editor build the table is here, in the first
@@ -380,8 +405,12 @@
 0180   E7           H_NOT:    RST   20h   ; ~x = -x - 1
 0181   2B                     DEC   HL   
 0182   F7                     RST   30h   
-0183                             ; "_" ( n -- addr ): the heap pointer moves up by n; TOS is the old pointer.
+0183                             ; "_" ( n -- addr ): the heap pointer moves by n, a signed count (the add is
+0183                             ; the same either way); TOS is the old pointer.
 0183   ED 5B 7C 07  H_ALLOC:   LD   DE,(HEAP)   
+0187                          IF   CHECKED*CPM   
+                              LD   A,H   ; the count's sign, for chkhp
+0187                          ENDIF      
 0187   19                     ADD   HL,DE   ; the new top
 0188                          IF   CHECKED   
                               CALL   chkhp   
@@ -403,7 +432,7 @@
 019C                             ; Digits: step back onto the first digit and read the whole number.
 019C   E5           DIGIT:    PUSH   HL   
 019D   0B                     DEC   BC   
-019E   CD 18 03               CALL   rdnum   
+019E   CD 10 03               CALL   rdnum   
 01A1   F7                     RST   30h   
 01A2                             ; a-z: push the cell's address (the cell is the variable)
 01A2   E5           LOWER:    PUSH   HL   
@@ -445,22 +474,14 @@
 01BA                             ; must keep BC, and on return the top cell becomes the new TOS.
 01BA   CD 6D 03     H_GRAVE:   CALL   hexc   
 01BD   30 CE                  JR   NC,exec   
-01BF                HX1:         
-01BF                          IF   CHECKED   
-                              CALL   chkst   
-01BF                          ENDIF      
-01BF   77                     LD   (HL),A   ; the high digit goes in first ...
+01BF   77           HX1:      LD   (HL),A   ; the high digit goes in first ...
 01C0   CD 6D 03               CALL   hexc   
 01C3   30 08                  JR   NC,hx2   ; odd digit: consumed, and the RET below
 01C5   ED 6F                  RLD      ;   overwrites it
 01C7   23                     INC   HL   ; ... and RLD shifts it up under the low one
 01C8   CD 6D 03               CALL   hexc   
 01CB   38 F2                  JR   C,hx1   
-01CD                HX2:         
-01CD                          IF   CHECKED   
-                              CALL   chkst   
-01CD                          ENDIF      
-01CD   36 C9                  LD   (HL),0C9h   
+01CD   36 C9        HX2:      LD   (HL),0C9h   ; (never range-checked: the spec says so)
 01CF   F7                     RST   30h   
 01D0                             ; ---- where the two pages meet ----------------------------------------------
 01D0                             ; The first page ends somewhere among the next four handlers, ] \ [ @ (they
@@ -478,7 +499,7 @@
 01D5   B5                     OR   L   
 01D6   E1                     POP   HL   
 01D7   28 FA                  JR   Z,brk1   
-01D9   CD 3A 03               CALL   skip   
+01D9   CD 32 03               CALL   skip   
 01DC   B7                     OR   A   ; skip returns 0 for ")"
 01DD   20 F1                  JR   NZ,h_ret   
 01DF   CF           RDROP:    RST   08h   
@@ -512,7 +533,11 @@
 01F7   E5                     PUSH   HL   ; an anonymous block: push its address
 01F8   60                     LD   H,B   
 01F9   69                     LD   L,C   
-01FA   CD 3A 03     SKIPNX:   CALL   skip   
+01FA                SKIPNX:      
+01FA                          IF   CHECKED   
+                              DEC   BC   ; back onto the letter, so that skip finds its
+01FA                          ENDIF      ;   opener, the "[", just before where it starts
+01FA   CD 32 03     SKIPO:    CALL   skip   
 01FD   F7                     RST   30h   
 01FE   5E           H_FETCH:   LD   E,(HL)   ; "@"
 01FF   23                     INC   HL   
@@ -529,7 +554,7 @@
 0203   7C           H_OPEN:   LD   A,H   
 0204   B5                     OR   L   
 0205   E1                     POP   HL   
-0206   28 F2                  JR   Z,skipnx   
+0206   28 F2                  JR   Z,skipo   
 0208   C5                     PUSH   BC   ; the block starts at the IP
 0209   18 A7                  JR   rpushn   
 020B                             ; ")" ( flag -- ): true jumps back to the block start (and keeps it); false
@@ -554,7 +579,7 @@
 021F   19                     ADD   HL,DE   
 0220   F7                     RST   30h   
 0221   E5           NEGNUM:   PUSH   HL   ; a negative number: read it, negate it
-0222   CD 18 03               CALL   rdnum   
+0222   CD 10 03               CALL   rdnum   
 0225   E7                     RST   20h   
 0226   F7                     RST   30h   
 0227   D1           H_AND:    POP   DE   
@@ -605,8 +630,15 @@
 025B   F7                     RST   30h   
 025C                             ; "/" ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 025C                             ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
-025C                             ; of a. Dividing by zero is not checked: it returns two cells of no meaning.
-025C   D1           H_DIV:    POP   DE   ; DE = a, HL = b
+025C                             ; of a. Dividing by zero returns two cells of no meaning; the checked build
+025C                             ; stops on it.
+025C                H_DIV:       
+025C                          IF   CHECKED   
+                              LD   A,H   
+                              OR   L   
+                              JP   Z,e_zero   
+025C                          ENDIF      
+025C   D1                     POP   DE   ; DE = a, HL = b
 025D   C5                     PUSH   BC   ; free BC for udiv
 025E   D5                     PUSH   DE   ; a, for r's sign
 025F   7A                     LD   A,D   
@@ -617,7 +649,7 @@
 0267   EB                     EX   DE,HL   
 0268   CB 7C                  BIT   7,H   
 026A   C4 20 01               CALL   NZ,neg16   ; HL = |a|, DE = |b|
-026D   CD F2 02               CALL   udiv   ; HL = q, DE = r
+026D   CD EA 02               CALL   udiv   ; HL = q, DE = r
 0270   F1                     POP   AF   
 0271   FC 20 01               CALL   M,neg16   ; q's sign
 0274   EB                     EX   DE,HL   ; HL = r, DE = q
@@ -632,18 +664,20 @@
 027E   F7                     RST   30h   
 027F   E3           H_SWAP:   EX   (SP),HL   ; "%"
 0280   F7                     RST   30h   
-0281   D1           H_CSTORE:   POP   DE   ; "." ( c addr -- )
-0282                          IF   CHECKED   
+0281                             ; (The checked build tests the address before it takes the value off the
+0281                             ; stack, so that an error report shows both.)
+0281                H_CSTORE:      ; "." ( c addr -- )
+0281                          IF   CHECKED   
                               CALL   chkst   
-0282                          ENDIF      
+0281                          ENDIF      
+0281   D1                     POP   DE   
 0282   73                     LD   (HL),E   
 0283   DF           H_DROP:   RST   18h   ; ";" is this one byte
-0284   D1           H_STORE:   POP   DE   ; "!" ( n addr -- )
-0285                          IF   CHECKED   
-                              INC   HL   ; both bytes must be in the program's space
+0284                H_STORE:      ; "!" ( n addr -- )
+0284                          IF   CHECKED   
                               CALL   chkst   
-                              DEC   HL   
-0285                          ENDIF      
+0284                          ENDIF      
+0284   D1                     POP   DE   
 0285   73                     LD   (HL),E   
 0286   23                     INC   HL   
 0287   72                     LD   (HL),D   
@@ -653,11 +687,16 @@
 0289   E5           H_STR:    PUSH   HL   
 028A   60                     LD   H,B   
 028B   69                     LD   L,C   
-028C   CD 2F 03               CALL   skipstr   
+028C   CD 27 03               CALL   skipstr   
+028F                          IF   CHECKED   
+                              OR   A   ; 0: the text ran out before the closing quote
+                              JP   Z,e_quote   
+028F                          ENDIF      
 028F   F7                     RST   30h   
 0290                             ; "$" prints the string at TOS, decoding escapes: "/" plus a character
 0290                             ; clears that character"s bit 6 (/M is CR, /` is space; "/" and ""' have no
 0290                             ; bit 6, so // and /" give themselves).
+0290                          IF   1-CHECKED   
 0290   7E           H_PRINT:   LD   A,(HL)   
 0291   23                     INC   HL   
 0292   FE 22                  CP   22h   
@@ -669,101 +708,106 @@
 029C   E6 BF                  AND   0BFh   
 029E   EF           PR1:      RST   28h   
 029F   18 EF                  JR   h_print   
+02A1                          ENDIF      
+02A1                          IF   CHECKED   
+                                 ; (The checked build has the loop as a routine, prstr, which the error
+                                 ; report uses too. The address is kept on the stack meanwhile: a report
+                                 ; shows the stack as it was before the "$".)
+                    H_PRINT:   PUSH   HL   
+                              CALL   prstr   
+                              POP   DE   
+                              RST   18h   
+02A1                          ENDIF      
 02A1   7D           H_EMIT:   LD   A,L   ; "'"
 02A2   EF                     RST   28h   
 02A3   DF           PR9:      RST   18h   
 02A4                             ; "#" prints TOS as a signed decimal number, with no space after it.
-02A4   CB 7C        H_NUM:    BIT   7,H   
-02A6   28 04                  JR   Z,num1   
-02A8   3E 2D                  LD   A,"-"   
-02AA   EF                     RST   28h   
-02AB   E7                     RST   20h   
-02AC   C5           NUM1:     PUSH   BC   
-02AD   CD 5B 03               CALL   pdec   
-02B0   C1                     POP   BC   
-02B1   DF                     RST   18h   
-02B2                             ; "?" ( n -- c ) or ( -n -- addr )
-02B2                             ;   n > 0: wait about n ms for a key; 0 if none came
-02B2                             ;   n = 0: wait for a key
-02B2                             ;   n < 0: read a line of at most -n characters, with echo. The buffer
-02B2                             ;          holds 127 characters and the CR: a bigger count is taken as 127.
-02B2   CB 7C        H_KEY:    BIT   7,H   
-02B4   20 19                  JR   NZ,line   
-02B6   1E 28        KT1:      LD   E,MSLOOP   ; one millisecond, roughly
-02B8   CD 9F 03     KT2:      CALL   getk   
-02BB   20 0E                  JR   NZ,kt3   
-02BD   1D                     DEC   E   
-02BE   20 F8                  JR   NZ,kt2   
-02C0   7C                     LD   A,H   ; 0? never counts down: it waits
-02C1   B5                     OR   L   
-02C2   28 F2                  JR   Z,kt1   
-02C4   2B                     DEC   HL   
-02C5   7C                     LD   A,H   
-02C6   B5                     OR   L   
-02C7   20 ED                  JR   NZ,kt1   ; A = 0 if the time ran out
-02C9   FE                     DB   0FEh   ; (CP n: steps over the one byte of ",")
-02CA   7E           H_CFETCH:   LD   A,(HL)   ; "," shares "?"s ending: A becomes TOS
-02CB   6F           KT3:      LD   L,A   
-02CC   26 00                  LD   H,0   
-02CE   F7                     RST   30h   
-02CF                          IF   CPM   
-02CF                             ; CP/M: BDOS 10 does the editing (the spec allows the platform's
-02CF                             ; own line editor). It doesn't store the CR, so it is added here.
-02CF   11 7F 00     LINE:     LD   DE,127   ; TOS is minus the count: adding 127 carries
-02D2   19                     ADD   HL,DE   ;   only for 1 to 127, and leaves 127 - count
-02D3   9F                     SBC   A,A   
-02D4   A5                     AND   L   ; (0 for a count that is too big)
-02D5   EE 7F                  XOR   127   ; A = the count, 127 at most
-02D7                          ENDIF      
-02D7                          IF   CPM*EDITOR   
-02D7   CD DD 02               CALL   rdline   ; (the editor calls rdline too)
-02DA   2E 80                  LD   L,LINEBUF & 0FFh   
-02DC   F7                     RST   30h   
-02DD                             ; rdline: read a line of at most A characters; HL -> the CR that ends it
-02DD                RDLINE:      
-02DD                          ENDIF      
-02DD                          IF   CPM   
-02DD   32 7E 07               LD   (LBHDR),A   
-02E0   11 7E 07               LD   DE,LBHDR   
-02E3   3E 0A                  LD   A,10   
-02E5   CD AD 03               CALL   bdosx   
-02E8   21 7F 07               LD   HL,LBHDR+1   
-02EB   7E                     LD   A,(HL)   ; the count typed (0-127)
-02EC   2C                     INC   L   ; HL = LINEBUF, whose low byte is 80h:
-02ED   85                     ADD   A,L   ;   adding the count to L can't carry
-02EE   6F                     LD   L,A   
-02EF   36 0D                  LD   (HL),13   
-02F1                          ENDIF      
-02F1                          IF   CPM*(1-EDITOR)   
+02A4   C5           H_NUM:    PUSH   BC   
+02A5   CD 53 03               CALL   psgn   
+02A8   C1                     POP   BC   
+02A9   DF                     RST   18h   
+02AA                             ; "?" ( n -- c ) or ( -n -- addr )
+02AA                             ;   n > 0: wait about n ms for a key; 0 if none came
+02AA                             ;   n = 0: wait for a key
+02AA                             ;   n < 0: read a line of at most -n characters, with echo. The buffer
+02AA                             ;          holds 127 characters and the CR: a bigger count is taken as 127.
+02AA   CB 7C        H_KEY:    BIT   7,H   
+02AC   20 19                  JR   NZ,line   
+02AE   1E 28        KT1:      LD   E,MSLOOP   ; one millisecond, roughly
+02B0   CD 9F 03     KT2:      CALL   getk   
+02B3   20 0E                  JR   NZ,kt3   
+02B5   1D                     DEC   E   
+02B6   20 F8                  JR   NZ,kt2   
+02B8   7C                     LD   A,H   ; 0? never counts down: it waits
+02B9   B5                     OR   L   
+02BA   28 F2                  JR   Z,kt1   
+02BC   2B                     DEC   HL   
+02BD   7C                     LD   A,H   
+02BE   B5                     OR   L   
+02BF   20 ED                  JR   NZ,kt1   ; A = 0 if the time ran out
+02C1   FE                     DB   0FEh   ; (CP n: steps over the one byte of ",")
+02C2   7E           H_CFETCH:   LD   A,(HL)   ; "," shares "?"s ending: A becomes TOS
+02C3   6F           KT3:      LD   L,A   
+02C4   26 00                  LD   H,0   
+02C6   F7                     RST   30h   
+02C7                          IF   CPM   
+02C7                             ; CP/M: BDOS 10 does the editing (the spec allows the platform's
+02C7                             ; own line editor). It doesn't store the CR, so it is added here.
+02C7   11 7F 00     LINE:     LD   DE,127   ; TOS is minus the count: adding 127 carries
+02CA   19                     ADD   HL,DE   ;   only for 1 to 127, and leaves 127 - count
+02CB   9F                     SBC   A,A   
+02CC   A5                     AND   L   ; (0 for a count that is too big)
+02CD   EE 7F                  XOR   127   ; A = the count, 127 at most
+02CF                          ENDIF      
+02CF                          IF   CPM*EDITOR   
+02CF   CD D5 02               CALL   rdline   ; (the editor calls rdline too)
+02D2   2E 80                  LD   L,LINEBUF & 0FFh   
+02D4   F7                     RST   30h   
+02D5                             ; rdline: read a line of at most A characters; HL -> the CR that ends it
+02D5                RDLINE:      
+02D5                          ENDIF      
+02D5                          IF   CPM   
+02D5   32 7E 07               LD   (LBHDR),A   
+02D8   11 7E 07               LD   DE,LBHDR   
+02DB   3E 0A                  LD   A,10   
+02DD   CD AD 03               CALL   bdosx   
+02E0   21 7F 07               LD   HL,LBHDR+1   
+02E3   7E                     LD   A,(HL)   ; the count typed (0-127)
+02E4   2C                     INC   L   ; HL = LINEBUF, whose low byte is 80h:
+02E5   85                     ADD   A,L   ;   adding the count to L can't carry
+02E6   6F                     LD   L,A   
+02E7   36 0D                  LD   (HL),13   
+02E9                          ENDIF      
+02E9                          IF   CPM*(1-EDITOR)   
                               LD   L,LINEBUF & 0FFh   
                               RST   30h   
-02F1                          ENDIF      
-02F1                          IF   CPM*EDITOR   
-02F1   C9                     RET      
-02F2                          ENDIF      
-02F2                          IFN   CPM   
+02E9                          ENDIF      
+02E9                          IF   CPM*EDITOR   
+02E9   C9                     RET      
+02EA                          ENDIF      
+02EA                          IFN   CPM   
                                  ; Generic: Backspace takes the last character back (and is echoed as
                                  ; it is), CR ends (stored, not echoed), every other key is stored and
                                  ; echoed until the line is full. The line buffer starts at offset 80h
                                  ; of its page, so L alone is the place in the line: D holds the L of
                                  ; a full line.
-02F2                          ENDIF      
-02F2                          IFN   CPM   
+02EA                          ENDIF      
+02EA                          IFN   CPM   
                     LINE:     LD   DE,127   ; TOS is minus the count: adding 127 carries
                               ADD   HL,DE   ;   only for 1 to 127, and leaves 127 - count
                               SBC   A,A   
                               AND   L   ; (0 for a count that is too big)
                               CPL      
                               LD   D,A   ; D = the L of a full line: 80h + count, FFh
-02F2                          ENDIF      ;   at most
-02F2                          IF   EDGEN   
+02EA                          ENDIF      ;   at most
+02EA                          IF   EDGEN   
                               CALL   rdline   ; (the editor calls rdline too)
                               LD   L,LINEBUF & 0FFh   
                               RST   30h   
                                  ; rdline: read a line that is full when L reaches D; HL -> the CR that ends it
                     RDLINE:      
-02F2                          ENDIF      
-02F2                          IFN   CPM   
+02EA                          ENDIF      
+02EA                          IFN   CPM   
                               LD   HL,LINEBUF   
                     LN2:      CALL   getk   
                               JR   Z,ln2   
@@ -785,104 +829,169 @@
                               INC   L   ;   upper half of the page)
                               JR   ln2   
                     LN5:      LD   (HL),A   ; the CR
-02F2                          ENDIF      
-02F2                          IF   (1-CPM)*(1-EDITOR)   
+02EA                          ENDIF      
+02EA                          IF   (1-CPM)*(1-EDITOR)   
                               LD   L,LINEBUF & 0FFh   
                               RST   30h   
-02F2                          ENDIF      
-02F2                          IF   EDGEN   
+02EA                          ENDIF      
+02EA                          IF   EDGEN   
                               RET      
-02F2                          ENDIF      
-02F2                             ; =============================================================================
-02F2                             ;  More routines (no handler starts past this point)
-02F2                             ; =============================================================================
-02F2                             ; udiv: unsigned HL / DE (DE <= 8000h). Returns HL = quotient, DE = remainder.
-02F2                             ; Uses A, BC; the caller saves the IP. The dividend shifts up through A:C
-02F2                             ; while the quotient bits arrive at the bottom of C.
-02F2                             ; Dividing by 2 is one shift (the spec wants that fast).
-02F2   7B           UDIV:     LD   A,E   
-02F3   EE 02                  XOR   2   
-02F5   B2                     OR   D   
-02F6   20 07                  JR   NZ,udv0   
-02F8   CB 3C                  SRL   H   
-02FA   CB 1D                  RR   L   ; the quotient
-02FC   8F                     ADC   A,A   
-02FD   5F                     LD   E,A   ; the remainder: the bit that fell out (D is 0)
-02FE   C9                     RET      
-02FF   7C           UDV0:     LD   A,H   
-0300   4D                     LD   C,L   
-0301   21 00 00               LD   HL,0   
-0304   06 10                  LD   B,16   
-0306   CB 21        UDV1:     SLA   C   
-0308   17                     RLA      
-0309   ED 6A                  ADC   HL,HL   
-030B   ED 52                  SBC   HL,DE   ; carry is clear here: the remainder
-030D   30 02                  JR   NC,udv2   ;   always fits in 16 bits
-030F   19                     ADD   HL,DE   ; too much: put it back, and cancel the
-0310   0D                     DEC   C   ;   INC below
-0311   0C           UDV2:     INC   C   ; a quotient bit
-0312   10 F2                  DJNZ   udv1   
-0314   EB                     EX   DE,HL   ; DE = remainder
-0315   67                     LD   H,A   
-0316   69                     LD   L,C   ; HL = quotient
-0317   C9                     RET      
-0318                             ; rdnum: read decimal digits at IP into HL; IP is left on the first
-0318                             ; non-digit. Values wrap at 16 bits, as the spec says.
-0318   21 00 00     RDNUM:    LD   HL,0   
-031B   0A           RDN1:     LD   A,(BC)   
-031C   D6 30                  SUB   "0"   
-031E   FE 0A                  CP   10   
-0320   D0                     RET   NC   
-0321   03                     INC   BC   
-0322   54                     LD   D,H   
-0323   5D                     LD   E,L   
-0324   29                     ADD   HL,HL   
-0325   29                     ADD   HL,HL   
-0326   19                     ADD   HL,DE   
-0327   29                     ADD   HL,HL   ; HL * 10
-0328   5F                     LD   E,A   
-0329   16 00                  LD   D,0   
-032B   19                     ADD   HL,DE   
-032C   18 ED                  JR   rdn1   
-032E                             ; skipstr: IP is inside a string; step past its closing quote. "/" escapes
-032E                             ; the next character, so "/"" does not end it. Leaves A = 22h.
-032E   03           SS0:      INC   BC   
-032F   0A           SKIPSTR:   LD   A,(BC)   
-0330   03                     INC   BC   
-0331   FE 2F                  CP   "/"   
-0333   28 F9                  JR   Z,ss0   
-0335   FE 22                  CP   22h   
-0337   20 F6                  JR   NZ,skipstr   
-0339   C9                     RET      
-033A                             ; skip: read past text to the closer at this level, and return A = 0 if it
-033A                             ; was ")" and 2 if it was "]". Brackets of both kinds count together;
-033A                             ; strings are stepped over whole. A NUL first ends the program (for "\" with
-033A                             ; no closer; anything else that runs into the NUL had unbalanced brackets
-033A                             ; anyway). D counts the open levels, starting at 1 for the one we are in:
-033A                             ; skip sets it to 0 and falls through the INC that an opener comes back to.
-033A   16 00        SKIP:     LD   D,0   
-033C   14           SK3:      INC   D   ; an opener: one deeper
-033D   0A           SK1:      LD   A,(BC)   
-033E   03                     INC   BC   
-033F   B7                     OR   A   
-0340   CA 15 01               JP   Z,endprog   
-0343   FE 22                  CP   22h   
-0345   CC 2F 03               CALL   Z,skipstr   ; leaves A = 22h, which matches nothing below
-0348   D6 28                  SUB   "("   
-034A   28 F0                  JR   Z,sk3   
-034C   3D                     DEC   A   ; ")"
-034D   28 08                  JR   Z,sk4   
-034F   D6 32                  SUB   "["-")"   
-0351   28 E9                  JR   Z,sk3   
-0353   FE 02                  CP   "]"-"["   
-0355   20 E6                  JR   NZ,sk1   
-0357   15           SK4:      DEC   D   
-0358   C8                     RET   Z   ; the closer at this level
-0359   18 E2                  JR   sk1   
+02EA                          ENDIF      
+02EA                             ; =============================================================================
+02EA                             ;  More routines (no handler starts past this point)
+02EA                             ; =============================================================================
+02EA                             ; udiv: unsigned HL / DE (DE <= 8000h). Returns HL = quotient, DE = remainder.
+02EA                             ; Uses A, BC; the caller saves the IP. The dividend shifts up through A:C
+02EA                             ; while the quotient bits arrive at the bottom of C.
+02EA                             ; Dividing by 2 is one shift (the spec wants that fast).
+02EA   7B           UDIV:     LD   A,E   
+02EB   EE 02                  XOR   2   
+02ED   B2                     OR   D   
+02EE   20 07                  JR   NZ,udv0   
+02F0   CB 3C                  SRL   H   
+02F2   CB 1D                  RR   L   ; the quotient
+02F4   8F                     ADC   A,A   
+02F5   5F                     LD   E,A   ; the remainder: the bit that fell out (D is 0)
+02F6   C9                     RET      
+02F7   7C           UDV0:     LD   A,H   
+02F8   4D                     LD   C,L   
+02F9   21 00 00               LD   HL,0   
+02FC   06 10                  LD   B,16   
+02FE   CB 21        UDV1:     SLA   C   
+0300   17                     RLA      
+0301   ED 6A                  ADC   HL,HL   
+0303   ED 52                  SBC   HL,DE   ; carry is clear here: the remainder
+0305   30 02                  JR   NC,udv2   ;   always fits in 16 bits
+0307   19                     ADD   HL,DE   ; too much: put it back, and cancel the
+0308   0D                     DEC   C   ;   INC below
+0309   0C           UDV2:     INC   C   ; a quotient bit
+030A   10 F2                  DJNZ   udv1   
+030C   EB                     EX   DE,HL   ; DE = remainder
+030D   67                     LD   H,A   
+030E   69                     LD   L,C   ; HL = quotient
+030F   C9                     RET      
+0310                             ; rdnum: read decimal digits at IP into HL; IP is left on the first
+0310                             ; non-digit. Values wrap at 16 bits, as the spec says.
+0310   21 00 00     RDNUM:    LD   HL,0   
+0313   0A           RDN1:     LD   A,(BC)   
+0314   D6 30                  SUB   "0"   
+0316   FE 0A                  CP   10   
+0318   D0                     RET   NC   
+0319   03                     INC   BC   
+031A   54                     LD   D,H   
+031B   5D                     LD   E,L   
+031C   29                     ADD   HL,HL   
+031D   29                     ADD   HL,HL   
+031E   19                     ADD   HL,DE   
+031F   29                     ADD   HL,HL   ; HL * 10
+0320   5F                     LD   E,A   
+0321   16 00                  LD   D,0   
+0323   19                     ADD   HL,DE   
+0324   18 ED                  JR   rdn1   
+0326                             ; skipstr: IP is inside a string; step past its closing quote. "/" escapes
+0326                             ; the next character, so "/"" does not end it. Leaves A = 22h.
+0326                          IF   1-CHECKED   
+0326   03           SS0:      INC   BC   
+0327   0A           SKIPSTR:   LD   A,(BC)   
+0328   03                     INC   BC   
+0329   FE 2F                  CP   "/"   
+032B   28 F9                  JR   Z,ss0   
+032D   FE 22                  CP   22h   
+032F   20 F6                  JR   NZ,skipstr   
+0331   C9                     RET      
+0332                          ENDIF      
+0332                          IF   CHECKED   
+                                 ; The checked build never steps over a NUL: if the text runs out first it
+                                 ; returns A = 0 with the IP on the NUL.
+                    SKIPSTR:   LD   A,(BC)   
+                              OR   A   
+                              RET   Z   
+                              INC   BC   
+                              CP   22h   
+                              RET   Z   
+                              CP   "/"   
+                              JR   NZ,skipstr   
+                              LD   A,(BC)   ; the escaped character
+                              OR   A   
+                              RET   Z   
+                              INC   BC   
+                              JR   skipstr   
+0332                          ENDIF      
+0332                             ; skip: read past text to the closer at this level, and return A = 0 if it
+0332                             ; was ")" and 2 if it was "]". Brackets of both kinds count together;
+0332                             ; strings are stepped over whole. A NUL first ends the program (for "\" with
+0332                             ; no closer; anything else that runs into the NUL had unbalanced brackets
+0332                             ; anyway). D counts the open levels, starting at 1 for the one we are in:
+0332                             ; skip sets it to 0 and falls through the INC that an opener comes back to.
+0332                             ; 
+0332                             ; The checked build also looks at the character the skip was started by,
+0332                             ; which is always the one just before where it starts: "(" must end at ")",
+0332                             ; "[" at "]", and neither may run into the NUL (N); a string with no closing
+0332                             ; quote counts as running into it. "\" takes either closer. IX keeps the
+0332                             ; place where the skip started, for the report.
+0332                SKIP:        
+0332                          IF   CHECKED   
+                              PUSH   BC   
+                              POP   IX   
+                              DEC   BC   
+                              LD   A,(BC)   
+                              INC   BC   
+                              LD   E,A   ; E = the opener: ( [ or \
+0332                          ENDIF      
+0332   16 00                  LD   D,0   
+0334   14           SK3:      INC   D   ; an opener: one deeper
+0335   0A           SK1:      LD   A,(BC)   
+0336                          IF   1-CHECKED   
+0336   03                     INC   BC   
+0337   B7                     OR   A   
+0338   CA 15 01               JP   Z,endprog   
+033B                          ENDIF      
+033B                          IF   CHECKED   
+                              OR   A   
+                              JR   Z,sk6   ; (the IP stays on the NUL)
+                              INC   BC   
+033B                          ENDIF      
+033B   FE 22                  CP   22h   
+033D   CC 27 03               CALL   Z,skipstr   ; leaves A = 22h, which matches nothing below
+0340   D6 28                  SUB   "("   ;   (or 0, and then the NUL is read next)
+0342   28 F0                  JR   Z,sk3   
+0344   3D                     DEC   A   ; ")"
+0345   28 08                  JR   Z,sk4   
+0347   D6 32                  SUB   "["-")"   
+0349   28 E9                  JR   Z,sk3   
+034B   FE 02                  CP   "]"-"["   
+034D   20 E6                  JR   NZ,sk1   
+034F   15           SK4:      DEC   D   
+0350                          IF   1-CHECKED   
+0350   C8                     RET   Z   ; the closer at this level
+0351   18 E2                  JR   sk1   
+0353                          ENDIF      
+0353                          IF   CHECKED   
+                              JR   NZ,sk1   
+                              LD   D,A   ; the closer at this level: 0 or 2. Bit 1 of the
+                              XOR   E   ;   opener is 0 for "(" and 1 for "[", and only
+                              AND   6   ;   "\" has bit 2: so this is 2 for the wrong
+                              CP   2   ;   closer, and only then
+                              LD   A,D   
+                              RET   NZ   
+                              JR   sk7   
+                    SK6:      BIT   2,E   ; the text ran out:
+                              JP   NZ,endprog   ;   "\" with no closer ends the program
+                    SK7:      PUSH   IX   ; N. The place is the opener
+                              POP   BC   
+                              LD   A,"N"   
+                              JP   errp   ; (errp drops skip's return address)
+0353                          ENDIF      
+0353                             ; psgn: print HL as a signed number. Uses BC.
+0353   CB 7C        PSGN:     BIT   7,H   
+0355   28 04                  JR   Z,pdec   
+0357   3E 2D                  LD   A,"-"   
+0359   EF                     RST   28h   
+035A   E7                     RST   20h   
 035B                             ; pdec: print HL unsigned, by recursion on HL / 10 (the stack holds digits).
 035B                             ; Uses BC.
 035B   11 0A 00     PDEC:     LD   DE,10   
-035E   CD F2 02               CALL   udiv   ; HL = HL / 10, E = the last digit
+035E   CD EA 02               CALL   udiv   ; HL = HL / 10, E = the last digit
 0361   7B                     LD   A,E   
 0362   F5                     PUSH   AF   
 0363   7C                     LD   A,H   
@@ -934,7 +1043,7 @@
 0387   0B                     DB   h_close & 0FFh   
 0388   48                     DB   h_mul & 0FFh   
 0389   1E                     DB   h_add & 0FFh   
-038A   CA                     DB   h_cfetch & 0FFh   
+038A   C2                     DB   h_cfetch & 0FFh   
 038B   16                     DB   h_sub & 0FFh   
 038C   81                     DB   h_cstore & 0FFh   
 038D   5C                     DB   h_div & 0FFh   
@@ -943,7 +1052,7 @@
 0390   2F                     DB   h_lt & 0FFh   
 0391   3E                     DB   h_eq & 0FFh   
 0392   30                     DB   h_gt & 0FFh   
-0393   B2                     DB   h_key & 0FFh   
+0393   AA                     DB   h_key & 0FFh   
 0394   FE                     DB   h_fetch & 0FFh   
 0395   E1                     DB   h_def & 0FFh   
 0396   D4                     DB   h_break & 0FFh   
@@ -1011,24 +1120,130 @@
 03BA                             ;  Checked build: the checks and the error report
 03BA                             ; =============================================================================
 03BA                          IF   CHECKED   
-                                 ; chkstk: both stacks are checked once per character, not in every handler.
-                                 ; Each stack lives in one page, so it has overrun exactly when the pointer's
-                                 ; high byte has left that page. Errors are caught one cell late at most; the
-                                 ; page below each stack is a guard band. (The call itself is on the data
-                                 ; stack, but in the same page whenever the stack is in range.)
-                    CHKSTK:   LD   (SPTMP),SP   
-                              LD   A,(SPTMP+1)   
-                              CP   DSPAGE   
-                              JR   NZ,e_stack   
-                              EXX      ; the return stack: in its page, and not
-                              LD   A,L   ;   above its empty position (an underflow
-                              CP   RSTOP&0FFh+1   ;   would stay inside the page, in the
-                              LD   A,H   ;   guard band)
-                              EXX      
-                              JR   NC,e_rstack   
-                              CP   RSPAGE   
+                                 ; chkst: stop unless HL is in the program's own space: from the letter page
+                                 ; up to the heap limit (the OS, or HEAPLIM), so the interpreter's stacks and
+                                 ; whatever lies above the limit are safe. Memory above the heap top but
+                                 ; below the limit is the program's own: Tiny BASIC keeps its lines there.
+                                 ; It is the page of HL + 1 that is tested, so that one test serves both
+                                 ; bytes of a cell: the last byte below the limit can"t be stored to with ".'.
+                                 ; Keeps HL and BC.
+                    CHKST:    INC   HL   
+                              LD   A,H   
+                              DEC   HL   
+                              CP   LETPAGE   
+                              JR   C,chs1   
+03BA                          ENDIF      
+03BA                          IF   CHECKED*(1-CPM)   
+                              CP   HEAPLIM   
+                              RET   C   
+03BA                          ENDIF      
+03BA                          IF   CHECKED*CPM   
+                              LD   E,A   
+                              LD   A,(0007h)   ; the BDOS page is the heap limit
+                              DEC   A   
+                              CP   E   
+                              RET   NC   
+03BA                          ENDIF      
+03BA                          IF   CHECKED   
+                    CHS1:     JP   e_store   
+                                 ; chkhp: HL = the new heap top, DE = the old one, the carry is from adding
+                                 ; the count. Stop if the top is not below the limit page, or is below the
+                                 ; program's end.
+                    CHKHP:       
+03BA                          ENDIF      
+03BA                          IF   CHECKED*CPM   
+                                 ; With this much room a top that wrapped round can land back in
+                                 ; range, so the add is tested too: growing (A, the count's high
+                                 ; byte, is positive) must not carry, and releasing must.
+                              RRA      ; the carry comes in above the sign:
+                              ADD   A,40h   ;   bit 7 = carry XOR sign
+                              ADD   A,A   
+                              JR   C,e_heap   
+                              LD   A,(0007h)   
+                              DEC   A   
+                              CP   H   
+                              JR   C,e_heap   
+03BA                          ENDIF      
+03BA                          IF   CHECKED*(1-CPM)   
+                                 ; (Here the program's space is under 32K, so a top that wrapped
+                                 ; round always falls outside it.)
+                              LD   A,H   
+                              CP   HEAPLIM   
+                              JR   NC,e_heap   
+03BA                          ENDIF      
+03BA                          IF   CHECKED   
+                              PUSH   DE   
+                              EX   DE,HL   
+                              LD   HL,(NPEND)   
+                              ADD   HL,DE   ; carry: at or above the program's end
+                              EX   DE,HL   
+                              POP   DE   
+                              RET   C   
+                    E_HEAP:   OR   A   ; put the count back in TOS for the report
+                              SBC   HL,DE   
+                              JP   e_heap1   
+                                 ; prstr: print the string at HL, to its closing quote, decoding "/" (this is
+                                 ; "$", and the error report's texts). A NUL first is an error: Q.
+                    PRSTR:    LD   A,(HL)   
+                              INC   HL   
+                              CP   22h   
                               RET   Z   
-                              JR   e_rstack   
+                              OR   A   
+                              JR   Z,e_dollar   
+                              CP   "/"   
+                              JR   NZ,prs1   
+                              LD   A,(HL)   
+                              INC   HL   
+                              AND   0BFh   
+                    PRS1:     RST   28h   
+                              JR   prstr   
+                    E_DOLLAR:   POP   DE   ; "$" ran into a NUL: drop the return address,
+                              POP   HL   ;   and put the string's address back in TOS
+                              LD   A,"Q"   
+                              JP   error   
+                                 ; pmsg: print the text that follows the CALL, to its closing quote. Keeps HL.
+                                 ; pnl: the same, on a new line.
+                    PNL:      LD   A,13   
+                              RST   28h   
+                              LD   A,10   
+                              RST   28h   
+                    PMSG:     EX   (SP),HL   
+                              CALL   prstr   
+                              EX   (SP),HL   
+                              RET      
+                                 ; chkstk: both stacks are checked once per character, not in every handler.
+                                 ; The data stack is right when SP lies in the 256 bytes below DSTOP: adding
+                                 ; the constant carries if it is above (cells were popped that were never
+                                 ; pushed), and leaves a high byte of FFh if it is in range. Errors are found
+                                 ; a character late at most: the bytes above DSTOP and the guard band below
+                                 ; the page take what happens meanwhile. DE is free between characters.
+                    CHKSTK:   EX   DE,HL   
+                              LD   HL,(1-DSTOP)&0FFFFh   ; (SP is 2 lower here: the call)
+                              ADD   HL,SP   
+                              EX   DE,HL   
+                              JR   C,e_under   
+                              INC   D   
+                              JR   NZ,e_over   
+                              EXX      ; the return stack: in its page (or it has
+                              LD   A,H   ;   overflowed), and not above its empty
+                              CP   RSPAGE   ;   position (an underflow stays inside the
+                              LD   A,L   ;   page, in the guard band)
+                              EXX      
+                              JR   NZ,e_rover   
+                              CP   RSTOP&0FFh+1   
+                              RET   C   
+                              EXX      ; return stack underflow: it counts as empty
+                              LD   HL,RSTOP   
+                              EXX      
+                              LD   A,"r"   
+                              JR   errp   
+                    E_ROVER:   LD   A,"R"   ; return stack overflow
+                              DB   11h   ; (LD DE,nn hides the next entry)
+                    E_OVER:   LD   A,"S"   ; data stack overflow
+                              JR   errp   
+                    E_UNDER:   LD   SP,DSTOP   ; data stack underflow: it counts as empty
+                              LD   A,"s"   
+                              JR   error   
                                  ; chkbrk: a waiting key is read now; Ctrl-C stops the program, anything
                                  ; else is held for the next "?".
                     CHKBRK:   CALL   getk   
@@ -1037,72 +1252,163 @@
                               JR   Z,e_break   
                               LD   (KEYBUF),A   
                               RET      
-                                 ; chkst: stop unless HL is in the program's own space: from the letter page
-                                 ; up to the heap limit (the OS, or HEAPLIM), so the interpreter's stacks and
-                                 ; whatever lies above the limit are safe. Memory above the heap top but
-                                 ; below the limit is the program's own: Tiny BASIC keeps its lines there.
-                                 ; Keeps every register.
-                    CHKST:    PUSH   AF   
-                              LD   A,H   
-                              CP   LETPAGE   
-                              JR   C,e_store   
-03BA                          ENDIF      
-03BA                          IF   CHECKED*(1-CPM)   
-                              CP   HEAPLIM   
-                              JR   NC,e_store   
-03BA                          ENDIF      
-03BA                          IF   CHECKED*CPM   
-                              LD   A,(0007h)   ; the BDOS page is the heap limit
-                              DEC   A   
-                              CP   H   
-                              JR   C,e_store   
-03BA                          ENDIF      
-03BA                          IF   CHECKED   
-                              POP   AF   
-                              RET      
-                                 ; chkhp: stop if working out the new heap top carried (a negative count
-                                 ; wraps: too big), or if the new top in HL is not below the limit page.
-                    CHKHP:    JR   C,e_heap   
-03BA                          ENDIF      
-03BA                          IF   CHECKED*(1-CPM)   
-                              LD   A,H   
-                              CP   HEAPLIM   
-                              RET   C   
-03BA                          ENDIF      
-03BA                          IF   CHECKED*CPM   
-                              LD   A,(0007h)   
-                              DEC   A   
-                              CP   H   
-                              RET   NC   
-03BA                          ENDIF      
-03BA                          IF   CHECKED   
+                                 ; e_hi: the inner loop read a reserved byte, 80h-FFh: X. But a word cell that
+                                 ; was never defined still holds 0000h, and the byte there is a reserved one
+                                 ; in every build (AFh or C3h): if the IP is in page zero, this was a call of
+                                 ; an undefined word. The call is undone, so the place is the call itself.
+                    E_HI:     INC   B   
+                              DJNZ   e_resv   ; (B is as it was, and is not 0)
+                              RST   08h   
+                              LD   B,D   
+                              LD   C,E   
+                              LD   A,"U"   
+                              JR   error   
                                  ; Error entries. Each loads its letter and then hides the next entry inside
-                                 ; a 3-byte LD HL,nn (the 21h), so they all fall through to `error`.
-                    E_HEAP:   LD   A,"H"   ; heap past the limit
-                              DB   21h   
-                    E_STORE:   LD   A,"W"   ; write outside the program's space
-                              DB   21h   
-                    E_STACK:   LD   A,"S"   ; data stack over or under
-                              DB   21h   
-                    E_RSTACK:   LD   A,"R"   ; return stack over or under
-                              DB   21h   
-                    E_BREAK:   LD   A,"B"   ; Ctrl-C
-                              DB   21h   
-                    E_BRACK:   LD   A,"D"   ; bad character after [
-                                 ; error: print the letter in A, " @ " and the offset in the program of the
-                                 ; character just read, then end. For example: S @ 245
-                    ERROR:    LD   SP,DSTOP   ; the stacks may be wrecked: start clean
+                                 ; a 3-byte LD DE,nn (the 11h), so they all fall through to `error`.
+                    E_BREAK:   LD   A,"B"   ; Ctrl-C (found inside chkbrk)
+                              DB   11h   
+                    E_HEAP1:   LD   A,"H"   ; heap (found inside chkhp)
+                              DB   11h   
+                    E_STORE:   LD   A,"O"   ; a store outside the program's space (chkst)
+                                 ; errp: an error found inside a routine: drop its return address first.
+                    ERRP:     POP   DE   
+                              JR   error   
+                    E_QUOTE:   LD   B,H   ; an unclosed string: HL is its address, one
+                              LD   C,L   ;   past the opening quote, which is the place
+                              LD   A,"Q"   
+                              DB   11h   
+                    E_RESV:   LD   A,"X"   ; a reserved byte outside a string
+                              DB   11h   
+                    E_ZERO:   LD   A,"Z"   ; dividing by zero
+                              DB   11h   
+                    E_BRACK:   LD   A,"W"   ; bad character after [
+                                 ; error: the report, then the end. A = the letter, BC = one past the place,
+                                 ; HL = TOS, and both stacks as the report is to show them:
+                                 ; 
+                                 ;   Err X @ line,col
+                                 ;   up to 16 characters of the text from the place
+                                 ;   Stk n: the top 8 cells at most, bottom to top
+                                 ;   Rtn n
+                    ERROR:    PUSH   HL   ; now the whole data stack is in memory
+                              LD   E,A   
+                              CALL   pnl   
+                              DB   "Err ",22h   
+                              LD   A,E   
                               RST   28h   
+                              CALL   pmsg   
+                              DB   " @ ",22h   
+                              DEC   BC   ; BC = the place
+                                 ; The line and column. A place below the program is in the line
+                                 ; buffer: line 0. Otherwise count the LFs from the program's start;
+                                 ; DE = the line's number, HL = where it starts.
+                              LD   HL,LINEBUF   
+                              LD   DE,0   
+                              LD   A,B   
+                              CP   PROG/256   
+                              JR   C,er3   
+                              INC   H   
+                              LD   L,E   ; HL = PROG
+                    ER1:      INC   DE   ; a new line starts at HL
+                              PUSH   HL   
+                    ER2:      LD   A,L   
+                              SUB   C   
+                              LD   A,H   
+                              SBC   A,B   
+                              JR   NC,er2x   ; reached the place
+                              LD   A,(HL)   
+                              INC   HL   
+                              CP   10   
+                              JR   NZ,er2   
+                              POP   AF   
+                              JR   er1   
+                    ER2X:     POP   HL   
+                    ER3:      PUSH   BC   
+                              PUSH   HL   
+                              EX   DE,HL   
+                              CALL   pdec   ; the line
+                              LD   A,","   
+                              RST   28h   
+                              POP   DE   
+                              POP   HL   
+                              PUSH   HL   
+                              OR   A   
+                              SBC   HL,DE   
+                              INC   HL   
+                              CALL   pdec   ; the column
+                              CALL   pnl   
+                              DB   22h   
+                              POP   HL   ; the text, as it is: 16 characters, or fewer
+                              LD   B,16   ;   if the line or the program ends first
+                    ER4:      LD   A,(HL)   
+                              INC   HL   
+                              OR   A   
+                              JR   Z,er5   
+                              CP   13   
+                              JR   Z,er5   
+                              CP   10   
+                              JR   Z,er5   
+03BA                          ENDIF      
+03BA                          IF   CHECKED*CPM   
+                              CP   1Ah   ; (the ^Z that pads a file's last record ends
+                              JR   Z,er5   ;   the text too: some terminals clear the
+03BA                          ENDIF      ;   screen on it)
+03BA                          IF   CHECKED   
+                              RST   28h   
+                              DJNZ   er4   
+                    ER5:      CALL   pnl   
+                              DB   "Stk ",22h   
+                              LD   HL,DSTOP-2   ; (the cell at DSTOP-2 was pushed with the
+                              OR   A   ;   first value and holds nothing)
+                              SBC   HL,SP   
+                              CALL   phalf   ; the depth
+                              LD   A,":"   
+                              RST   28h   
+                              LD   A,C   
+                              CP   9   
+                              JR   C,er6   
+                              CALL   pmsg   
+                              DB   " ...",22h   
+                              LD   C,8   
+                    ER6:      LD   H,0   ; C = the number of cells to show
+                              LD   L,C   
+                              ADD   HL,HL   
+                              ADD   HL,SP   ; HL -> just above the deepest of them
+                              INC   C   
+                    ER7:      DEC   C   
+                              JR   Z,er8   
+                              DEC   HL   
+                              LD   D,(HL)   
+                              DEC   HL   
+                              LD   E,(HL)   
+                              PUSH   HL   
+                              PUSH   BC   
                               LD   A," "   
                               RST   28h   
-                              LD   A,"@"   
-                              RST   28h   
-                              LD   A," "   
-                              RST   28h   
-                              LD   HL,(0-PROG-1)&0FFFFh   ; minus the address of the character
-                              ADD   HL,BC   ;   just read: HL = its offset
-                              CALL   pdec   
+                              EX   DE,HL   
+                              CALL   psgn   
+                              POP   BC   
+                              POP   HL   
+                              JR   er7   
+                    ER8:      CALL   pnl   
+                              DB   "Rtn ",22h   
+                              EXX      
+                              PUSH   HL   
+                              EXX      
+                              POP   DE   
+                              LD   HL,RSTOP   
+                              OR   A   
+                              SBC   HL,DE   
+                              CALL   phalf   
+                              CALL   pnl   
+                              DB   22h   
                               JP   endprog   
+                                 ; phalf: print half of HL, and leave it in C
+                    PHALF:    SRL   H   
+                              RR   L   
+                              PUSH   HL   
+                              CALL   pdec   
+                              POP   BC   
+                              RET      
 03BA                          ENDIF      
 03BA                             ; =============================================================================
 03BA                             ;  The line editor (EDITOR = 1)
@@ -1131,10 +1437,8 @@
 03BA                             ;  CP/M. Nothing is written back: there is no command to save.
 03BA                             ; 
 03BA                             ;  With CHECKED = 1 a program that is stopped (an error, or Ctrl-C) prints
-03BA                             ;  its letter and place and comes back here. The place is counted from the
-03BA                             ;  start of the program, so in a line typed here it is 65408 plus the
-03BA                             ;  character's place in the line (the line buffer is 128 bytes below the
-03BA                             ;  program).
+03BA                             ;  its report and comes back here, with both stacks empty. The place is a
+03BA                             ;  line and column of the program; in a line typed here it is line 0.
 03BA                             ; 
 03BA                             ;  Things to know:
 03BA                             ;    - Reset empties the program (generic builds).
@@ -1146,13 +1450,19 @@
 03BA                             ;      (The stored program never comes back to the line, so it may.)
 03BA                             ; =============================================================================
 03BA                          IF   EDGEN*CHECKED   
-                    INIT:     LD   (KEYBUF),A   ; (A = 0) reset: no key held back
+                                 ; Reset (A = 0): clear the lower half of the letter page. Every variable
+                                 ; starts at 0, every word cell holds 0000h, the address an undefined word is
+                                 ; caught at (see e_hi), and no key is held back.
+                    INIT:     LD   HL,LET   
+                    INI1:     LD   (HL),A   
+                              INC   L   
+                              JP   P,ini1   ; +00h to +7Fh
                               JR   edit   
 03BA                          ENDIF      
 03BA                          IF   EDITOR   
 03BA                             ; -n: list from line n. DE = the number of the line at HL.
 03BA   03           LIST:     INC   BC   
-03BB   CD 18 03               CALL   rdnum   ; HL = n
+03BB   CD 10 03               CALL   rdnum   ; HL = n
 03BE   E5                     PUSH   HL   
 03BF   CD 5E 04               CALL   find   
 03C2   D1                     POP   DE   
@@ -1189,7 +1499,7 @@
 03F5   13                     INC   DE   
 03F6   B7                     OR   A   
 03F7   20 F9                  JR   NZ,de1   ; and fall into the editor
-03F9   31 FE 06     EDIT:     LD   SP,DSTOP   
+03F9   31 FC 06     EDIT:     LD   SP,DSTOP   
 03FC                          ENDIF      
 03FC                          IF   EDITOR*CPM*CHECKED   
                                  ; A key that the break check held back while a program ran is let
@@ -1205,7 +1515,7 @@
 03FC   3E 7D                  LD   A,125   
 03FE                          ENDIF      
 03FE                          IF   EDITOR   
-03FE   CD DD 02               CALL   rdline   ; HL -> the CR that ended the line
+03FE   CD D5 02               CALL   rdline   ; HL -> the CR that ended the line
 0401   2C                     INC   L   
 0402   36 0A                  LD   (HL),10   ; a LF after it,
 0404   2D                     DEC   L   
@@ -1216,7 +1526,7 @@
 040E   0A                     LD   A,(BC)   
 040F   FE 2D                  CP   "-"   
 0411   28 A7                  JR   Z,list   
-0413   CD 18 03               CALL   rdnum   ; HL = the number it starts with, BC -> after
+0413   CD 10 03               CALL   rdnum   ; HL = the number it starts with, BC -> after
 0416   79                     LD   A,C   ; C is still 80h if there was no number:
 0417   87                     ADD   A,A   ;   only then is twice it 0
 0418   28 0C                  JR   Z,st0   ; no number: run the line where it is
@@ -1235,6 +1545,12 @@
 042C   23                     INC   HL   
 042D   20 FC                  JR   NZ,st1   
 042F   22 7C 07               LD   (HEAP),HL   
+0432                          ENDIF      
+0432                          IF   EDITOR*CHECKED   
+                              RST   20h   ; minus the heap"s first address: "_' may not
+                              LD   (NPEND),HL   ;   release below it
+0432                          ENDIF      
+0432                          IF   EDITOR   
 0432   D9                     EXX      
 0433   21 E0 05               LD   HL,RSTOP   ; the return stack is empty
 0436   D9                     EXX      
@@ -1306,7 +1622,21 @@
 047F                             ; =============================================================================
 047F                          IF   CPM   
 047F                             ; The RAM pages follow the image; the heap may grow to the BDOS.
-047F   21 08 01     START:    LD   HL,vecs   ; the RST routines go down into page zero
+047F                START:       
+047F                          ENDIF      
+047F                          IF   CPM*CHECKED   
+                                 ; Clear the lower half of the letter page: every variable starts at
+                                 ; 0, every word cell holds 0000h, the address an undefined word is
+                                 ; caught at (see e_hi: the byte there is CP/M's JP, C3h), and no key
+                                 ; is held back.
+                              LD   HL,LET   
+                              XOR   A   
+                    INI1:     LD   (HL),A   
+                              INC   L   
+                              JP   P,ini1   ; +00h to +7Fh
+047F                          ENDIF      
+047F                          IF   CPM   
+047F   21 08 01               LD   HL,vecs   ; the RST routines go down into page zero
 0482   11 08 00               LD   DE,0008h   
 0485   01 2C 00               LD   BC,vecend-vecs   
 0488   ED B0                  LDIR      
@@ -1368,346 +1698,347 @@
 04CC                IMGEND:      
 
 
-CPM:                0001 DEFINED AT LINE 23
-                    > USED AT LINE 26
-CHECKED:            0000 DEFINED AT LINE 24
-                    > USED AT LINE 27
-EDITOR:             0001 DEFINED AT LINE 25
-                    > USED AT LINE 26
-EDGEN:              0000 DEFINED AT LINE 26
-                    > USED AT LINE 27
-TABP0:              0000 DEFINED AT LINE 27
-BDOS:               0005 DEFINED AT LINE 82
-                    > USED AT LINE 998
-                    > USED AT LINE 1323
-                    > USED AT LINE 1327
-                    > USED AT LINE 1330
-BASE:               0100 DEFINED AT LINE 83
-                    > USED AT LINE 131
-                    > USED AT LINE 944
-                    > USED AT LINE 945
-                    > USED AT LINE 946
-                    > USED AT LINE 947
-EXIT:               03F9 DEFINED AT LINE 106
-                    > USED AT LINE 170
-MSLOOP:             0028 DEFINED AT LINE 109
-                    > USED AT LINE 709
-LET:                0700 DEFINED AT LINE 114
+CPM:                0001 DEFINED AT LINE 19
+                    > USED AT LINE 22
+CHECKED:            0000 DEFINED AT LINE 20
+                    > USED AT LINE 23
+EDITOR:             0001 DEFINED AT LINE 21
+                    > USED AT LINE 22
+EDGEN:              0000 DEFINED AT LINE 22
+                    > USED AT LINE 23
+TABP0:              0000 DEFINED AT LINE 23
+BDOS:               0005 DEFINED AT LINE 79
+                    > USED AT LINE 1107
+                    > USED AT LINE 1657
+                    > USED AT LINE 1661
+                    > USED AT LINE 1664
+BASE:               0100 DEFINED AT LINE 80
+                    > USED AT LINE 133
+                    > USED AT LINE 1053
+                    > USED AT LINE 1054
+                    > USED AT LINE 1055
+                    > USED AT LINE 1056
+EXIT:               03F9 DEFINED AT LINE 103
+                    > USED AT LINE 179
+MSLOOP:             0028 DEFINED AT LINE 106
+                    > USED AT LINE 753
+LET:                0700 DEFINED AT LINE 111
+                    > USED AT LINE 112
+                    > USED AT LINE 113
+                    > USED AT LINE 114
                     > USED AT LINE 115
-                    > USED AT LINE 116
                     > USED AT LINE 117
                     > USED AT LINE 118
-                    > USED AT LINE 119
-                    > USED AT LINE 120
-HEAP:               077C DEFINED AT LINE 115
-                    > USED AT LINE 365
-                    > USED AT LINE 370
-                    > USED AT LINE 1240
-RSAVE:              0734 DEFINED AT LINE 116
-                    > USED AT LINE 375
-                    > USED AT LINE 379
-KEYBUF:             0736 DEFINED AT LINE 117
-SPTMP:              0738 DEFINED AT LINE 118
-LBHDR:              077E DEFINED AT LINE 119
-                    > USED AT LINE 744
-                    > USED AT LINE 745
-                    > USED AT LINE 748
-LINEBUF:            0780 DEFINED AT LINE 120
-                    > USED AT LINE 738
-                    > USED AT LINE 1217
-RSTOP:              05E0 DEFINED AT LINE 121
-                    > USED AT LINE 1242
-DSTOP:              06FE DEFINED AT LINE 123
-                    > USED AT LINE 133
-                    > USED AT LINE 1194
-VECS:               0108 DEFINED AT LINE 156
-                    > USED AT LINE 1317
-                    > USED AT LINE 1319
-RPOP:               0108 DEFINED AT LINE 158
-CTL:                0111 DEFINED AT LINE 168
-                    > USED AT LINE 224
-ENDPROG:            0115 DEFINED AT LINE 170
-                    > USED AT LINE 891
-RST18:              0118 DEFINED AT LINE 172
-H_FROMR:            011C DEFINED AT LINE 175
-                    > USED AT LINE 276
-NEG16:              0120 DEFINED AT LINE 180
-                    > USED AT LINE 621
-                    > USED AT LINE 624
-                    > USED AT LINE 627
-                    > USED AT LINE 631
-RST28:              0128 DEFINED AT LINE 189
-JPHL:               012B DEFINED AT LINE 196
-                    > USED AT LINE 377
-H_TOR:              012C DEFINED AT LINE 197
-                    > USED AT LINE 274
-RST30:              0130 DEFINED AT LINE 200
-NX:                 0131 DEFINED AT LINE 201
-                    > USED AT LINE 174
-VECEND:             0134 DEFINED AT LINE 205
-                    > USED AT LINE 1319
-NEXT0:              0134 DEFINED AT LINE 217
-                    > USED AT LINE 169
-                    > USED AT LINE 203
-                    > USED AT LINE 240
-P5B:                015C DEFINED AT LINE 242
-                    > USED AT LINE 236
-P3A:                015E DEFINED AT LINE 243
-                    > USED AT LINE 231
-PUNCT:              0160 DEFINED AT LINE 282
-                    > USED AT LINE 226
-PU1:                016E DEFINED AT LINE 298
-                    > USED AT LINE 296
-H_XOR:              0170 DEFINED AT LINE 342
-                    > USED AT LINE 271
-H_OR:               0178 DEFINED AT LINE 351
-                    > USED AT LINE 275
-H_NOT:              0180 DEFINED AT LINE 360
-                    > USED AT LINE 277
-H_ALLOC:            0183 DEFINED AT LINE 365
-                    > USED AT LINE 272
-EXEC:               018D DEFINED AT LINE 374
-                    > USED AT LINE 435
-DIGIT:              019C DEFINED AT LINE 388
-                    > USED AT LINE 229
-LOWER:              01A2 DEFINED AT LINE 394
-                    > USED AT LINE 238
-UPPER:              01A8 DEFINED AT LINE 402
-                    > USED AT LINE 234
-RPUSHN:             01B2 DEFINED AT LINE 414
-                    > USED AT LINE 198
-                    > USED AT LINE 530
-                    > USED AT LINE 542
-H_GRAVE:            01BA DEFINED AT LINE 434
-                    > USED AT LINE 273
-HX1:                01BF DEFINED AT LINE 436
-                    > USED AT LINE 446
-HX2:                01CD DEFINED AT LINE 447
-                    > USED AT LINE 442
-H_RET:              01D0 DEFINED AT LINE 461
-                    > USED AT LINE 474
-                    > USED AT LINE 944
-                    > USED AT LINE 270
-BRK1:               01D3 DEFINED AT LINE 464
-                    > USED AT LINE 471
-H_BREAK:            01D4 DEFINED AT LINE 468
-                    > USED AT LINE 945
-                    > USED AT LINE 269
-RDROP:              01DF DEFINED AT LINE 475
-                    > USED AT LINE 537
-H_DEF:              01E1 DEFINED AT LINE 483
-                    > USED AT LINE 946
-                    > USED AT LINE 268
-DEF2:               01F7 DEFINED AT LINE 498
-                    > USED AT LINE 489
-SKIPNX:             01FA DEFINED AT LINE 507
-                    > USED AT LINE 497
-                    > USED AT LINE 528
-H_FETCH:            01FE DEFINED AT LINE 510
-                    > USED AT LINE 947
-                    > USED AT LINE 267
-H_OPEN:             0203 DEFINED AT LINE 525
-                    > USED AT LINE 253
-H_CLOSE:            020B DEFINED AT LINE 534
-                    > USED AT LINE 254
-H_SUB:              0216 DEFINED AT LINE 547
-                    > USED AT LINE 258
-H_ADD:              021E DEFINED AT LINE 552
-                    > USED AT LINE 256
-NEGNUM:             0221 DEFINED AT LINE 555
-                    > USED AT LINE 550
-H_AND:              0227 DEFINED AT LINE 560
-                    > USED AT LINE 251
-H_LT:               022F DEFINED AT LINE 574
-                    > USED AT LINE 263
-H_GT:               0230 DEFINED AT LINE 575
-                    > USED AT LINE 265
-TF:                 023B DEFINED AT LINE 583
-                    > USED AT LINE 592
-H_EQ:               023E DEFINED AT LINE 586
-                    > USED AT LINE 264
-H_MUL:              0248 DEFINED AT LINE 596
-                    > USED AT LINE 255
-MUL1:               0251 DEFINED AT LINE 602
-                    > USED AT LINE 607
-MUL2:               0258 DEFINED AT LINE 607
-                    > USED AT LINE 605
-H_DIV:              025C DEFINED AT LINE 614
-                    > USED AT LINE 260
-H_DUP:              027D DEFINED AT LINE 638
-                    > USED AT LINE 261
-H_SWAP:             027F DEFINED AT LINE 641
-                    > USED AT LINE 250
-H_CSTORE:           0281 DEFINED AT LINE 644
-                    > USED AT LINE 259
-H_DROP:             0283 DEFINED AT LINE 649
-                    > USED AT LINE 262
-H_STORE:            0284 DEFINED AT LINE 651
-                    > USED AT LINE 246
-H_STR:              0289 DEFINED AT LINE 666
-                    > USED AT LINE 247
-H_PRINT:            0290 DEFINED AT LINE 675
-                    > USED AT LINE 685
-                    > USED AT LINE 249
-PR1:                029E DEFINED AT LINE 684
-                    > USED AT LINE 680
-H_EMIT:             02A1 DEFINED AT LINE 687
-                    > USED AT LINE 252
-PR9:                02A3 DEFINED AT LINE 689
-                    > USED AT LINE 678
-H_NUM:              02A4 DEFINED AT LINE 692
-                    > USED AT LINE 248
-NUM1:               02AC DEFINED AT LINE 697
-                    > USED AT LINE 693
-H_KEY:              02B2 DEFINED AT LINE 707
-                    > USED AT LINE 266
-KT1:                02B6 DEFINED AT LINE 709
-                    > USED AT LINE 716
-                    > USED AT LINE 720
-KT2:                02B8 DEFINED AT LINE 710
-                    > USED AT LINE 713
-H_CFETCH:           02CA DEFINED AT LINE 722
-                    > USED AT LINE 257
-KT3:                02CB DEFINED AT LINE 723
-                    > USED AT LINE 711
-LINE:               02CF DEFINED AT LINE 730
-                    > USED AT LINE 708
-RDLINE:             02DD DEFINED AT LINE 741
-                    > USED AT LINE 737
-                    > USED AT LINE 1210
-UDIV:               02F2 DEFINED AT LINE 823
-                    > USED AT LINE 625
-                    > USED AT LINE 909
-UDV0:               02FF DEFINED AT LINE 832
-                    > USED AT LINE 826
-UDV1:               0306 DEFINED AT LINE 836
-                    > USED AT LINE 844
-UDV2:               0311 DEFINED AT LINE 843
-                    > USED AT LINE 840
-RDNUM:              0318 DEFINED AT LINE 852
-                    > USED AT LINE 390
-                    > USED AT LINE 556
-                    > USED AT LINE 1155
-                    > USED AT LINE 1221
-RDN1:               031B DEFINED AT LINE 853
-                    > USED AT LINE 867
-SS0:                032E DEFINED AT LINE 871
-                    > USED AT LINE 875
-SKIPSTR:            032F DEFINED AT LINE 872
-                    > USED AT LINE 669
-                    > USED AT LINE 877
-                    > USED AT LINE 893
-SKIP:               033A DEFINED AT LINE 886
-                    > USED AT LINE 472
-                    > USED AT LINE 507
-SK3:                033C DEFINED AT LINE 887
-                    > USED AT LINE 895
-                    > USED AT LINE 899
-SK1:                033D DEFINED AT LINE 888
-                    > USED AT LINE 901
-                    > USED AT LINE 904
-SK4:                0357 DEFINED AT LINE 902
-                    > USED AT LINE 897
-PDEC:               035B DEFINED AT LINE 908
-                    > USED AT LINE 698
-                    > USED AT LINE 914
-                    > USED AT LINE 1173
-HEXC:               036D DEFINED AT LINE 923
-                    > USED AT LINE 434
-                    > USED AT LINE 441
-                    > USED AT LINE 445
-HC1:                037D DEFINED AT LINE 932
-                    > USED AT LINE 926
-PGRET:              0000 DEFINED AT LINE 944
-                    > USED AT LINE 948
-PGBRK:              0000 DEFINED AT LINE 945
-                    > USED AT LINE 948
-PGDEF:              0000 DEFINED AT LINE 946
-                    > USED AT LINE 948
-PGFET:              0000 DEFINED AT LINE 947
-                    > USED AT LINE 948
-NPG1:               0015 DEFINED AT LINE 948
-                    > USED AT LINE 285
-PTAB:               037F DEFINED AT LINE 950
-                    > USED AT LINE 282
-                    > USED AT LINE 284
-                    > USED AT LINE 285
-PTABEND:            039F DEFINED AT LINE 952
-GETK:               039F DEFINED AT LINE 977
-                    > USED AT LINE 710
-                    > USED AT LINE 1162
-                    > USED AT LINE 1166
-PUTC:               03A1 DEFINED AT LINE 983
-                    > USED AT LINE 194
-BDOSX:              03AD DEFINED AT LINE 993
-                    > USED AT LINE 747
-                    > USED AT LINE 987
-LIST:               03BA DEFINED AT LINE 1154
-                    > USED AT LINE 1220
-LI1:                03C3 DEFINED AT LINE 1159
-                    > USED AT LINE 1180
-LI2:                03D0 DEFINED AT LINE 1166
-                    > USED AT LINE 1167
-LI3:                03D9 DEFINED AT LINE 1170
-                    > USED AT LINE 1163
-DEL:                03EA DEFINED AT LINE 1183
-                    > USED AT LINE 1230
-DE1:                03F2 DEFINED AT LINE 1187
-                    > USED AT LINE 1192
-EDIT:               03F9 DEFINED AT LINE 1194
-                    > USED AT LINE 106
-                    > USED AT LINE 1161
-                    > USED AT LINE 1165
-                    > USED AT LINE 1169
-                    > USED AT LINE 1277
-                    > USED AT LINE 1367
-ST0:                0426 DEFINED AT LINE 1234
-                    > USED AT LINE 1224
-ST1:                042B DEFINED AT LINE 1237
-                    > USED AT LINE 1239
-INS:                0438 DEFINED AT LINE 1248
-                    > USED AT LINE 1227
-FIND:               045E DEFINED AT LINE 1281
-                    > USED AT LINE 1157
-                    > USED AT LINE 1183
-                    > USED AT LINE 1248
-FI1:                0462 DEFINED AT LINE 1283
-                    > USED AT LINE 1288
-NXL:                046C DEFINED AT LINE 1293
-                    > USED AT LINE 1186
-                    > USED AT LINE 1287
-                    > USED AT LINE 1298
-PRL:                0476 DEFINED AT LINE 1303
-                    > USED AT LINE 1179
-                    > USED AT LINE 1214
-                    > USED AT LINE 1308
-START:              047F DEFINED AT LINE 1317
-                    > USED AT LINE 153
-LD1:                0495 DEFINED AT LINE 1325
-                    > USED AT LINE 1337
-LD2:                04AE DEFINED AT LINE 1338
-                    > USED AT LINE 1333
-TR1:                04B5 DEFINED AT LINE 1354
-                    > USED AT LINE 1358
-TR2:                04C7 DEFINED AT LINE 1366
-                    > USED AT LINE 1361
-RSPAGE:             0005 DEFINED AT LINE 1372
-                    > USED AT LINE 121
-                    > USED AT LINE 1373
-                    > USED AT LINE 1374
-DSPAGE:             0006 DEFINED AT LINE 1373
-                    > USED AT LINE 123
-LETPAGE:            0007 DEFINED AT LINE 1374
-                    > USED AT LINE 114
-                    > USED AT LINE 397
+HEAP:               077C DEFINED AT LINE 112
+                    > USED AT LINE 391
+                    > USED AT LINE 399
+                    > USED AT LINE 1554
+RSAVE:              0734 DEFINED AT LINE 113
+                    > USED AT LINE 404
+                    > USED AT LINE 408
+KEYBUF:             0736 DEFINED AT LINE 114
+NPEND:              0738 DEFINED AT LINE 115
+LBHDR:              077E DEFINED AT LINE 117
+                    > USED AT LINE 788
+                    > USED AT LINE 789
+                    > USED AT LINE 792
+LINEBUF:            0780 DEFINED AT LINE 118
+                    > USED AT LINE 782
+                    > USED AT LINE 1531
+RSTOP:              05E0 DEFINED AT LINE 119
+                    > USED AT LINE 1562
+DSTOP:              06FC DEFINED AT LINE 121
+                    > USED AT LINE 138
+                    > USED AT LINE 1508
+VECS:               0108 DEFINED AT LINE 165
+                    > USED AT LINE 1651
+                    > USED AT LINE 1653
+RPOP:               0108 DEFINED AT LINE 167
+CTL:                0111 DEFINED AT LINE 177
+                    > USED AT LINE 233
+ENDPROG:            0115 DEFINED AT LINE 179
+                    > USED AT LINE 970
+RST18:              0118 DEFINED AT LINE 181
+H_FROMR:            011C DEFINED AT LINE 184
+                    > USED AT LINE 291
+NEG16:              0120 DEFINED AT LINE 189
+                    > USED AT LINE 653
+                    > USED AT LINE 656
+                    > USED AT LINE 659
+                    > USED AT LINE 663
+RST28:              0128 DEFINED AT LINE 198
+JPHL:               012B DEFINED AT LINE 205
                     > USED AT LINE 406
-                    > USED AT LINE 491
-                    > USED AT LINE 1375
-PROG:               0800 DEFINED AT LINE 1375
-                    > USED AT LINE 1231
-                    > USED AT LINE 1235
-                    > USED AT LINE 1282
-                    > USED AT LINE 1324
-                    > USED AT LINE 1352
-IMGEND:             04CC DEFINED AT LINE 1377
-                    > USED AT LINE 1372
+H_TOR:              012C DEFINED AT LINE 206
+                    > USED AT LINE 289
+RST30:              0130 DEFINED AT LINE 209
+NX:                 0131 DEFINED AT LINE 210
+                    > USED AT LINE 183
+VECEND:             0134 DEFINED AT LINE 214
+                    > USED AT LINE 1653
+NEXT0:              0134 DEFINED AT LINE 226
+                    > USED AT LINE 178
+                    > USED AT LINE 212
+                    > USED AT LINE 250
+P5B:                015C DEFINED AT LINE 257
+                    > USED AT LINE 245
+P3A:                015E DEFINED AT LINE 258
+                    > USED AT LINE 240
+PUNCT:              0160 DEFINED AT LINE 297
+                    > USED AT LINE 235
+PU1:                016E DEFINED AT LINE 313
+                    > USED AT LINE 311
+H_XOR:              0170 DEFINED AT LINE 367
+                    > USED AT LINE 286
+H_OR:               0178 DEFINED AT LINE 376
+                    > USED AT LINE 290
+H_NOT:              0180 DEFINED AT LINE 385
+                    > USED AT LINE 292
+H_ALLOC:            0183 DEFINED AT LINE 391
+                    > USED AT LINE 287
+EXEC:               018D DEFINED AT LINE 403
+                    > USED AT LINE 464
+DIGIT:              019C DEFINED AT LINE 417
+                    > USED AT LINE 238
+LOWER:              01A2 DEFINED AT LINE 423
+                    > USED AT LINE 247
+UPPER:              01A8 DEFINED AT LINE 431
+                    > USED AT LINE 243
+RPUSHN:             01B2 DEFINED AT LINE 443
+                    > USED AT LINE 207
+                    > USED AT LINE 555
+                    > USED AT LINE 567
+H_GRAVE:            01BA DEFINED AT LINE 463
+                    > USED AT LINE 288
+HX1:                01BF DEFINED AT LINE 465
+                    > USED AT LINE 471
+HX2:                01CD DEFINED AT LINE 472
+                    > USED AT LINE 467
+H_RET:              01D0 DEFINED AT LINE 482
+                    > USED AT LINE 495
+                    > USED AT LINE 1053
+                    > USED AT LINE 285
+BRK1:               01D3 DEFINED AT LINE 485
+                    > USED AT LINE 492
+H_BREAK:            01D4 DEFINED AT LINE 489
+                    > USED AT LINE 1054
+                    > USED AT LINE 284
+RDROP:              01DF DEFINED AT LINE 496
+                    > USED AT LINE 562
+H_DEF:              01E1 DEFINED AT LINE 504
+                    > USED AT LINE 1055
+                    > USED AT LINE 283
+DEF2:               01F7 DEFINED AT LINE 519
+                    > USED AT LINE 510
+SKIPNX:             01FA DEFINED AT LINE 528
+                    > USED AT LINE 518
+SKIPO:              01FA DEFINED AT LINE 532
+                    > USED AT LINE 553
+H_FETCH:            01FE DEFINED AT LINE 535
+                    > USED AT LINE 1056
+                    > USED AT LINE 282
+H_OPEN:             0203 DEFINED AT LINE 550
+                    > USED AT LINE 268
+H_CLOSE:            020B DEFINED AT LINE 559
+                    > USED AT LINE 269
+H_SUB:              0216 DEFINED AT LINE 572
+                    > USED AT LINE 273
+H_ADD:              021E DEFINED AT LINE 577
+                    > USED AT LINE 271
+NEGNUM:             0221 DEFINED AT LINE 580
+                    > USED AT LINE 575
+H_AND:              0227 DEFINED AT LINE 585
+                    > USED AT LINE 266
+H_LT:               022F DEFINED AT LINE 599
+                    > USED AT LINE 278
+H_GT:               0230 DEFINED AT LINE 600
+                    > USED AT LINE 280
+TF:                 023B DEFINED AT LINE 608
+                    > USED AT LINE 617
+H_EQ:               023E DEFINED AT LINE 611
+                    > USED AT LINE 279
+H_MUL:              0248 DEFINED AT LINE 621
+                    > USED AT LINE 270
+MUL1:               0251 DEFINED AT LINE 627
+                    > USED AT LINE 632
+MUL2:               0258 DEFINED AT LINE 632
+                    > USED AT LINE 630
+H_DIV:              025C DEFINED AT LINE 640
+                    > USED AT LINE 275
+H_DUP:              027D DEFINED AT LINE 670
+                    > USED AT LINE 276
+H_SWAP:             027F DEFINED AT LINE 673
+                    > USED AT LINE 265
+H_CSTORE:           0281 DEFINED AT LINE 678
+                    > USED AT LINE 274
+H_DROP:             0283 DEFINED AT LINE 684
+                    > USED AT LINE 277
+H_STORE:            0284 DEFINED AT LINE 686
+                    > USED AT LINE 261
+H_STR:              0289 DEFINED AT LINE 700
+                    > USED AT LINE 262
+H_PRINT:            0290 DEFINED AT LINE 714
+                    > USED AT LINE 724
+                    > USED AT LINE 264
+PR1:                029E DEFINED AT LINE 723
+                    > USED AT LINE 719
+H_EMIT:             02A1 DEFINED AT LINE 736
+                    > USED AT LINE 267
+PR9:                02A3 DEFINED AT LINE 738
+                    > USED AT LINE 717
+H_NUM:              02A4 DEFINED AT LINE 741
+                    > USED AT LINE 263
+H_KEY:              02AA DEFINED AT LINE 751
+                    > USED AT LINE 281
+KT1:                02AE DEFINED AT LINE 753
+                    > USED AT LINE 760
+                    > USED AT LINE 764
+KT2:                02B0 DEFINED AT LINE 754
+                    > USED AT LINE 757
+H_CFETCH:           02C2 DEFINED AT LINE 766
+                    > USED AT LINE 272
+KT3:                02C3 DEFINED AT LINE 767
+                    > USED AT LINE 755
+LINE:               02C7 DEFINED AT LINE 774
+                    > USED AT LINE 752
+RDLINE:             02D5 DEFINED AT LINE 785
+                    > USED AT LINE 781
+                    > USED AT LINE 1524
+UDIV:               02EA DEFINED AT LINE 867
+                    > USED AT LINE 657
+                    > USED AT LINE 1018
+UDV0:               02F7 DEFINED AT LINE 876
+                    > USED AT LINE 870
+UDV1:               02FE DEFINED AT LINE 880
+                    > USED AT LINE 888
+UDV2:               0309 DEFINED AT LINE 887
+                    > USED AT LINE 884
+RDNUM:              0310 DEFINED AT LINE 896
+                    > USED AT LINE 419
+                    > USED AT LINE 581
+                    > USED AT LINE 1469
+                    > USED AT LINE 1535
+RDN1:               0313 DEFINED AT LINE 897
+                    > USED AT LINE 911
+SS0:                0326 DEFINED AT LINE 916
+                    > USED AT LINE 920
+SKIPSTR:            0327 DEFINED AT LINE 917
+                    > USED AT LINE 703
+                    > USED AT LINE 922
+                    > USED AT LINE 978
+SKIP:               0332 DEFINED AT LINE 955
+                    > USED AT LINE 493
+                    > USED AT LINE 532
+SK3:                0334 DEFINED AT LINE 965
+                    > USED AT LINE 980
+                    > USED AT LINE 984
+SK1:                0335 DEFINED AT LINE 966
+                    > USED AT LINE 986
+                    > USED AT LINE 990
+SK4:                034F DEFINED AT LINE 987
+                    > USED AT LINE 982
+PSGN:               0353 DEFINED AT LINE 1010
+                    > USED AT LINE 742
+PDEC:               035B DEFINED AT LINE 1017
+                    > USED AT LINE 1011
+                    > USED AT LINE 1023
+                    > USED AT LINE 1487
+HEXC:               036D DEFINED AT LINE 1032
+                    > USED AT LINE 463
+                    > USED AT LINE 466
+                    > USED AT LINE 470
+HC1:                037D DEFINED AT LINE 1041
+                    > USED AT LINE 1035
+PGRET:              0000 DEFINED AT LINE 1053
+                    > USED AT LINE 1057
+PGBRK:              0000 DEFINED AT LINE 1054
+                    > USED AT LINE 1057
+PGDEF:              0000 DEFINED AT LINE 1055
+                    > USED AT LINE 1057
+PGFET:              0000 DEFINED AT LINE 1056
+                    > USED AT LINE 1057
+NPG1:               0015 DEFINED AT LINE 1057
+                    > USED AT LINE 300
+PTAB:               037F DEFINED AT LINE 1059
+                    > USED AT LINE 297
+                    > USED AT LINE 299
+                    > USED AT LINE 300
+PTABEND:            039F DEFINED AT LINE 1061
+GETK:               039F DEFINED AT LINE 1086
+                    > USED AT LINE 754
+                    > USED AT LINE 1476
+                    > USED AT LINE 1480
+PUTC:               03A1 DEFINED AT LINE 1092
+                    > USED AT LINE 203
+BDOSX:              03AD DEFINED AT LINE 1102
+                    > USED AT LINE 791
+                    > USED AT LINE 1096
+LIST:               03BA DEFINED AT LINE 1468
+                    > USED AT LINE 1534
+LI1:                03C3 DEFINED AT LINE 1473
+                    > USED AT LINE 1494
+LI2:                03D0 DEFINED AT LINE 1480
+                    > USED AT LINE 1481
+LI3:                03D9 DEFINED AT LINE 1484
+                    > USED AT LINE 1477
+DEL:                03EA DEFINED AT LINE 1497
+                    > USED AT LINE 1544
+DE1:                03F2 DEFINED AT LINE 1501
+                    > USED AT LINE 1506
+EDIT:               03F9 DEFINED AT LINE 1508
+                    > USED AT LINE 103
+                    > USED AT LINE 1475
+                    > USED AT LINE 1479
+                    > USED AT LINE 1483
+                    > USED AT LINE 1597
+                    > USED AT LINE 1701
+ST0:                0426 DEFINED AT LINE 1548
+                    > USED AT LINE 1538
+ST1:                042B DEFINED AT LINE 1551
+                    > USED AT LINE 1553
+INS:                0438 DEFINED AT LINE 1568
+                    > USED AT LINE 1541
+FIND:               045E DEFINED AT LINE 1601
+                    > USED AT LINE 1471
+                    > USED AT LINE 1497
+                    > USED AT LINE 1568
+FI1:                0462 DEFINED AT LINE 1603
+                    > USED AT LINE 1608
+NXL:                046C DEFINED AT LINE 1613
+                    > USED AT LINE 1500
+                    > USED AT LINE 1607
+                    > USED AT LINE 1618
+PRL:                0476 DEFINED AT LINE 1623
+                    > USED AT LINE 1493
+                    > USED AT LINE 1528
+                    > USED AT LINE 1628
+START:              047F DEFINED AT LINE 1637
+                    > USED AT LINE 162
+LD1:                0495 DEFINED AT LINE 1659
+                    > USED AT LINE 1671
+LD2:                04AE DEFINED AT LINE 1672
+                    > USED AT LINE 1667
+TR1:                04B5 DEFINED AT LINE 1688
+                    > USED AT LINE 1692
+TR2:                04C7 DEFINED AT LINE 1700
+                    > USED AT LINE 1695
+RSPAGE:             0005 DEFINED AT LINE 1706
+                    > USED AT LINE 119
+                    > USED AT LINE 1707
+                    > USED AT LINE 1708
+DSPAGE:             0006 DEFINED AT LINE 1707
+                    > USED AT LINE 121
+LETPAGE:            0007 DEFINED AT LINE 1708
+                    > USED AT LINE 111
+                    > USED AT LINE 426
+                    > USED AT LINE 435
+                    > USED AT LINE 512
+                    > USED AT LINE 1709
+PROG:               0800 DEFINED AT LINE 1709
+                    > USED AT LINE 1545
+                    > USED AT LINE 1549
+                    > USED AT LINE 1602
+                    > USED AT LINE 1658
+                    > USED AT LINE 1686
+IMGEND:             04CC DEFINED AT LINE 1711
+                    > USED AT LINE 1706

@@ -92,7 +92,7 @@ def model(steps, sy, cpm, file=b''):
             else:                               # run the program (0) or the line
                 stored = b''.join(prog)
                 code = stored if digits else typed + b'\r\n'
-                r = Ref(code, bytes(queue), prog_at=PROG if digits else LINEBUF, let=LET, linebuf=LINEBUF, cpm=cpm)
+                r = Ref(code, bytes(queue), prog_at=PROG if digits else LINEBUF, let=LET, linebuf=LINEBUF, cpm=cpm, filepad=False)
                 r.m[PROG:PROG + len(stored) + 1] = stored + b'\0'
                 r.m[LET:LET + 0x7C] = cells     # words and variables last from line to line
                 r.w(r.heapcell, PROG + len(stored) + 1)
@@ -149,24 +149,29 @@ CPM_SESSIONS = {
     'a file whose last line has no CR LF': (b'1#\r\n2#', [b'-1', b'0']),
 }
 
-# Checked builds only: the program is stopped, the letter and the place are
-# printed, and the editor carries on. Each session is (steps, timed keys by
-# count of characters printed, the patterns that must follow each other in
-# the output).
+# Checked builds only: the program is stopped, the report is printed, and the
+# editor carries on. Each session is (steps, timed keys by count of characters
+# printed, the patterns that must follow each other in the output).
 def checked_sessions(sy):
-    low = sy['LINEBUF'] - sy['PROG'] + 65536    # the place of a typed line's first character
     no = b" 88'88'"                             # prints XX: it must never be reached
+    def rpt(code, line, col, stk=rb'[^\r]*', rtn=rb'\d+'):
+        return rb'\r\nErr %s @ %s,%s\r\n[^\r\n]{0,16}\r\nStk %s\r\nRtn %s\r\n' % (code, line, col, stk, rtn)
     return {
-        'data stack': ([b'1 1 2+ ;;;' + no, b'0', b' 7#'], [], [rb'S @ \d+ 7#\r+\n7$']),
-        'return stack': ([b'1 [R R] R' + no, b'0', b' 7#'], [], [rb'R @ \d+ 7#\r+\n7$']),
-        'bad [': ([b'1 [5 1]' + no, b'0', b' 7#'], [], [rb'0\r+\nD @ 1 7#\r+\n7$']),
-        'store': ([b'1 1 0!' + no, b'0', b' 7#'], [], [rb'0\r+\nW @ 3 7#\r+\n7$']),
-        'heap': ([b'1 -1_' + no, b'0', b' 7#'], [], [rb'0\r+\nH @ 2 7#\r+\n7$']),
-        'a typed line': ([b' 1 0!' + no, b' 7#'], [], [rb'\nW @ %d 7#\r+\n7$' % (low + 4)]),
+        'data stack': ([b'1 1 2+ ;;' + no, b'0', b' 7#'], [], [rpt(b's', b'1', rb'\d+', b'0:', b'0') + rb' 7#\r+\n7$']),
+        'return stack': ([b'1 [R R] R' + no, b'0', b' 7#'], [], [rpt(b'R', b'1', rb'\d+', b'0:') + rb' 7#\r+\n7$']),
+        'bad [': ([b'1 [5 1]' + no, b'0', b' 7#'], [], [rb'0\r+\n' + rpt(b'W', b'1', b'2', b'0:', b'0') + rb' 7#\r+\n7$']),
+        'store': ([b'1 1 0!' + no, b'0', b' 7#'], [], [rb'0\r+\n' + rpt(b'O', b'1', b'4', b'2: 1 0', b'0') + rb' 7#\r+\n7$']),
+        'heap': ([b'1 -1_' + no, b'0', b' 7#'], [], [rb'0\r+\n' + rpt(b'H', b'1', b'3', b'1: -1', b'0') + rb' 7#\r+\n7$']),
+        'an error in the second line': ([b'1 1 2', b'2 3 0/' + no, b'0', b' 7#'], [],
+                                        [rb'0\r+\n' + rpt(b'Z', b'2', b'4', b'4: 1 2 3 0', b'0') + rb' 7#\r+\n7$']),
+        'an undefined word': ([b'1 5 Q' + no, b'0', b' [Q 9#] Q'], [],
+                              [rb'0\r+\n' + rpt(b'U', b'1', b'3', b'1: 5', b'0') + rb' \[Q 9#\] Q\r+\n9$']),
+        'a typed line is line 0': ([b' 1 0!' + no, b' 7#'], [], [rb'\n' + rpt(b'O', b'0', b'5', b'2: 1 0', b'0') + rb' 7#\r+\n7$']),
+        'variables start at 0': ([b' q@# j@#'], [], [rb'\n00$']),
         'Ctrl-C stops a program': ([b'1 1("."$ 1)' + no, b'0', b' 7#', b'-1'], [(40, 3)],
-                                   [rb'\.{10,}B @ \d+ 7#\r+\n7-1\r+\n1 1\("\."\$ 1\) 88\'88\'\r\n$']),
+                                   [rb'\.{10,}' + rpt(b'B', b'1', rb'\d+') + rb' 7#\r+\n7-1\r+\n1 1\("\."\$ 1\) 88\'88\'\r\n$']),
         'the stacks are empty again after an error': (
-            [b' 1 2 3 4 [R R] R', b' 5 6+#', b' 8#'], [], [rb'R @ \d+ 5 6\+#\r+\n11 8#\r+\n8$']),
+            [b' 1 2 3 4 [R R] R', b' 5 6+#', b' 8#'], [], [rpt(b'R', b'0', rb'\d+', b'4: 1 2 3 4') + rb' 5 6\+#\r+\n11 8#\r+\n8$']),
     }
 
 

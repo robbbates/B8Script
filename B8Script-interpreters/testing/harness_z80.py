@@ -10,8 +10,17 @@ at PROG starts as junk, as after power-on) and everything goes in through KEY.
 cpm-editor: a .COM built with EDITOR = 1; the program is the file it loads.
 In both editor modes the input is a list of chunks: the next chunk is typed
 only when the machine has been left waiting for a key, as a person would, and
-the run ends when it waits with no chunks left. `timed` is a list of (n, key):
-the key is pressed once n characters have been printed.
+the run ends when it waits with no chunks left.
+
+Keys are typed as a person types them: only when the program is waiting for
+one. Every build looks at the keyboard now and then for the break key, and a
+key it finds then is held, the newest winning (the spec); a queue of keys
+handed over as fast as they are read would mostly be lost. So a key from the
+input is given only when the machine asks twice within GAP clock ticks, which
+is a program sitting in a key loop ('?', a line read, the editor), not the
+break check, whose looks are far apart. Keys to be pressed while the program
+is busy are given at once: `brk_at` presses Ctrl-C, and `timed` is a list of
+(n, keys): the keys are pressed once n characters have been printed.
 BDOS 10 is modelled as CP/M does it: Ctrl-C as the first key of a line is a
 warm boot.
 """
@@ -21,6 +30,7 @@ import z80
 TRAP = 0xFFF0          # BDOS lives here in the cpm runs
 WBOOT = 0xFFE0
 IDLE = 20000         # empty KEY polls in a row before a run counts as waiting for input
+GAP = 3000           # clock ticks: two looks at the keyboard closer than this are a key loop
 
 
 def load_hex(path):
@@ -50,6 +60,15 @@ def symbols(lst):
     return sy
 
 
+def plat(lst, cpm=False):
+    """A build's own addresses, for ref.py: where the program text, the
+    letter cells and the line buffer are, and the heap limit. (In the CP/M
+    runs the limit is the page of the BDOS entry, which is TRAP here.)"""
+    sy = symbols(lst)
+    return dict(prog_at=sy['PROG'], let=sy['LET'], linebuf=sy['LINEBUF'],
+                heaplim=(TRAP & 0xFF00) if cpm else sy['HEAPLIM'] << 8)
+
+
 class Run:
     def __init__(self, hexf, lst, prog, inp=b'', cpu='z80', mode='generic',
                  maxticks=4_000_000_000, brk_at=None, timed=()):
@@ -63,6 +82,9 @@ class Run:
             self.stages, inp = [bytes(c) for c in inp], b''
             self.mode = mode = 'editor' if mode == 'editor' else 'cpm'
         self.timed = list(timed)
+        self.now = 0           # clock ticks so far
+        self.last_look = -GAP  # when the keyboard was last looked at
+        self.pressed = []      # keys pressed while the program is busy: given at once
         self.inp = list(inp)
         self.out = bytearray()
         self.mode = mode
@@ -105,12 +127,26 @@ class Run:
         self.m.pc = self.mem(sp) | (self.mem(sp + 1) << 8)
         self.m.sp = (sp + 2) & 0xFFFF
 
-    def key_ready(self):
+    def key(self):
+        """The key that a look at the keyboard finds now, or 0."""
         if self.brk_at is not None and len(self.out) >= self.brk_at:
-            self.inp.insert(0, 3)
+            self.pressed.append(3)
             self.brk_at = None
-        if self.timed and len(self.out) >= self.timed[0][0]:
-            self.inp.append(self.timed.pop(0)[1])
+        while self.timed and len(self.out) >= self.timed[0][0]:
+            k = self.timed.pop(0)[1]
+            self.pressed += list(k) if isinstance(k, (bytes, list, tuple)) else [k]
+        waiting = self.now - self.last_look < GAP
+        self.last_look = self.now
+        if self.pressed:
+            return self.pressed.pop(0)
+        if self.inp and waiting:
+            return self.inp.pop(0)
+        return 0
+
+    def key_ready(self):
+        """For the line reader of BDOS 10, which waits for its keys."""
+        if self.pressed:
+            self.inp.insert(0, self.pressed.pop(0))
         return bool(self.inp)
 
     def run(self):
@@ -121,6 +157,7 @@ class Run:
             m.ticks_to_stop = 20_000_000
             m.run()
             total += 20_000_000 - m.ticks_to_stop
+            self.now = total
             if total > self.maxticks:
                 self.ended = 'timeout'
                 break
@@ -130,11 +167,14 @@ class Run:
                 if pc == sy['CONOUT']:
                     self.out.append(m.a); idle = 0; self.ret()
                 elif pc == sy['KEY']:
-                    if self.key_ready():
-                        m.a = self.inp.pop(0); idle = 0
+                    m.a = self.key()
+                    if m.a:
+                        idle = 0
+                    elif self.inp:
+                        pass                    # the key comes at the next look
                     else:
                         # a program polling for a key that will never come
-                        m.a = 0; idle += 1
+                        idle += 1
                         if idle > IDLE and self.stages:
                             self.inp = list(self.stages.pop(0)); idle = 0
                         elif idle > IDLE:
@@ -160,11 +200,14 @@ class Run:
         f = m.c
         if f == 6:
             if m.e == 0xFF:
-                if self.key_ready():
-                    m.a = self.inp.pop(0); self.idle = 0
+                m.a = self.key()
+                if m.a:
+                    self.idle = 0
+                elif self.inp:
+                    pass                        # the key comes at the next look
                 else:
                     # a program polling for a key that will never come
-                    m.a = 0; self.idle += 1
+                    self.idle += 1
                     if self.idle > IDLE and self.stages:
                         self.inp = list(self.stages.pop(0)); self.idle = 0
                     elif self.idle > IDLE:

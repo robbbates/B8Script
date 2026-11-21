@@ -1,21 +1,17 @@
 ; =============================================================================
 ;  B8Script interpreter for the Z80
-;  Spec: docs/b8script.md (2026-10-09) plus the 2026-11-20 changes:
-;        [x stores in a variable, "[ " pushes an anonymous block, any other
-;        character after [ is an error, the heap pointer lives at z10+.
-;        The string escape is '/' (it was '>').
-;        Dividing by zero is not checked. -n? does no more editing than
-;        Backspace.
+;  Spec: docs/b8script.md (2026-11-21).
 ;
 ;  Three switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
 ;    EDITOR   1 = with a small line editor built in (see the end of this
 ;                 file). It goes with either setting of the other two.
-;    CHECKED  0 = no checks (spec: "B8Script checks nothing")
-;             1 = stops on stack overrun, Ctrl-C, heap past the limit, a store
-;                 outside the program's own space, and a bad character after [,
-;                 printing a letter and the place, like  S @ 245
+;    CHECKED  0 = no checks (spec: the programmer is responsible)
+;             1 = starts with every variable at 0 and every word undefined,
+;                 and stops on every error in the spec's table (and Ctrl-C)
+;                 with a four-line report: the letter and the place as line
+;                 and column, the text there, and both stacks. See `error`.
 ;
 ;  Assembler: asm80 (https://maly.github.io/asm80-node/), Z80 mode.
 ; =============================================================================
@@ -63,19 +59,20 @@ TABP0   EQU     EDGEN*(1-CHECKED) ; (the build with its table in page zero)
 ;  Memory map. Everything the interpreter writes is in four RAM pages:
 ;
 ;    RSPAGE   return stack, 112 entries (the pointer stays inside this page)
-;    DSPAGE   data stack, 127 cells (SP stays inside this page)
+;    DSPAGE   data stack, 127 cells (the top four bytes of the page are spare,
+;             so a full stack runs two bytes into the page below)
 ;    LETPAGE  letter cells: A..Z at +00h..+33h, a..z at +40h..+73h (so a word
 ;             cell is always 64 bytes below its variable), the heap pointer at
-;             +7Ch (= z10+), interpreter variables in the gaps, and the -n?
-;             line buffer at +80h..+FFh
+;             +7Ch, interpreter variables in the gaps, and the -n? line buffer
+;             at +80h..+FFh
 ;    PROG     the program text, NUL-terminated; the heap starts after the NUL
 ;
 ;  The stacks sit below the letter page, so "the program's own space" (what
 ;  the checked build lets ! and . write) is the single range from the letter
-;  page up to the heap limit. Each stack's page has a guard band: the data
-;  stack can overrun by a cell or two (and the calls made while it is full)
-;  into the top 32 bytes of the return-stack page, which are never used, and
-;  the return stack by one entry into the page below it.
+;  page up to the heap limit. Each stack has a guard band: the data stack can
+;  overrun by a cell or two (and the calls made while it is full, the error
+;  report's included) into the top 32 bytes of the return-stack page, which
+;  are never used, and the return stack by one entry into the page below it.
 ; -----------------------------------------------------------------------------
 
         IF      CPM
@@ -112,15 +109,20 @@ MSLOOP  EQU     40              ; n? inner loop count for about 1 ms (1-255):
 
 ; letter-page layout (offsets inside LETPAGE)
 LET     EQU     LETPAGE*256
-HEAP    EQU     LET+7Ch         ; z10+, the heap pointer
+HEAP    EQU     LET+7Ch         ; the heap pointer
 RSAVE   EQU     LET+34h         ; gap after Z: return stack pointer, saved
 KEYBUF  EQU     LET+36h         ;   around machine code; a held-back key;
-SPTMP   EQU     LET+38h         ;   scratch for the SP check
+NPEND   EQU     LET+38h         ;   minus the address of the program's end
+                                ;   (the heap's first byte), for the checked '_'
 LBHDR   EQU     LET+7Eh         ; CP/M BDOS 10 header: max, count
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
 RSTOP   EQU     RSPAGE*256+0E0h ; empty return stack: the 32 bytes above it
                                 ; take calls made while the data stack is full
-DSTOP   EQU     DSPAGE*256+0FEh ; empty data stack
+DSTOP   EQU     DSPAGE*256+0FCh ; empty data stack. The four bytes above it
+                                ; are spare: a character can pop two cells
+                                ; too many before the checked build sees it,
+                                ; and the next call must not land on the
+                                ; letter cells.
 
 ; =============================================================================
 ;  The first 49 bytes: the entry, then the RST routines, with small handlers
@@ -129,12 +131,19 @@ DSTOP   EQU     DSPAGE*256+0FEh ; empty data stack
 ;  page zero (see the header).
 ; =============================================================================
         ORG     BASE
+        IF      (1-CPM)*(1-EDITOR)*CHECKED
+        XOR     A               ; 00  reset. (This byte, AFh, is also what an
+        ENDIF                   ;     undefined word runs into: see e_hi.)
         IF      1-EDGEN
         LD      SP,DSTOP        ; 00  reset, or the start of the .COM file
         ENDIF
-        IF      (1-CPM)*(1-EDITOR)
+        IF      (1-CPM)*(1-EDITOR)*(1-CHECKED)
         LD      BC,PROG         ; 03  the IP
         JR      st0             ; 06  (the rest of the startup is close by)
+        ENDIF
+        IF      (1-CPM)*(1-EDITOR)*CHECKED
+        JR      init            ; 04  (the rest of the startup is close by)
+        DW      0               ; 06  spare
         ENDIF
         IF      EDGEN
         XOR     A               ; 00  reset: no program yet
@@ -237,7 +246,13 @@ next0:
         CP      3Ah
         JR      C,lower         ; 61h-7Ah: A = 20h-39h (cell +64 bytes)
         CP      3Eh
+        IF      1-CHECKED
         JR      NC,next0        ; 7Fh-FFh: ignored
+        ENDIF
+        IF      CHECKED
+        JR      Z,next0         ; 7Fh, DEL: ignored
+        JP      NC,e_hi         ; 80h-FFh: reserved
+        ENDIF
         SUB     1Ah             ; 7Bh-7Eh: -1Eh in all, index 28-31
 p5b:    SUB     9               ; 5Bh-60h: -4 in all, index 22-27
 p3a:    ADD     A,5             ; 3Ah-40h: index 15-21
@@ -303,6 +318,16 @@ pu1:
 ; The rest of the startup: here so that the generic reset code can reach it
 ; with JR. st0: find the program's NUL; the heap starts after it.
 ; (The editor build has its own copy of this, next to the editor.)
+; A checked build first clears the lower half of the letter page (A = 0):
+; every variable starts at 0, every word cell holds 0000h, the address an
+; undefined word is caught at (see e_hi), and no key is held back.
+        IF      (1-CPM)*(1-EDITOR)*CHECKED
+init:   LD      HL,LET
+ini1:   LD      (HL),A
+        INC     L
+        JP      P,ini1          ; +00h to +7Fh
+        LD      BC,PROG         ; the IP
+        ENDIF
         IF      (1-CPM)*(1-EDITOR)
 st0:    LD      H,B
         LD      L,C
@@ -313,15 +338,15 @@ st1:    CP      (HL)
         ENDIF
         IF      1-EDITOR
 st2:    LD      (HEAP),HL
+        ENDIF
+        IF      CHECKED*(1-EDITOR)
+        RST     20h             ; minus the heap's first address: '_' may not
+        LD      (NPEND),HL      ;   release below it
+        ENDIF
+        IF      1-EDITOR
         EXX
         LD      HL,RSTOP        ; the return stack is empty
         EXX
-        ENDIF
-        IF      CHECKED*(1-EDITOR)
-        XOR     A
-        LD      (KEYBUF),A      ; no key held back
-        ENDIF
-        IF      1-EDITOR
         RST     30h             ; (its return address is thrown away)
         ENDIF
 
@@ -361,8 +386,12 @@ h_not:  RST     20h             ; ~x = -x - 1
         DEC     HL
         RST     30h
 
-; '_' ( n -- addr ): the heap pointer moves up by n; TOS is the old pointer.
+; '_' ( n -- addr ): the heap pointer moves by n, a signed count (the add is
+; the same either way); TOS is the old pointer.
 h_alloc:LD      DE,(HEAP)
+        IF      CHECKED*CPM
+        LD      A,H             ; the count's sign, for chkhp
+        ENDIF
         ADD     HL,DE           ; the new top
         IF      CHECKED
         CALL    chkhp
@@ -433,22 +462,14 @@ rpushn:
 ; must keep BC, and on return the top cell becomes the new TOS.
 h_grave:CALL    hexc
         JR      NC,exec
-hx1:
-        IF      CHECKED
-        CALL    chkst
-        ENDIF
-        LD      (HL),A          ; the high digit goes in first ...
+hx1:    LD      (HL),A          ; the high digit goes in first ...
         CALL    hexc
         JR      NC,hx2          ; odd digit: consumed, and the RET below
         RLD                     ;   overwrites it
         INC     HL              ; ... and RLD shifts it up under the low one
         CALL    hexc
         JR      C,hx1
-hx2:
-        IF      CHECKED
-        CALL    chkst
-        ENDIF
-        LD      (HL),0C9h
+hx2:    LD      (HL),0C9h       ; (never range-checked: the spec says so)
         RST     30h
 
 ; ---- where the two pages meet ----------------------------------------------
@@ -504,7 +525,11 @@ def2:
         PUSH    HL              ; an anonymous block: push its address
         LD      H,B
         LD      L,C
-skipnx: CALL    skip
+skipnx:
+        IF      CHECKED
+        DEC     BC              ; back onto the letter, so that skip finds its
+        ENDIF                   ;   opener, the '[', just before where it starts
+skipo:  CALL    skip
         RST     30h
 
 h_fetch:LD      E,(HL)          ; '@'
@@ -525,7 +550,7 @@ h_fetch:LD      E,(HL)          ; '@'
 h_open: LD      A,H
         OR      L
         POP     HL
-        JR      Z,skipnx
+        JR      Z,skipo
         PUSH    BC              ; the block starts at the IP
         JR      rpushn
 
@@ -610,8 +635,15 @@ mul2:   DJNZ    mul1
 
 ; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
-; of a. Dividing by zero is not checked: it returns two cells of no meaning.
-h_div:  POP     DE              ; DE = a, HL = b
+; of a. Dividing by zero returns two cells of no meaning; the checked build
+; stops on it.
+h_div:
+        IF      CHECKED
+        LD      A,H
+        OR      L
+        JP      Z,e_zero
+        ENDIF
+        POP     DE              ; DE = a, HL = b
         PUSH    BC              ; free BC for udiv
         PUSH    DE              ; a, for r's sign
         LD      A,D
@@ -641,19 +673,21 @@ h_dup:  PUSH    HL              ; ':'
 h_swap: EX      (SP),HL         ; '%'
         RST     30h
 
-h_cstore:POP    DE              ; '.' ( c addr -- )
+; (The checked build tests the address before it takes the value off the
+; stack, so that an error report shows both.)
+h_cstore:                       ; '.' ( c addr -- )
         IF      CHECKED
         CALL    chkst
         ENDIF
+        POP     DE
         LD      (HL),E
 h_drop: RST     18h             ; ';' is this one byte
 
-h_store:POP     DE              ; '!' ( n addr -- )
+h_store:                        ; '!' ( n addr -- )
         IF      CHECKED
-        INC     HL              ; both bytes must be in the program's space
         CALL    chkst
-        DEC     HL
         ENDIF
+        POP     DE
         LD      (HL),E
         INC     HL
         LD      (HL),D
@@ -667,11 +701,16 @@ h_str:  PUSH    HL
         LD      H,B
         LD      L,C
         CALL    skipstr
+        IF      CHECKED
+        OR      A               ; 0: the text ran out before the closing quote
+        JP      Z,e_quote
+        ENDIF
         RST     30h
 
 ; '$' prints the string at TOS, decoding escapes: '/' plus a character
 ; clears that character's bit 6 (/M is CR, /` is space; '/' and '"' have no
 ; bit 6, so // and /" give themselves).
+        IF      1-CHECKED
 h_print:LD      A,(HL)
         INC     HL
         CP      22h
@@ -683,19 +722,24 @@ h_print:LD      A,(HL)
         AND     0BFh
 pr1:    RST     28h
         JR      h_print
+        ENDIF
+        IF      CHECKED
+; (The checked build has the loop as a routine, prstr, which the error
+; report uses too. The address is kept on the stack meanwhile: a report
+; shows the stack as it was before the '$'.)
+h_print:PUSH    HL
+        CALL    prstr
+        POP     DE
+        RST     18h
+        ENDIF
 
 h_emit: LD      A,L             ; "'"
         RST     28h
 pr9:    RST     18h
 
 ; '#' prints TOS as a signed decimal number, with no space after it.
-h_num:  BIT     7,H
-        JR      Z,num1
-        LD      A,'-'
-        RST     28h
-        RST     20h
-num1:   PUSH    BC
-        CALL    pdec
+h_num:  PUSH    BC
+        CALL    psgn
         POP     BC
         RST     18h
 
@@ -868,6 +912,7 @@ rdn1:   LD      A,(BC)
 
 ; skipstr: IP is inside a string; step past its closing quote. '/' escapes
 ; the next character, so '/"' does not end it. Leaves A = 22h.
+        IF      1-CHECKED
 ss0:    INC     BC
 skipstr:LD      A,(BC)
         INC     BC
@@ -876,6 +921,24 @@ skipstr:LD      A,(BC)
         CP      22h
         JR      NZ,skipstr
         RET
+        ENDIF
+        IF      CHECKED
+; The checked build never steps over a NUL: if the text runs out first it
+; returns A = 0 with the IP on the NUL.
+skipstr:LD      A,(BC)
+        OR      A
+        RET     Z
+        INC     BC
+        CP      22h
+        RET     Z
+        CP      '/'
+        JR      NZ,skipstr
+        LD      A,(BC)          ; the escaped character
+        OR      A
+        RET     Z
+        INC     BC
+        JR      skipstr
+        ENDIF
 
 ; skip: read past text to the closer at this level, and return A = 0 if it
 ; was ')' and 2 if it was ']'. Brackets of both kinds count together;
@@ -883,15 +946,37 @@ skipstr:LD      A,(BC)
 ; no closer; anything else that runs into the NUL had unbalanced brackets
 ; anyway). D counts the open levels, starting at 1 for the one we are in:
 ; skip sets it to 0 and falls through the INC that an opener comes back to.
-skip:   LD      D,0
+;
+; The checked build also looks at the character the skip was started by,
+; which is always the one just before where it starts: '(' must end at ')',
+; '[' at ']', and neither may run into the NUL (N); a string with no closing
+; quote counts as running into it. '\' takes either closer. IX keeps the
+; place where the skip started, for the report.
+skip:
+        IF      CHECKED
+        PUSH    BC
+        POP     IX
+        DEC     BC
+        LD      A,(BC)
+        INC     BC
+        LD      E,A             ; E = the opener: ( [ or \
+        ENDIF
+        LD      D,0
 sk3:    INC     D               ; an opener: one deeper
 sk1:    LD      A,(BC)
+        IF      1-CHECKED
         INC     BC
         OR      A
         JP      Z,endprog
+        ENDIF
+        IF      CHECKED
+        OR      A
+        JR      Z,sk6           ; (the IP stays on the NUL)
+        INC     BC
+        ENDIF
         CP      22h
         CALL    Z,skipstr       ; leaves A = 22h, which matches nothing below
-        SUB     '('
+        SUB     '('             ;   (or 0, and then the NUL is read next)
         JR      Z,sk3
         DEC     A               ; ')'
         JR      Z,sk4
@@ -900,9 +985,33 @@ sk1:    LD      A,(BC)
         CP      ']'-'['
         JR      NZ,sk1
 sk4:    DEC     D
+        IF      1-CHECKED
         RET     Z               ; the closer at this level
         JR      sk1
+        ENDIF
+        IF      CHECKED
+        JR      NZ,sk1
+        LD      D,A             ; the closer at this level: 0 or 2. Bit 1 of the
+        XOR     E               ;   opener is 0 for '(' and 1 for '[', and only
+        AND     6               ;   '\' has bit 2: so this is 2 for the wrong
+        CP      2               ;   closer, and only then
+        LD      A,D
+        RET     NZ
+        JR      sk7
+sk6:    BIT     2,E             ; the text ran out:
+        JP      NZ,endprog      ;   '\' with no closer ends the program
+sk7:    PUSH    IX              ; N. The place is the opener
+        POP     BC
+        LD      A,'N'
+        JP      errp            ; (errp drops skip's return address)
+        ENDIF
 
+; psgn: print HL as a signed number. Uses BC.
+psgn:   BIT     7,H
+        JR      Z,pdec
+        LD      A,'-'
+        RST     28h
+        RST     20h
 ; pdec: print HL unsigned, by recursion on HL / 10 (the stack holds digits).
 ; Uses BC.
 pdec:   LD      DE,10
@@ -1007,24 +1116,134 @@ bdosx:  PUSH    BC
 ;  Checked build: the checks and the error report
 ; =============================================================================
         IF      CHECKED
-; chkstk: both stacks are checked once per character, not in every handler.
-; Each stack lives in one page, so it has overrun exactly when the pointer's
-; high byte has left that page. Errors are caught one cell late at most; the
-; page below each stack is a guard band. (The call itself is on the data
-; stack, but in the same page whenever the stack is in range.)
-chkstk: LD      (SPTMP),SP
-        LD      A,(SPTMP+1)
-        CP      DSPAGE
-        JR      NZ,e_stack
-        EXX                     ; the return stack: in its page, and not
-        LD      A,L             ;   above its empty position (an underflow
-        CP      RSTOP&0FFh+1    ;   would stay inside the page, in the
-        LD      A,H             ;   guard band)
-        EXX
-        JR      NC,e_rstack
-        CP      RSPAGE
+; chkst: stop unless HL is in the program's own space: from the letter page
+; up to the heap limit (the OS, or HEAPLIM), so the interpreter's stacks and
+; whatever lies above the limit are safe. Memory above the heap top but
+; below the limit is the program's own: Tiny BASIC keeps its lines there.
+; It is the page of HL + 1 that is tested, so that one test serves both
+; bytes of a cell: the last byte below the limit can't be stored to with '.'.
+; Keeps HL and BC.
+chkst:  INC     HL
+        LD      A,H
+        DEC     HL
+        CP      LETPAGE
+        JR      C,chs1
+        ENDIF
+        IF      CHECKED*(1-CPM)
+        CP      HEAPLIM
+        RET     C
+        ENDIF
+        IF      CHECKED*CPM
+        LD      E,A
+        LD      A,(0007h)       ; the BDOS page is the heap limit
+        DEC     A
+        CP      E
+        RET     NC
+        ENDIF
+        IF      CHECKED
+chs1:   JP      e_store
+
+; chkhp: HL = the new heap top, DE = the old one, the carry is from adding
+; the count. Stop if the top is not below the limit page, or is below the
+; program's end.
+chkhp:
+        ENDIF
+        IF      CHECKED*CPM
+        ; With this much room a top that wrapped round can land back in
+        ; range, so the add is tested too: growing (A, the count's high
+        ; byte, is positive) must not carry, and releasing must.
+        RRA                     ; the carry comes in above the sign:
+        ADD     A,40h           ;   bit 7 = carry XOR sign
+        ADD     A,A
+        JR      C,e_heap
+        LD      A,(0007h)
+        DEC     A
+        CP      H
+        JR      C,e_heap
+        ENDIF
+        IF      CHECKED*(1-CPM)
+        ; (Here the program's space is under 32K, so a top that wrapped
+        ; round always falls outside it.)
+        LD      A,H
+        CP      HEAPLIM
+        JR      NC,e_heap
+        ENDIF
+        IF      CHECKED
+        PUSH    DE
+        EX      DE,HL
+        LD      HL,(NPEND)
+        ADD     HL,DE           ; carry: at or above the program's end
+        EX      DE,HL
+        POP     DE
+        RET     C
+e_heap: OR      A               ; put the count back in TOS for the report
+        SBC     HL,DE
+        JP      e_heap1
+
+; prstr: print the string at HL, to its closing quote, decoding '/' (this is
+; '$', and the error report's texts). A NUL first is an error: Q.
+prstr:  LD      A,(HL)
+        INC     HL
+        CP      22h
         RET     Z
-        JR      e_rstack
+        OR      A
+        JR      Z,e_dollar
+        CP      '/'
+        JR      NZ,prs1
+        LD      A,(HL)
+        INC     HL
+        AND     0BFh
+prs1:   RST     28h
+        JR      prstr
+e_dollar:POP    DE              ; '$' ran into a NUL: drop the return address,
+        POP     HL              ;   and put the string's address back in TOS
+        LD      A,'Q'
+        JP      error
+
+; pmsg: print the text that follows the CALL, to its closing quote. Keeps HL.
+; pnl: the same, on a new line.
+pnl:    LD      A,13
+        RST     28h
+        LD      A,10
+        RST     28h
+pmsg:   EX      (SP),HL
+        CALL    prstr
+        EX      (SP),HL
+        RET
+
+; chkstk: both stacks are checked once per character, not in every handler.
+; The data stack is right when SP lies in the 256 bytes below DSTOP: adding
+; the constant carries if it is above (cells were popped that were never
+; pushed), and leaves a high byte of FFh if it is in range. Errors are found
+; a character late at most: the bytes above DSTOP and the guard band below
+; the page take what happens meanwhile. DE is free between characters.
+chkstk: EX      DE,HL
+        LD      HL,(1-DSTOP)&0FFFFh ; (SP is 2 lower here: the call)
+        ADD     HL,SP
+        EX      DE,HL
+        JR      C,e_under
+        INC     D
+        JR      NZ,e_over
+        EXX                     ; the return stack: in its page (or it has
+        LD      A,H             ;   overflowed), and not above its empty
+        CP      RSPAGE          ;   position (an underflow stays inside the
+        LD      A,L             ;   page, in the guard band)
+        EXX
+        JR      NZ,e_rover
+        CP      RSTOP&0FFh+1
+        RET     C
+        EXX                     ; return stack underflow: it counts as empty
+        LD      HL,RSTOP
+        EXX
+        LD      A,'r'
+        JR      errp
+e_rover:LD      A,'R'           ; return stack overflow
+        DB      11h             ; (LD DE,nn hides the next entry)
+e_over: LD      A,'S'           ; data stack overflow
+        JR      errp
+e_under:LD      SP,DSTOP        ; data stack underflow: it counts as empty
+        LD      A,'s'
+        JR      error
 
 ; chkbrk: a waiting key is read now; Ctrl-C stops the program, anything
 ; else is held for the next '?'.
@@ -1035,73 +1254,164 @@ chkbrk: CALL    getk
         LD      (KEYBUF),A
         RET
 
-; chkst: stop unless HL is in the program's own space: from the letter page
-; up to the heap limit (the OS, or HEAPLIM), so the interpreter's stacks and
-; whatever lies above the limit are safe. Memory above the heap top but
-; below the limit is the program's own: Tiny BASIC keeps its lines there.
-; Keeps every register.
-chkst:  PUSH    AF
-        LD      A,H
-        CP      LETPAGE
-        JR      C,e_store
-        ENDIF
-        IF      CHECKED*(1-CPM)
-        CP      HEAPLIM
-        JR      NC,e_store
-        ENDIF
-        IF      CHECKED*CPM
-        LD      A,(0007h)       ; the BDOS page is the heap limit
-        DEC     A
-        CP      H
-        JR      C,e_store
-        ENDIF
-        IF      CHECKED
-        POP     AF
-        RET
-
-; chkhp: stop if working out the new heap top carried (a negative count
-; wraps: too big), or if the new top in HL is not below the limit page.
-chkhp:  JR      C,e_heap
-        ENDIF
-        IF      CHECKED*(1-CPM)
-        LD      A,H
-        CP      HEAPLIM
-        RET     C
-        ENDIF
-        IF      CHECKED*CPM
-        LD      A,(0007h)
-        DEC     A
-        CP      H
-        RET     NC
-        ENDIF
-        IF      CHECKED
+; e_hi: the inner loop read a reserved byte, 80h-FFh: X. But a word cell that
+; was never defined still holds 0000h, and the byte there is a reserved one
+; in every build (AFh or C3h): if the IP is in page zero, this was a call of
+; an undefined word. The call is undone, so the place is the call itself.
+e_hi:   INC     B
+        DJNZ    e_resv          ; (B is as it was, and is not 0)
+        RST     08h
+        LD      B,D
+        LD      C,E
+        LD      A,'U'
+        JR      error
 ; Error entries. Each loads its letter and then hides the next entry inside
-; a 3-byte LD HL,nn (the 21h), so they all fall through to `error`.
-e_heap: LD      A,'H'           ; heap past the limit
-        DB      21h
-e_store:LD      A,'W'           ; write outside the program's space
-        DB      21h
-e_stack:LD      A,'S'           ; data stack over or under
-        DB      21h
-e_rstack:LD     A,'R'           ; return stack over or under
-        DB      21h
-e_break:LD      A,'B'           ; Ctrl-C
-        DB      21h
-e_brack:LD      A,'D'           ; bad character after [
-; error: print the letter in A, " @ " and the offset in the program of the
-; character just read, then end. For example: S @ 245
-error:  LD      SP,DSTOP        ; the stacks may be wrecked: start clean
+; a 3-byte LD DE,nn (the 11h), so they all fall through to `error`.
+e_break:LD      A,'B'           ; Ctrl-C (found inside chkbrk)
+        DB      11h
+e_heap1:LD      A,'H'           ; heap (found inside chkhp)
+        DB      11h
+e_store:LD      A,'O'           ; a store outside the program's space (chkst)
+; errp: an error found inside a routine: drop its return address first.
+errp:   POP     DE
+        JR      error
+e_quote:LD      B,H             ; an unclosed string: HL is its address, one
+        LD      C,L             ;   past the opening quote, which is the place
+        LD      A,'Q'
+        DB      11h
+e_resv: LD      A,'X'           ; a reserved byte outside a string
+        DB      11h
+e_zero: LD      A,'Z'           ; dividing by zero
+        DB      11h
+e_brack:LD      A,'W'           ; bad character after [
+
+; error: the report, then the end. A = the letter, BC = one past the place,
+; HL = TOS, and both stacks as the report is to show them:
+;
+;   Err X @ line,col
+;   up to 16 characters of the text from the place
+;   Stk n: the top 8 cells at most, bottom to top
+;   Rtn n
+error:  PUSH    HL              ; now the whole data stack is in memory
+        LD      E,A
+        CALL    pnl
+        DB      "Err ",22h
+        LD      A,E
         RST     28h
+        CALL    pmsg
+        DB      " @ ",22h
+        DEC     BC              ; BC = the place
+        ; The line and column. A place below the program is in the line
+        ; buffer: line 0. Otherwise count the LFs from the program's start;
+        ; DE = the line's number, HL = where it starts.
+        LD      HL,LINEBUF
+        LD      DE,0
+        LD      A,B
+        CP      PROG/256
+        JR      C,er3
+        INC     H
+        LD      L,E             ; HL = PROG
+er1:    INC     DE              ; a new line starts at HL
+        PUSH    HL
+er2:    LD      A,L
+        SUB     C
+        LD      A,H
+        SBC     A,B
+        JR      NC,er2x         ; reached the place
+        LD      A,(HL)
+        INC     HL
+        CP      10
+        JR      NZ,er2
+        POP     AF
+        JR      er1
+er2x:   POP     HL
+er3:    PUSH    BC
+        PUSH    HL
+        EX      DE,HL
+        CALL    pdec            ; the line
+        LD      A,','
+        RST     28h
+        POP     DE
+        POP     HL
+        PUSH    HL
+        OR      A
+        SBC     HL,DE
+        INC     HL
+        CALL    pdec            ; the column
+        CALL    pnl
+        DB      22h
+        POP     HL              ; the text, as it is: 16 characters, or fewer
+        LD      B,16            ;   if the line or the program ends first
+er4:    LD      A,(HL)
+        INC     HL
+        OR      A
+        JR      Z,er5
+        CP      13
+        JR      Z,er5
+        CP      10
+        JR      Z,er5
+        ENDIF
+        IF      CHECKED*CPM
+        CP      1Ah             ; (the ^Z that pads a file's last record ends
+        JR      Z,er5           ;   the text too: some terminals clear the
+        ENDIF                   ;   screen on it)
+        IF      CHECKED
+        RST     28h
+        DJNZ    er4
+er5:    CALL    pnl
+        DB      "Stk ",22h
+        LD      HL,DSTOP-2      ; (the cell at DSTOP-2 was pushed with the
+        OR      A               ;   first value and holds nothing)
+        SBC     HL,SP
+        CALL    phalf           ; the depth
+        LD      A,':'
+        RST     28h
+        LD      A,C
+        CP      9
+        JR      C,er6
+        CALL    pmsg
+        DB      " ...",22h
+        LD      C,8
+er6:    LD      H,0             ; C = the number of cells to show
+        LD      L,C
+        ADD     HL,HL
+        ADD     HL,SP           ; HL -> just above the deepest of them
+        INC     C
+er7:    DEC     C
+        JR      Z,er8
+        DEC     HL
+        LD      D,(HL)
+        DEC     HL
+        LD      E,(HL)
+        PUSH    HL
+        PUSH    BC
         LD      A,' '
         RST     28h
-        LD      A,'@'
-        RST     28h
-        LD      A,' '
-        RST     28h
-        LD      HL,(0-PROG-1)&0FFFFh ; minus the address of the character
-        ADD     HL,BC           ;   just read: HL = its offset
-        CALL    pdec
+        EX      DE,HL
+        CALL    psgn
+        POP     BC
+        POP     HL
+        JR      er7
+er8:    CALL    pnl
+        DB      "Rtn ",22h
+        EXX
+        PUSH    HL
+        EXX
+        POP     DE
+        LD      HL,RSTOP
+        OR      A
+        SBC     HL,DE
+        CALL    phalf
+        CALL    pnl
+        DB      22h
         JP      endprog
+; phalf: print half of HL, and leave it in C
+phalf:  SRL     H
+        RR      L
+        PUSH    HL
+        CALL    pdec
+        POP     BC
+        RET
         ENDIF
 
 ; =============================================================================
@@ -1131,10 +1441,8 @@ error:  LD      SP,DSTOP        ; the stacks may be wrecked: start clean
 ;  CP/M. Nothing is written back: there is no command to save.
 ;
 ;  With CHECKED = 1 a program that is stopped (an error, or Ctrl-C) prints
-;  its letter and place and comes back here. The place is counted from the
-;  start of the program, so in a line typed here it is 65408 plus the
-;  character's place in the line (the line buffer is 128 bytes below the
-;  program).
+;  its report and comes back here, with both stacks empty. The place is a
+;  line and column of the program; in a line typed here it is line 0.
 ;
 ;  Things to know:
 ;    - Reset empties the program (generic builds).
@@ -1146,7 +1454,13 @@ error:  LD      SP,DSTOP        ; the stacks may be wrecked: start clean
 ;      (The stored program never comes back to the line, so it may.)
 ; =============================================================================
         IF      EDGEN*CHECKED
-init:   LD      (KEYBUF),A      ; (A = 0) reset: no key held back
+; Reset (A = 0): clear the lower half of the letter page. Every variable
+; starts at 0, every word cell holds 0000h, the address an undefined word is
+; caught at (see e_hi), and no key is held back.
+init:   LD      HL,LET
+ini1:   LD      (HL),A
+        INC     L
+        JP      P,ini1          ; +00h to +7Fh
         JR      edit
         ENDIF
         IF      EDITOR
@@ -1238,6 +1552,12 @@ st1:    CP      (HL)
         INC     HL
         JR      NZ,st1
         LD      (HEAP),HL
+        ENDIF
+        IF      EDITOR*CHECKED
+        RST     20h             ; minus the heap's first address: '_' may not
+        LD      (NPEND),HL      ;   release below it
+        ENDIF
+        IF      EDITOR
         EXX
         LD      HL,RSTOP        ; the return stack is empty
         EXX
@@ -1314,7 +1634,21 @@ prl:    LD      A,(HL)
 ; =============================================================================
         IF      CPM
         ; The RAM pages follow the image; the heap may grow to the BDOS.
-start:  LD      HL,vecs         ; the RST routines go down into page zero
+start:
+        ENDIF
+        IF      CPM*CHECKED
+        ; Clear the lower half of the letter page: every variable starts at
+        ; 0, every word cell holds 0000h, the address an undefined word is
+        ; caught at (see e_hi: the byte there is CP/M's JP, C3h), and no key
+        ; is held back.
+        LD      HL,LET
+        XOR     A
+ini1:   LD      (HL),A
+        INC     L
+        JP      P,ini1          ; +00h to +7Fh
+        ENDIF
+        IF      CPM
+        LD      HL,vecs         ; the RST routines go down into page zero
         LD      DE,0008h
         LD      BC,vecend-vecs
         LDIR

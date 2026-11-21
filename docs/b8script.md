@@ -199,18 +199,18 @@ Three things skip text without running it: a false `(`, a `[` (after reading the
 
 ```mermaid
 flowchart TD
-    S([called by a false &#40;, a &#91; or a true &#92;]) --> D0[depth = 0]
-    D0 --> R[read next character]
-    R --> Q{"&quot; ?"}
-    Q -- yes --> STR[step over the string:<br>read to the closing &quot;,<br>stepping over / and the next character] --> R
-    Q -- no --> O{"&#40; or &#91; ?"}
-    O -- yes --> INC[depth + 1] --> R
-    O -- no --> C{"&#41; or &#93; ?"}
-    C -- yes --> Z{depth = 0 ?}
-    Z -- yes --> STOP([stop after this closer:<br>the caller acts on its kind])
-    Z -- no --> DEC[depth - 1] --> R
-    C -- no --> N{NUL ?}
-    N -- yes --> EOT([out of text])
+    S(["called by a false (, a [ or a true \"]) --> D0["depth = 0"]
+    D0 --> R["read next character"]
+    R --> Q{"#quot; ?"}
+    Q -- yes --> STR["step over the string:<br>read to the closing #quot;,<br>stepping over / and the next character"] --> R
+    Q -- no --> O{"( or [ ?"}
+    O -- yes --> INC["depth + 1"] --> R
+    O -- no --> C{") or ] ?"}
+    C -- yes --> Z{"depth = 0 ?"}
+    Z -- yes --> STOP(["stop after this closer:<br>the caller acts on its kind"])
+    Z -- no --> DEC["depth - 1"] --> R
+    C -- no --> N{"NUL ?"}
+    N -- yes --> EOT(["out of text"])
     N -- no --> R
 ```
 

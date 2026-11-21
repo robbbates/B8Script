@@ -5,7 +5,7 @@ Generic interpreters for minimal homebrew machines (serial console only), plus C
 ```
 CPM     EQU     0               ; 1 = CP/M .COM build        (Z80, 8080)
 CHECKED EQU     0               ; 1 = checked build          (all)
-EDITOR  EQU     0               ; 1 = with the line editor   (Z80, generic unchecked only)
+EDITOR  EQU     0               ; 1 = with the line editor   (Z80)
 ```
 
 The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, and `b8s-6502-zp.asm` is a smaller interpreter that keeps it in zero page.
@@ -15,7 +15,7 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | CPU | Generic | Generic, checked | CP/M | CP/M, checked |
 |---|---|---|---|---|
 | Z80 | 694 | 834 | 759 | 901 |
-| Z80 with the line editor | 876 | n/a | n/a | n/a |
+| Z80 with the line editor | 877 | 1,020 | 972 | 1,114 |
 | 8080 | 775 | 925 | 824 | 976 |
 | 6502, stack in pages 2-3 | 1,114 | 1,275 | n/a | n/a |
 | 6502, stack in zero page | 1,015 | 1,164 | n/a | n/a |
@@ -32,6 +32,7 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | `*/b8s-*.asm` | The source, with comments |
 | `*-rom-XXXX.bin` | Generic ROM image, to load at XXXXh (`-zp-` = the zero-page 6502 interpreter, `-editor-` = Z80 with the line editor) |
 | `B8SZ80.COM`, `B8SZ80C.COM`, `B8S8080.COM`, `B8S8080C.COM` | CP/M builds; the C means checked. Run as `B8SZ80 PROG.B8S` |
+| `B8SZ80E.COM`, `B8SZ80EC.COM` | CP/M builds with the line editor; the C means checked. Run as `B8SZ80E PROG.B8S`, or with no file |
 | `*.lst` | The assembler's listings |
 
 ## The language, where it differs from the 2026-10-09 spec
@@ -108,13 +109,23 @@ The interpreter starts in the editor, and a program that ends comes back to it. 
 - Lines are counted, not numbered: the text holds no line numbers, and the list shows each line's place. There can be 65,535 lines.
 - A typed line holds 125 characters, the line number included. The one character after the line number separates it from the text and is not stored, whatever it is: `3 5#` stores `5#`, and so does `3x5#`. Type a space there.
 - Putting a line in opens the gap with one block move, so it is quick in a long program too.
-- Reset empties the program. There is no save or load.
+- Reset empties the program. The generic builds have no save or load.
 - Nothing is checked, and nothing is printed between a program's output and what you type next.
 - Keys typed while the list is running hold it, so wait for it to end before typing the next line.
 - Words and variables last from one line to the next, so you can call a word from the keyboard after running the program. A word's address points into the program text, so run the program again after editing it.
 - A line run at once sits in the line buffer, which `-n?` also reads into. The stored program never returns to the line, so it can use `-n?` freely; a typed line that calls `-n?` itself and carries on afterwards runs what was typed.
 
-The editor adds 182 bytes. The earlier, barer editor that brought the whole image to 768 bytes (with the leaner language of that day) is commit `4fbf418`.
+**With CP/M** (`B8SZ80E`, `B8SZ80EC`):
+- The file named on the command line is the program to start with. With no file, or no such file, there is no program. The text ends at the file's first ^Z, and a last line with no CR LF is given one.
+- **There is no command to save.** What you type is lost when you leave.
+- Lines are read by BDOS 10, so its editing keys work, and Ctrl-C as the first key of a line goes back to CP/M.
+
+**Checked** (`-editor-checked-`, `B8SZ80EC`):
+- A program that is stopped, by an error or by Ctrl-C, prints its letter and place and comes back to the editor, with both stacks empty.
+- The place is a count of bytes from the start of the program, not a line number. In a line typed at the editor it is 65408 plus the character's place in the line, because the line buffer lies 128 bytes below the program.
+- In the CP/M build a key pressed while a program runs (other than Ctrl-C) is dropped when the program ends.
+
+The editor adds 183 bytes to the generic build and 213 to the CP/M one. The earlier, barer editor that brought the whole image to 768 bytes (with the leaner language of that day) is commit `4fbf418`.
 
 ## Checked builds
 
@@ -168,7 +179,7 @@ Every build runs, in an emulator, against a reference interpreter written from t
 - a machine-code test per CPU (and per interpreter on the 6502);
 - for checked builds, every error plus Ctrl-C.
 
-The editor build is tested by typing at it (`testing/test_editor.py`), a line at a time as a person would: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, Backspace, and programs that read lines and keys.
+The four editor builds are tested by typing at them (`testing/test_editor.py`), a line at a time as a person would: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, Backspace, and programs that read lines and keys. The CP/M ones also load files (empty, a whole record, a last line with no CR LF) and leave on Ctrl-C; the checked ones also hit every error and Ctrl-C and carry on in the editor.
 
 The other eight games are also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`). The test setup is in `testing/` (see its README).
 

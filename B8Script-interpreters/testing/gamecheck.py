@@ -19,7 +19,7 @@ for cpu in ('z80', '8080', '6502', '6809'):
     for hexf in sorted(glob.glob(f'{out}/{cpu}/*.hex')):
         base = hexf[:-4]
         name = os.path.basename(base)
-        if name.endswith('-ed'):
+        if '-ed' in name:               # the editor builds have their own test
             continue
         cpm = '-cpm' in name
         short = []

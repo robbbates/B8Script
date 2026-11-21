@@ -11,7 +11,7 @@ Everything here runs from this folder.
 
 ```
 ./build.sh Z80   ../z80/b8s-z80.asm   out/z80       # all four variants
-VARIANTS='0 0 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80   # and the editor build
+VARIANTS=$'0 0 1\n0 1 1\n1 0 1\n1 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80   # and the four editor builds
 python3 run_z80.py z80 out/z80                     # PASS/FAIL per variant
 ./build.sh I8080 ../8080/b8s-8080.asm out/8080
 python3 run_8080.py out/8080
@@ -30,8 +30,8 @@ python3 sizes.py out/z80                           # bytes per variant
 python3 mkrel.py                                   # copy out/ to the .bin, .COM and .lst files
 ```
 
-- A variant line for `build.sh` is `CPM CHECKED`, then `EDITOR` for the Z80. A build is named after its source, plus `-gen`, `-cpm` or `-ed`, plus `-chk` if checked.
-- `run_z80.py` tests the editor build by typing at it (`test_editor.py`, which can also be run by itself).
+- A variant line for `build.sh` is `CPM CHECKED`, then `EDITOR` for the Z80. A build is named after its source, plus `-gen` or `-cpm` (with the editor: `-ed` or `-cpm-ed`), plus `-chk` if checked.
+- `run_z80.py` tests the editor builds by typing at them (`test_editor.py`, which can also be run by itself: `python3 test_editor.py out/z80`).
 - Run the layout and branch checks after every change. They catch mistakes the assembler lets through and the tests may not reach.
 - Each CPU's full run takes a few minutes at most.
 
@@ -42,10 +42,10 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `ref.py` | Reference interpreter written from the spec. It produces the expected output for every test |
 | `tests.py` | The suite: `SUITE` (program, input), `MC` (machine-code tests per CPU), `LOOSE` (unchecked builds only), `ERRS` (checked-build errors: letter and offset) |
 | `run_tests.py` | `check()` runs one build against everything, including Tiny BASIC and the Ctrl-C test |
-| `harness_z80.py` | Z80/8080 emulator wrapper. In generic builds it traps KEY/CONOUT/EXIT; in CP/M builds it emulates BDOS 6, 10, 15, 20 and 26 and loads the program as a file |
+| `harness_z80.py` | Z80/8080 emulator wrapper. In generic builds it traps KEY/CONOUT/EXIT; in CP/M builds it emulates BDOS 6, 10, 15, 20 and 26 and loads the program as a file. Its editor modes type the input a chunk at a time |
 | `harness_6502.py`, `harness_6809.py` | The same wrapper for py65 and MC6809 |
 | `run_z80.py`, `run_8080.py`, `run_6502.py`, `run_6809.py` | Run every build in a folder through `check()`. `run_6502.py` holds the two 6502 machine-code tests, one per interpreter |
-| `test_editor.py` | Types sessions at the Z80 editor build, each line when the editor is waiting for it, and compares the output with a model of the editor (which uses `ref.py` for whatever a line runs) |
+| `test_editor.py` | Types sessions at the Z80 editor builds, each line when the editor is waiting for it, and compares the output with a model of the editor (which uses `ref.py` for whatever a line runs). Checked builds get error sessions too, and CP/M builds file-loading ones |
 | `gamecheck.py` | Runs every game on every build for a short while and compares the output with `ref.py` |
 | `chktab.py`, `chktab09.py`, `chktab6502.py` | Check the dispatch-table layout rules on Z80/8080, 6809 and zero-page 6502 listings |
 | `chkbr6502.py` | Checks every 6502 branch against its target |

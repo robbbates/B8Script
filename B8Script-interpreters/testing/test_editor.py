@@ -1,7 +1,7 @@
-"""Test the Z80 build that has the line editor (EDITOR = 1).
+"""Test the Z80 builds that have the line editor (EDITOR = 1).
 
-usage: test_editor.py DIR      (DIR holds b8s-z80-ed.hex and .lst, from
-                                VARIANTS='0 0 0 1' ./build.sh Z80 ../z80/b8s-z80.asm DIR)
+usage: test_editor.py DIR      (DIR holds the builds named *-ed and *-ed-chk, from
+       VARIANTS=$'0 0 1\n0 1 1\n1 0 1\n1 1 1' ./build.sh Z80 ../z80/b8s-z80.asm DIR)
 
 Each session is a list of steps, typed one after the other, each when the
 editor is waiting:
@@ -11,72 +11,101 @@ editor is waiting:
                             printed key a is pressed, and then, unless a was
                             Ctrl-C, key b (None: no key, the list stays held)
 The expected output comes from a small model of the editor here, with ref.py
-running whatever a line runs.
+running whatever a line runs. The CP/M builds read their lines with BDOS 10,
+which echoes and edits in its own way; the model follows it.
 """
-import sys, os
+import sys, os, re, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from harness_z80 import Run
+from harness_z80 import Run, symbols
 from ref import Ref
 
-LET, LINEBUF, PROG = 0x8200, 0x8280, 0x8300
+
+def read_line(queue, cpm, out):
+    """Take one typed line off the queue of keys; return what the line reader
+    keeps. The echo goes to out."""
+    typed = bytearray()
+    while True:
+        c = queue.pop(0)
+        if c == 13:
+            break
+        if cpm:
+            if c in (8, 127):
+                if typed:
+                    typed.pop(); out += b'\x08 \x08'
+            elif c >= 32:
+                typed.append(c); out.append(c)
+                if len(typed) == 125:       # BDOS 10 ends a full line by itself
+                    break
+        elif c == 8:
+            if typed:
+                typed.pop(); out.append(8)
+        elif len(typed) < 125:
+            typed.append(c); out.append(c)
+    if cpm:
+        out.append(13)                      # BDOS 10 echoes the CR
+    out += b'\r\n'
+    return bytes(typed)
 
 
-def model(steps):
+def model(steps, sy, cpm, file=b''):
     """Return (expected output, chunks to type, timed keys) for a session."""
-    prog, out, cells = [], bytearray(), bytes(0x7C)     # (the tests only read cells they have set)
+    LET, LINEBUF, PROG = sy['LET'], sy['LINEBUF'], sy['PROG']
+    text = file.split(b'\x1a')[0]
+    if text and not text.endswith(b'\n'):
+        text += b'\r\n'                         # the loader ends a last line that has no LF
+    prog = [l + b'\n' for l in text.split(b'\n')[:-1]] + ([text.split(b'\n')[-1]] if text.split(b'\n')[-1] else [])
+    out, cells = bytearray(), bytes(0x7C)   # (the tests only read cells they have set)
     chunks, timed = [], []
     for step in steps:
         keys, extra = step if isinstance(step, tuple) else (step, b'')
         more = extra if isinstance(extra, bytes) else b''
         events = list(extra) if isinstance(extra, list) else []
         chunks.append(keys + b'\r' + more)
-        typed = bytearray()                 # what the line reader keeps
-        for c in keys:
-            if c == 8:
-                if typed:
-                    typed.pop(); out.append(8)
-            elif len(typed) < 125:
-                typed.append(c); out.append(c)
-        typed = bytes(typed)
-        out += b'\r\n'
-        minus = typed[:1] == b'-'
-        digits = 1 if minus else 0
-        while digits < len(typed) and typed[digits:digits + 1].isdigit():
-            digits += 1
-        n = int(typed[minus:digits] or b'0') & 0xFFFF
-        if minus:                           # list from line n
-            done = 0
-            for i in range(n - 1 if n else len(prog), len(prog)):
-                if events and events[0][0] == done:
-                    _, a, b = events.pop(0)
-                    timed.append((len(out), a))
-                    if a == 3:
-                        break
-                    if b is None:           # held for good
-                        break
-                    chunks.append(bytes([b]))
-                    if b == 3:
-                        break
-                out += b'%d ' % (i + 1) + prog[i]
-                done += 1
-            assert not events, 'a key was set for a line the list never reached'
-        elif digits and typed[digits:]:     # put a line in; the character after the number is not stored
-            prog.insert(min(n - 1, len(prog)) if n else len(prog), typed[digits + 1:] + b'\r\n')
-        elif digits and n:                  # take a line out
-            del prog[n - 1:n]
-        else:                               # run the program (0) or the line
-            stored = b''.join(prog)
-            text = stored if digits else typed + b'\r\n'
-            r = Ref(text, more, prog_at=PROG if digits else LINEBUF, let=LET, linebuf=LINEBUF)
-            r.m[PROG:PROG + len(stored) + 1] = stored + b'\0'
-            r.m[LET:LET + 0x7C] = cells     # words and variables last from line to line
-            r.w(r.heapcell, PROG + len(stored) + 1)
-            out += r.run(2_000_000)
-            cells = bytes(r.m[LET:LET + 0x7C])
+        queue = list(keys + b'\r' + more)
+        while queue:
+            typed = read_line(queue, cpm, out)
+            minus = typed[:1] == b'-'
+            digits = 1 if minus else 0
+            while digits < len(typed) and typed[digits:digits + 1].isdigit():
+                digits += 1
+            n = int(typed[minus:digits] or b'0') & 0xFFFF
+            if minus:                           # list from line n
+                done = 0
+                for i in range(n - 1 if n else len(prog), len(prog)):
+                    if events and events[0][0] == done:
+                        _, a, b = events.pop(0)
+                        timed.append((len(out), a))
+                        if a == 3:
+                            break
+                        if b is None:           # held for good
+                            break
+                        chunks.append(bytes([b]))
+                        if b == 3:
+                            break
+                    out += b'%d ' % (i + 1) + prog[i]
+                    done += 1
+                assert not events, 'a key was set for a line the list never reached'
+            elif digits and typed[digits:]:     # put a line in; the character after the number is not stored
+                prog.insert(min(n - 1, len(prog)) if n else len(prog), typed[digits + 1:] + b'\r\n')
+            elif digits and n:                  # take a line out
+                del prog[n - 1:n]
+            else:                               # run the program (0) or the line
+                stored = b''.join(prog)
+                code = stored if digits else typed + b'\r\n'
+                r = Ref(code, bytes(queue), prog_at=PROG if digits else LINEBUF, let=LET, linebuf=LINEBUF, cpm=cpm)
+                r.m[PROG:PROG + len(stored) + 1] = stored + b'\0'
+                r.m[LET:LET + 0x7C] = cells     # words and variables last from line to line
+                r.w(r.heapcell, PROG + len(stored) + 1)
+                out += r.run(2_000_000)
+                cells = bytes(r.m[LET:LET + 0x7C])
+                queue = list(r.inp)             # what the code did not read is typed at the editor
     return bytes(out), chunks, timed
 
 
-SESSIONS = {
+def sessions(PROG):
+    run = b' %d{]' % PROG                       # the old way to run: jump to the program
+    return {
+
     'enter, list, run': [b'1 "Hi"$', b'2 2 3+#', b'-1', b'0'],
     'direct mode': [b' 7 6*#', b'"x"$ 1 2+#', b' [S:*] 9S#', b' -5 3*#'],
     'insert in the middle and at the ends': [
@@ -99,10 +128,10 @@ SESSIONS = {
     'the character after the line number': [
         b'1 5#', b'2 7 8+#', b'3x9#', b'2 ', b'-1', b'0', b'2', b'-1', b'1  1#', b'-1'],
     'Backspace while typing': [b'\x08\x081 "abX\x08c"$', b'2 9#\x08\x08\x08\x08\x08\x08\x08 5 5*#', b'-1', b'0'],
-    'run, then use what the program defined': [b'1 "one"$', b'2 [W "w"$]', b'0', b' W 33536{] W', b' W'],
+    'run, then use what the program defined': [b'1 "one"$', b'2 [W "w"$]', b'0', b' W' + run + b' W', b' W'],
     '300 lines': [b'0 %d#' % i for i in range(300)] + [b'-1', b'128 "at 128"$', b'100', b'-250', b'299', b'-290', b'0'],
     'a program that reads a line and a key': [
-        b'1 -9? ,\' 0?\' "."$', (b'0', b'hello\rk'), b' 1#', (b' 33536{] 2#', b'\rZ'), b'-1'],
+        b'1 -9? ,\' 0?\' "."$', (b'0', b'hello\rk'), b' 1#', (b'0', b'\rZ'), b'-1'],
     'hold the list and let it go': [b'0 %d#' % i for i in range(9)] + [
         (b'-1', [(3, 32, 32)]), (b'-1', [(0, 120, 13), (4, 32, 32), (5, 13, 120)]), b'-8'],
     'Ctrl-C ends the list': [b'0 %d#' % i for i in range(9)] + [
@@ -110,25 +139,86 @@ SESSIONS = {
 }
 
 
+# CP/M builds only: the file named on the command line is loaded, and Ctrl-C
+# as the first key of a line goes back to CP/M.
+FILE = b'"one "$\r\n[W "w"$]\r\n2 3*#\r\n'
+CPM_SESSIONS = {
+    'a file is loaded, listed, run and added to': (FILE, [b'-1', b'0', b' W', b'2 "new "$', b'0 9#', b'-1', b'0']),
+    'a file with no text': (b'', [b'-1', b'1 5#', b'-1', b'0']),
+    'a file of exactly one record': ((b'1#' + b' ' * 61 + b'\r\n') * 2, [b'-1', b'0', b'0 2#', b'0']),
+    'a file whose last line has no CR LF': (b'1#\r\n2#', [b'-1', b'0']),
+}
+
+# Checked builds only: the program is stopped, the letter and the place are
+# printed, and the editor carries on. Each session is (steps, timed keys by
+# count of characters printed, the patterns that must follow each other in
+# the output).
+def checked_sessions(sy):
+    low = sy['LINEBUF'] - sy['PROG'] + 65536    # the place of a typed line's first character
+    no = b" 88'88'"                             # prints XX: it must never be reached
+    return {
+        'data stack': ([b'1 1 2+ ;;;' + no, b'0', b' 7#'], [], [rb'S @ \d+ 7#\r+\n7$']),
+        'return stack': ([b'1 [R R] R' + no, b'0', b' 7#'], [], [rb'R @ \d+ 7#\r+\n7$']),
+        'bad [': ([b'1 [5 1]' + no, b'0', b' 7#'], [], [rb'0\r+\nD @ 1 7#\r+\n7$']),
+        'store': ([b'1 1 0!' + no, b'0', b' 7#'], [], [rb'0\r+\nW @ 3 7#\r+\n7$']),
+        'heap': ([b'1 -1_' + no, b'0', b' 7#'], [], [rb'0\r+\nH @ 2 7#\r+\n7$']),
+        'a typed line': ([b' 1 0!' + no, b' 7#'], [], [rb'\nW @ %d 7#\r+\n7$' % (low + 4)]),
+        'Ctrl-C stops a program': ([b'1 1("."$ 1)' + no, b'0', b' 7#', b'-1'], [(40, 3)],
+                                   [rb'\.{10,}B @ \d+ 7#\r+\n7-1\r+\n1 1\("\."\$ 1\) 88\'88\'\r\n$']),
+        'the stacks are empty again after an error': (
+            [b' 1 2 3 4 [R R] R', b' 5 6+#', b' 8#'], [], [rb'R @ \d+ 5 6\+#\r+\n11 8#\r+\n8$']),
+    }
+
+
 def check_editor(base, verbose=True):
     """Run every session against base.hex/.lst; return the number that failed."""
+    sy = symbols(base + '.lst')
+    name = os.path.basename(base)
+    cpm, checked = '-cpm' in name, name.endswith('-chk')
+    mode = 'cpm-editor' if cpm else 'editor'
     fails = 0
-    for name, steps in SESSIONS.items():
-        exp, chunks, timed = model(steps)
-        r = Run(base + '.hex', base + '.lst', b'', chunks, cpu='z80', mode='editor', timed=timed)
-        got = r.run()
-        ok = got == exp and r.ended == 'needkey' and not r.stages and not r.timed
+
+    def report(ok, title, r, got, exp=None):
+        nonlocal fails
         fails += not ok
         if verbose or not ok:
-            print(f'  {"ok  " if ok else "FAIL"} {name}')
-        if not ok:
-            k = next((i for i in range(min(len(got), len(exp))) if got[i] != exp[i]), min(len(got), len(exp)))
-            print(f'     ended={r.ended}; first difference at byte {k} of {len(got)}/{len(exp)}')
-            print(f'     got {got[max(0, k - 40):k + 60]!r}')
-            print(f'     exp {exp[max(0, k - 40):k + 60]!r}')
-    print(f'{os.path.basename(base)}:', 'PASS' if not fails else f'{fails} FAILED')
+            print(f'  {"ok  " if ok else "FAIL"} {title}')
+        if ok:
+            return
+        if exp is None:
+            print(f'     ended={r.ended}; got {got[-200:]!r}')
+            return
+        k = next((i for i in range(min(len(got), len(exp))) if got[i] != exp[i]), min(len(got), len(exp)))
+        print(f'     ended={r.ended}; first difference at byte {k} of {len(got)}/{len(exp)}')
+        print(f'     got {got[max(0, k - 40):k + 60]!r}')
+        print(f'     exp {exp[max(0, k - 40):k + 60]!r}')
+
+    todo = [(t, b'', st) for t, st in sessions(sy['PROG']).items()]
+    if cpm:
+        todo += [(t, f, st) for t, (f, st) in CPM_SESSIONS.items()]
+    for title, file, steps in todo:
+        exp, chunks, timed = model(steps, sy, cpm, file)
+        r = Run(base + '.hex', base + '.lst', file, chunks, cpu='z80', mode=mode, timed=timed)
+        got = r.run()
+        report(got == exp and r.ended == 'needkey' and not r.stages and not r.timed, title, r, got, exp)
+    if cpm:
+        r = Run(base + '.hex', base + '.lst', b'', [b'1 5#\r', b'\x03', b' 6#\r'], cpu='z80', mode=mode)
+        got = r.run()
+        report(r.ended == 'exit' and r.stages == [b' 6#\r'], 'Ctrl-C at the start of a line leaves', r, got)
+    if checked:
+        for title, (steps, timed, pats) in checked_sessions(sy).items():
+            r = Run(base + '.hex', base + '.lst', b'', [s + b'\r' for s in steps], cpu='z80', mode=mode, timed=timed)
+            got = r.run()
+            at, ok = 0, r.ended == 'needkey' and b'XX' not in got
+            for p in pats:
+                m = re.compile(p).search(got, at)
+                ok, at = ok and bool(m), m.end() if m else at
+            report(ok, 'checked: ' + title, r, got)
+    print(f'{name}:', 'PASS' if not fails else f'{fails} FAILED')
     return fails
 
 
 if __name__ == '__main__':
-    sys.exit(1 if check_editor(os.path.join(sys.argv[1], 'b8s-z80-ed')) else 0)
+    builds = sorted(f[:-4] for f in glob.glob(os.path.join(sys.argv[1], '*.hex'))
+                    if re.search(r'-ed(-chk)?\.hex$', f))
+    sys.exit(1 if sum(check_editor(b, '-v' in sys.argv) for b in builds) else 0)

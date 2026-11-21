@@ -25,6 +25,9 @@ for cpu, (org, com) in CPUS.items():
     for variant, name in (('gen', f'b8s-{cpu}-rom-{org}.bin'),
                           ('gen-chk', f'b8s-{cpu}-rom-checked-{org}.bin'),
                           ('ed', f'b8s-{cpu}-rom-editor-{org}.bin'),
+                          ('ed-chk', f'b8s-{cpu}-rom-editor-checked-{org}.bin'),
+                          ('cpm-ed', com and com + 'E.COM'),
+                          ('cpm-ed-chk', com and com + 'EC.COM'),
                           ('zp-gen', f'b8s-{cpu}-rom-zp-{org}.bin'),
                           ('zp-gen-chk', f'b8s-{cpu}-rom-zp-checked-{org}.bin'),
                           ('cpm', com and com + '.COM'),
@@ -35,4 +38,4 @@ for cpu, (org, com) in CPUS.items():
         lo, img = load_hex(base + '.hex')
         open(f'{dst}/{name}', 'wb').write(bytes(img))
         shutil.copy(base + '.lst', f'{dst}/b8s-{cpu}-{variant}.lst')
-        print(f'{cpu:5} {variant:8} {len(img):5} bytes -> {name}')
+        print(f'{cpu:5} {variant:10} {len(img):5} bytes -> {name}')

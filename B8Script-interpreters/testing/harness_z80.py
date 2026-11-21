@@ -7,10 +7,13 @@ cpm: the image is a .COM at 0100h; BDOS 6, 10, 15, 20 and 26 are emulated,
 and the program is the 'file' that fn 15/20 read.
 editor: a generic image built with EDITOR = 1. No program is loaded (the RAM
 at PROG starts as junk, as after power-on) and everything goes in through KEY.
-The input is a list of chunks: the next chunk is typed only when the machine
-has been left waiting for a key, as a person would, and the run ends when it
-waits with no chunks left. `timed` is a list of (n, key): the key is pressed
-once n characters have been printed.
+cpm-editor: a .COM built with EDITOR = 1; the program is the file it loads.
+In both editor modes the input is a list of chunks: the next chunk is typed
+only when the machine has been left waiting for a key, as a person would, and
+the run ends when it waits with no chunks left. `timed` is a list of (n, key):
+the key is pressed once n characters have been printed.
+BDOS 10 is modelled as CP/M does it: Ctrl-C as the first key of a line is a
+warm boot.
 """
 import re
 import z80
@@ -56,8 +59,9 @@ class Run:
         self.img_size = len(img)
         self.m.set_memory_block(org, img)
         self.stages = []
-        if mode == 'editor':
+        if mode in ('editor', 'cpm-editor'):
             self.stages, inp = [bytes(c) for c in inp], b''
+            self.mode = mode = 'editor' if mode == 'editor' else 'cpm'
         self.timed = list(timed)
         self.inp = list(inp)
         self.out = bytearray()
@@ -161,7 +165,9 @@ class Run:
                 else:
                     # a program polling for a key that will never come
                     m.a = 0; self.idle += 1
-                    if self.idle > IDLE:
+                    if self.idle > IDLE and self.stages:
+                        self.inp = list(self.stages.pop(0)); self.idle = 0
+                    elif self.idle > IDLE:
                         self.ended = 'needkey'; return False
             else:
                 self.out.append(m.e); self.idle = 0
@@ -171,8 +177,13 @@ class Run:
             buf = bytearray()
             while True:
                 if not self.key_ready():
-                    self.ended = 'needkey'; return False
+                    if not self.stages:
+                        self.ended = 'needkey'; return False
+                    self.inp = list(self.stages.pop(0))
+                    continue
                 c = self.inp.pop(0)
+                if c == 3 and not buf:
+                    self.ended = 'exit'; return False
                 if c in (13, 10):
                     break
                 if c in (8, 127):

@@ -14,9 +14,11 @@ for hexf in sorted(glob.glob(d + '/*.hex')):
         continue
     cpm = '-cpm' in base
     checked = base.endswith('-chk')
-    def runner(p, i, brk=None, base=base, cpm=cpm):
-        r = Run(base + '.hex', base + '.lst', p, i, cpu=cpu, mode='cpm' if cpm else 'generic', brk_at=brk)
+    def runner(p, i, timed=None, base=base, cpm=cpm):
+        r = Run(base + '.hex', base + '.lst', p, i, cpu=cpu, mode='cpm' if cpm else 'generic', timed=timed or ())
         o = r.run()
+        runner.last = r
         return o, r.ended
+    runner.os_line = cpm      # -n? is BDOS 10 there
     total += check(runner, os.path.basename(base), cpu, cpm, checked, 0xC9, verbose=verbose, plat=plat(base + '.lst', cpm))
 sys.exit(1 if total else 0)

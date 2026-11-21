@@ -30,9 +30,10 @@ for hexf in sorted(glob.glob(d + '/*.hex')):
     base = hexf[:-4]
     checked = base.endswith('-chk')
     tests.MC['6502'] = MC['-zp' in os.path.basename(base)]
-    def runner(p, i, brk=None, base=base):
-        r = Run(base + '.hex', base + '.lst', p, i, brk_at=brk)
+    def runner(p, i, timed=None, base=base):
+        r = Run(base + '.hex', base + '.lst', p, i, timed=timed or ())
         o = r.run()
+        runner.last = r
         return o, r.ended
     # the build's own addresses, so that ref.py can reproduce a checked
     # build's report exactly (places, the heap limit, addresses on the stack)

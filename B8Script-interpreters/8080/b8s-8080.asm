@@ -100,7 +100,8 @@ HEAPLIM EQU     0F0h            ; the heap must stay below F000h (a page)
 BASE    EQU     0000h           ; where the image starts
         ENDIF
 
-MSLOOP  EQU     40              ; n? inner loop count for about 1 ms (1-255):
+MSLOOP  EQU     40              ; n? inner loop count for about 1 ms (1-255;
+                                ; the wait for a second Ctrl-C uses it too):
                                 ; each pass calls getk once, so tune it for
                                 ; your clock and your KEY routine
 
@@ -108,9 +109,13 @@ MSLOOP  EQU     40              ; n? inner loop count for about 1 ms (1-255):
 LET     EQU     LETPAGE*256
 HEAP    EQU     LET+7Ch         ; the heap pointer
 RSP     EQU     LET+34h         ; gap after Z: the return stack pointer;
-KEYBUF  EQU     LET+36h         ;   a held-back key;
+BRKCNT  EQU     LET+36h         ;   the break check's countdown;
 NPEND   EQU     LET+38h         ;   minus the address of the program's end
                                 ;   (the heap's first byte), for the checked '_'
+KEYBUF  EQU     LET+7Ah         ; gap after z: a key read by the break check and
+                                ;   held for the next '?' (0: none);
+BRKOFF  EQU     LET+7Bh         ;   the break-off cell: a program that stores a
+                                ;   non-zero byte here gets Ctrl-C as a key
 LBHDR   EQU     LET+7Eh         ; CP/M BDOS 10 header: max, count
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
 RSTOP   EQU     RSPAGE*256+0E0h ; empty return stack: the 32 bytes above it
@@ -321,17 +326,20 @@ upper:  PUSH    H               ; keep TOS: rpushd pops it back
 ; go on. Every push of the return stack ends here: for a word call the cell
 ; popped is the TOS that upper parked; for '(' and '{' it is the cell under
 ; the one that was used up.
-rpushd:
-        IF      CHECKED
-        CALL    chkbrk          ; Ctrl-C is checked at every word call, block
-        ENDIF                   ;   entry, loop-back and '{'
-        LHLD    RSP
+;
+; The break key is looked at here, so at every word call and loop-back (and
+; block entry and '{'), but only one time in 256: BRKCNT counts them. Reading
+; the keyboard can be slow (it is a BDOS call under CP/M).
+rpushd: LHLD    RSP
         DCX     H
         MOV     M,D
         DCX     H
         MOV     M,E
         SHLD    RSP
-        POP     H
+        LXI     H,BRKCNT
+        DCR     M
+        POP     H               ; (keeps the flags)
+        CZ      pollk
         RST     6
 
 ; ---- machine code: the grave -----------------------------------------------
@@ -1008,31 +1016,77 @@ hc1:    INX     B
         RET
 
 ; =============================================================================
-;  Console layer: getk returns a waiting key in A (zero flag clear), or
-;  A = 0 with the zero flag set when none is waiting. putc (RST 5) prints A.
-;  Both keep BC, DE and HL. In the generic build they are the host's KEY and
-;  CONOUT routines themselves.
+;  Console layer. rawk is the host's key routine: a waiting key in A (zero
+;  flag clear), or A = 0 with the zero flag set when none is waiting. putc
+;  (RST 5) prints A. Both keep BC, DE and HL. In the generic build they are
+;  the host's KEY and CONOUT routines themselves.
+;
+;  A running program reads the keyboard only through getk and pollk, which
+;  between them give the break key its rules:
+;    - Ctrl-C stops the program;
+;    - any other key that the break check reads is held in KEYBUF for the
+;      next '?', and a newer one takes its place;
+;    - '?' (getk) takes the held key first;
+;    - a program that has stored a non-zero byte at BRKOFF gets Ctrl-C as a
+;      key like any other, but two of them within about 250 ms still stop it.
+;  Both are called straight from a handler, never from a routine under one:
+;  the checked build's report counts on finding one return address above the
+;  data stack, and TOS in HL.
 ; =============================================================================
-        IF      (1-CPM)*(1-CHECKED)
-getk    EQU     KEY             ; the host's routine does the whole job
+        IFN     CPM
+rawk    EQU     KEY
         ENDIF
-        IF      CHECKED
-getk:   PUSH    H               ; a key held back by the break check goes
-        LXI     H,KEYBUF        ;   first, and is taken out of the buffer
+; pollk: the break check (see rpushd).
+pollk:  CALL    rawk
+        RZ                      ; no key
+        STA     KEYBUF          ; held for the next '?'
+        CPI     3
+        RNZ
+        JMP     ctlc
+; getk: a key for '?', or A = 0 and the zero flag if there is none.
+getk:   PUSH    H               ; a held key goes first, and is taken out of
+        LXI     H,KEYBUF        ;   the buffer
         MOV     A,M
         MVI     M,0
         POP     H
         ORA     A
         RNZ
+        CALL    rawk
+        RZ
+        CPI     3
+        RNZ
+; ctlc: Ctrl-C has been read. If the break key is on, that is the end. If
+; the program has turned it off, wait about 250 ms for one more key: a
+; second Ctrl-C is the end too; any other key is held (the newest wins),
+; and the Ctrl-C goes to the program: returns A = 3, zero flag clear.
+ctlc:   LDA     BRKOFF
+        ORA     A
+        JZ      brk
+        PUSH    D
+        LXI     D,250*MSLOOP
+ct1:    CALL    rawk
+        JNZ     ct2
+        DCX     D
+        MOV     A,D
+        ORA     E
+        JNZ     ct1
+ct2:    POP     D               ; A = the second key, or 0 if none came
+        CPI     3
+        JZ      brk
+        ORA     A
+        JZ      ct3
+        STA     KEYBUF
+ct3:    MVI     A,3
+        ORA     A
+        RET
+        IF      1-CHECKED
+brk     EQU     endprog         ; the unchecked build stops without a word;
         ENDIF
-        IF      (1-CPM)*CHECKED
-        JMP     KEY
-        ENDIF
-        IF      CPM*(1-CHECKED)
-getk:
+        IF      CHECKED
+brk     EQU     e_break         ;   the checked build reports B
         ENDIF
         IF      CPM
-        MVI     A,0FFh          ; BDOS 6 with E = FFh: a key, or 0
+rawk:   MVI     A,0FFh          ; BDOS 6 with E = FFh: a key, or 0
 ; putc: BDOS 6 for every character. BDOS 2 would check for ^S while
 ; printing and could swallow a key that BDOS 6 then never sees.
 putc:   PUSH    B
@@ -1184,19 +1238,8 @@ e_under:LXI     SP,DSTOP        ; data stack underflow: it counts as empty
         MVI     A,'s'
         JMP     error
 
-; chkbrk: a waiting key is read now; Ctrl-C stops the program, anything
-; else is held for the next '?'. Keeps BC, DE, HL.
-chkbrk: CALL    getk
-        RZ
-        CPI     3
-        STA     KEYBUF
-        RNZ
-        XRA     A
-        STA     KEYBUF
-        POP     D               ; Ctrl-C. Drop the return address; the cell on
-        POP     H               ;   top of the stack is the TOS that rpushd
-        MVI     A,'B'           ;   was about to bring back
-        JMP     error
+e_break:MVI     A,'B'           ; Ctrl-C (found inside pollk or getk)
+        JMP     errp
 
 ; e_hi: the inner loop read a reserved byte, 80h-FFh: X. But a word cell that
 ; was never defined still holds 0000h, and the byte there is a JMP, C3h, in
@@ -1428,6 +1471,10 @@ fnul:   MOV     A,M
         ENDIF
         LXI     H,RSTOP         ; the return stack is empty
         SHLD    RSP
+        IF      1-CHECKED
+        LXI     H,0             ; no key is held, and the break key is on
+        SHLD    KEYBUF          ;   (the checked build has cleared these)
+        ENDIF
         LXI     B,PROG          ; the IP
         RST     6               ; (its return address is thrown away)
 

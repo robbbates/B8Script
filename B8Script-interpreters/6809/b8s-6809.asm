@@ -19,6 +19,10 @@
 ;                 quote, X reserved byte, Z divide by zero, N unbalanced or
 ;                 mismatched brackets, B Ctrl-C.
 ;
+;  In both builds Ctrl-C stops a running program (the unchecked build goes
+;  to EXIT without a word): see the console layer below for the rules, the
+;  held key and the break-off cell at 827Bh.
+;
 ;  Assembler: asm80, M6809 mode.
 ; =============================================================================
 
@@ -70,8 +74,8 @@ CHECKED EQU     0               ; 1 = checked build
 ;    8200h-82FFh  letter page (LET): A..Z at +00h..+33h, a..z at +40h..+73h
 ;                 (a word cell is always 64 bytes below its variable), the
 ;                 heap pointer at +7Ch (= z10+), interpreter variables in the
-;                 gaps, and the -n? line buffer at +80h..+FFh. +7Ah and +7Bh
-;                 are kept free.
+;                 gaps, and the -n? line buffer at +80h..+FFh. The break-off
+;                 cell is at +7Bh (827Bh); +7Ah is free.
 ;    8300h-       PROG, the program text, NUL-terminated; the heap starts
 ;                 after the NUL and grows to HEAPLIM*256 (F000h)
 ;    F000h-       this image (ROM). The reset vector (FFFEh) must point to
@@ -106,10 +110,15 @@ MSLOOP  EQU     20              ; n? inner loop count for about 1 ms; tune it
 LET     EQU     LETPAGE*256
 HEAP    EQU     7Ch             ; z10+, the heap pointer (little-endian)
 KEYBUF  EQU     34h             ; gap after Z: a key held back by the break check
+COUNT   EQU     35h             ; the break check's countdown (1 look in 256)
 AT      EQU     36h             ; checked: the address of the character being
                                 ;   run (big-endian), the place an error reports
 PEND    EQU     38h             ; checked: the program's end, the first byte
                                 ;   after its NUL (big-endian): the heap's floor
+SSAV    EQU     3Ah             ; checked: S as each character starts (big-
+                                ;   endian): the return stack an error reports
+BRKOFF  EQU     7Bh             ; the break-off cell (827Bh, z9+): 0 = the
+                                ;   break key is on
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
 RSTOP   EQU     RSPAGE*256+100h ; empty return stack
 RSLIM   EQU     RSPAGE*256+20h  ; checked: S may go no lower between characters
@@ -118,6 +127,64 @@ DSTOP   EQU     DSPAGE*256+100h-4*CHECKED ; empty data stack (a guard if checked
 DSLIM   EQU     DSPAGE*256      ; checked: U may go no lower between characters
 
         ORG     0F000h
+
+; =============================================================================
+;  Console layer: the break key. A running program reads the keyboard only
+;  through pollk and getk, which between them give the break key its rules:
+;    - Ctrl-C (03h) stops the program;
+;    - any other key that the break check reads is held in KEYBUF for the
+;      next '?', and a newer one takes its place;
+;    - '?' (getk) takes the held key first;
+;    - a program that has stored a non-zero byte at BRKOFF gets Ctrl-C as a
+;      key like any other, but two of them within about 250 ms still stop it.
+;  On a break the unchecked build ends without a word (EXIT); the checked
+;  one reports B. All three keep B, X, Y and U.
+; =============================================================================
+; pollk: the break check, at every word call and every true ')' loop-back.
+; It looks at the keyboard only once in 256 calls.
+pollk:  DEC     <COUNT
+        BNE     cc9
+        JSR     KEY
+        BEQ     cc9             ; no key
+        STA     <KEYBUF         ; held for the next '?'
+        BRA     ctlc
+
+; getk: a key for '?', or A = 0 with the zero flag set if there is none.
+getk:   LDA     <KEYBUF         ; a held key goes first, and is taken out of
+        BEQ     gk1             ;   the buffer (it has been through ctlc)
+        CLR     <KEYBUF
+        TSTA                    ; (CLR set Z: A is not 0)
+        RTS
+gk1:    JSR     KEY
+        BEQ     cc9
+; ctlc: a key has been read. If it is Ctrl-C and the break key is on, that
+; is the end. If the program has turned it off, wait about 250 ms for one
+; more key: a second Ctrl-C is the end too; any other key is held (the
+; newest wins), and the Ctrl-C goes on: A = 3, zero flag clear.
+ctlc:   CMPA    #3
+        BNE     cc9
+        TST     <BRKOFF
+        BEQ     brk
+        PSHS    X
+        LDX     #250*MSLOOP
+cc1:    JSR     KEY
+        BNE     cc2
+        LEAX    -1,X
+        BNE     cc1
+        BRA     cc3
+cc2:    CMPA    #3
+        BEQ     brk
+        STA     <KEYBUF
+cc3:    LDA     #3
+        PULS    X
+cc9:    RTS
+        IF      1-CHECKED
+brk     EQU     fin             ; the unchecked build stops without a word;
+        ENDIF
+        IF      CHECKED
+brk:    LDA     #'B'            ;   the checked build reports B. (The report
+        JMP     error           ;   takes S from SSAV, so the depth of the
+        ENDIF                   ;   calls here doesn't matter.)
 
 fin:    JMP     EXIT            ; the program has ended
 
@@ -140,6 +207,8 @@ sz:     CLR     ,X+
         BNE     sz
         ENDIF
         IF      1-CHECKED
+        CLR     <KEYBUF         ; no key held
+        CLR     <BRKOFF         ; the break key is on
         LDX     #PROG           ; the heap starts after the program's NUL
         ENDIF
 sc:     LDA     ,X+
@@ -177,6 +246,7 @@ next:
         CMPX    #RSTOP-RSLIM
         BHI     e_rs
         STY     <AT             ; the place, should this character fail
+        STS     <SSAV           ; and the return stack, as it is now
         ENDIF
         LDA     ,Y+
         BEQ     fin             ; NUL ends the program
@@ -247,6 +317,7 @@ upper:  BSR     cellx
         ENDIF
         PSHS    Y
         TFR     D,Y
+        JSR     pollk           ; the break check, at every word call
         BRA     next
 
 ; =============================================================================
@@ -258,12 +329,12 @@ upper:  BSR     cellx
 ;  each character before it runs it; the one error that reports another
 ;  place (W, at the character after the [) changes AT before it comes.
 ;
-;  The report counts the return stack from S, so S must be what the program
-;  left there. The entries reached from a handler (after h_cstore, just
-;  ahead of the report) first drop the dispatcher's return address, and the
-;  return address of chkst or chkbrk, which are one call deeper. The inner
-;  loop's own entries (here, where its short branches reach them) need
-;  nothing dropped.
+;  The report counts the return stack from SSAV, which the inner loop sets
+;  to S before each character, so an error may come from any depth of
+;  calls: a handler, chkst under one, or ctlc under '?' or the break check.
+;  (An r sets SSAV to the empty stack.) The inner loop's own entries are
+;  here, where its short branches reach them; those reached from a handler
+;  are after h_cstore, just ahead of the report.
 ; =============================================================================
         IF      CHECKED
 ; ---- reached from the inner loop -------------------------------------------
@@ -275,7 +346,8 @@ e_ds:   BMI     e_S
         LDA     #'s'
         BRA     eall
 e_rs:   BMI     e_R
-        LDS     #RSTOP          ; r
+        LDX     #RSTOP          ; r
+        STX     <SSAV
         LDA     #'r'
         FCB     8Ch
 e_S:    LDA     #'S'
@@ -528,10 +600,6 @@ hv1:    LEAY    1,Y             ; (LEAY leaves the carry alone)
 hv9:    RTS
         ENDIF
 
-        IF      1-CHECKED
-getk    EQU     KEY             ; the host's routine does the whole job
-        ENDIF
-
 ; ---- where the two ranges meet ---------------------------------------------
 ; The first range ends somewhere among the next five handlers, ] \ [ @ ?
 ; (they are in falling code order for this): NPG1 follows. Every handler
@@ -540,11 +608,7 @@ getk    EQU     KEY             ; the host's routine does the whole job
 
 ; ']' returns: pop an address and jump to it. (PULS X,Y: the dispatcher's
 ; return address into X, then the saved IP into Y.)
-h_ret:
-        IF      CHECKED
-        JSR     chkbrk          ; Ctrl-C is checked at every word return
-        ENDIF
-        PULS    X,Y
+h_ret:  PULS    X,Y
         JMP     ,X
 
 ; '\' ( flag -- ): true skips to the next ')' or ']' at this level; ')'
@@ -761,11 +825,8 @@ cf1:    LDB     ,X
 ; drops it and carries on.
 h_close:LDD     ,U++
         LBEQ    rdrop
-        IF      CHECKED
-        JSR     chkbrk          ; Ctrl-C is checked at every loop-back
-        ENDIF
         LDY     2,S             ; the block start, under the return address
-        RTS
+        JMP     pollk           ; the break check, at every loop-back
 
 ; ---- arithmetic and logic: ( NOS TOS -- result ) ---------------------------
 
@@ -884,17 +945,6 @@ h_cstore:LDX    ,U              ; '.' ( c addr -- )
 
         IF      CHECKED
 ; ---- reached from a handler ------------------------------------------------
-; chkbrk: a waiting key is read now; Ctrl-C stops the program (B), anything
-; else is held for the next '?'. Called from the handlers of ] and a true ).
-chkbrk: JSR     getk
-        BEQ     ck9
-        CMPA    #3
-        BNE     ck1
-        LDA     #'B'
-        BRA     eh2
-ck1:    STA     <KEYBUF
-ck9:    RTS
-
 ; chkst: stop with O unless X is in the program's own space: from the letter
 ; page up to HEAPLIM, so the interpreter's stacks and whatever lies above the
 ; limit are safe. Memory above the heap top but below the limit is the
@@ -902,10 +952,10 @@ ck9:    RTS
 chkst:  CMPX    #LET
         BLO     cs9
         CMPX    #HEAPLIM*256
-        BLO     ck9             ; in range: return
+        BHS     cs9
+        RTS                     ; in range
 cs9:    LDA     #'O'
-eh2:    LEAS    2,S             ; chkst's or chkbrk's return address
-        FCB     8Ch             ; (and the chain below hides every LDA)
+        FCB     8Ch
 e_brack:LDA     #'W'            ; [ and a bad character (AT is set)
         FCB     8Ch
 e_zero: LDA     #'Z'            ; / by zero
@@ -915,12 +965,12 @@ e_heap: LDA     #'H'            ; _ past the limit, or below the program's end
 e_quote:LDA     #'Q'            ; " or $ ran into the NUL
         FCB     8Ch
 e_nest: LDA     #'N'            ; a skip from ( or [: the NUL or the wrong closer
-eh1:    LEAS    2,S             ; the dispatcher's return address
         ; and fall into error
 
 ; =============================================================================
-;  Checked build: the error report. A = the letter, AT = the place; U and S
-;  are as the program left them (see "the error entries" after `upper`).
+;  Checked build: the error report. A = the letter, AT = the place; U is
+;  as the program left it, and SSAV holds S as the failing character began
+;  (see "the error entries" after `upper`).
 ;  It sits here, ahead of h_num, pdec and putc, so that it reaches them with
 ;  short calls. Prints
 ;
@@ -947,10 +997,8 @@ error:  TFR     A,B             ; the letter (pmsg and CONOUT keep B)
         FCB     13,10,"Err",' '+80h
         TFR     B,A
         JSR     CONOUT
-        TFR     S,D             ; the return stack's depth, (RSTOP - S) / 2:
-        COMA                    ;   -S-1 ...
-        COMB
-        ADDD    #RSTOP+1        ;   ... + RSTOP+1
+        LDD     #RSTOP          ; the return stack's depth, (RSTOP - S) / 2,
+        SUBD    <SSAV           ;   S as it was when this character began
         LSRA
         RORB
         LDS     #RSREP
@@ -1156,14 +1204,4 @@ ud2:    LEAX    -1,X
 ud3:    STD     ,U
         RTS
 
-        IF      CHECKED
-; getk: a key held back by the break check goes first; then the host's KEY.
-getk:   LDA     <KEYBUF
-        BEQ     gk1
-        CLR     <KEYBUF
-        TSTA
-        RTS
-gk1:    JMP     KEY
-
-        ENDIF
 imgend:

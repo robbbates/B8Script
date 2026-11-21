@@ -70,6 +70,10 @@ LOOSE = [
 # variables at startup.
 CHK = [
     ('zerovars', b'a@# m@# z@# 5a! a@#', b''),
+    # \ with no closer ends the program quietly even when the text it skips
+    # holds openers and a string with no closing quote (in an unchecked
+    # build an unclosed string is unsafe)
+    ('breakend2', b'"b"$ 1\\ "no"$ ( [ "x', b''),
 ]
 
 # Checked builds only: programs that stop with an error. The whole output, the
@@ -146,8 +150,7 @@ ERRS = [
 ]
 
 # Unchecked and checked builds: \ with no closer ends the program quietly,
-# even from inside brackets (it is not an N).
+# even from inside a block (it is not an N).
 SUITE += [
     ('breakend', b'"a"$ 1( 1\\ "no"$', b''),
-    ('breakend2', b'"b"$ 1\\ "no"$ ( [ "x', b''),
 ]

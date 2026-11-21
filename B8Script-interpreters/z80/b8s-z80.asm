@@ -105,15 +105,20 @@ EXIT    EQU     edit            ; a program that ends goes back to the editor
 
 MSLOOP  EQU     40              ; n? inner loop count for about 1 ms (1-255):
                                 ; each pass calls getk once, so tune it for
-                                ; your clock and your KEY routine
+                                ; your clock and your KEY routine. (The wait
+                                ; for a second Ctrl-C uses it too: 250 ms.)
 
 ; letter-page layout (offsets inside LETPAGE)
 LET     EQU     LETPAGE*256
 HEAP    EQU     LET+7Ch         ; the heap pointer
 RSAVE   EQU     LET+34h         ; gap after Z: return stack pointer, saved
-KEYBUF  EQU     LET+36h         ;   around machine code; a held-back key;
+                                ;   around machine code;
 NPEND   EQU     LET+38h         ;   minus the address of the program's end
                                 ;   (the heap's first byte), for the checked '_'
+KEYBUF  EQU     LET+7Ah         ; gap after z: a key read by the break check and
+                                ;   held for the next '?' (0: none);
+BRKOFF  EQU     LET+7Bh         ;   the break-off cell: a program that stores a
+                                ;   non-zero byte here gets Ctrl-C as a key
 LBHDR   EQU     LET+7Eh         ; CP/M BDOS 10 header: max, count
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
 RSTOP   EQU     RSPAGE*256+0E0h ; empty return stack: the 32 bytes above it
@@ -343,6 +348,10 @@ st2:    LD      (HEAP),HL
         RST     20h             ; minus the heap's first address: '_' may not
         LD      (NPEND),HL      ;   release below it
         ENDIF
+        IF      (1-CHECKED)*(1-EDITOR)
+        LD      HL,0            ; no key is held, and the break key is on
+        LD      (KEYBUF),HL     ;   (the checked build has cleared these)
+        ENDIF
         IF      1-EDITOR
         EXX
         LD      HL,RSTOP        ; the return stack is empty
@@ -440,17 +449,22 @@ upper:  PUSH    BC              ; the return address, for rpushn
 
 ; rpushn: move the top cell of the data stack (in memory) to the return
 ; stack, then next. Everything that pushes the return stack ends here.
-rpushn:
-        IF      CHECKED
-        CALL    chkbrk          ; Ctrl-C is checked at every word call, block
-        ENDIF                   ;   entry, loop-back and '{'
-        EXX
+;
+; The break key is looked at here, so at every word call and loop-back (and
+; block entry and '{'), but only one time in 256: B', which nothing else
+; uses, counts them. Reading the keyboard can be slow (it is a BDOS call
+; under CP/M), and this way it costs a loop two bytes and 13 T-states.
+rpushn: EXX
         POP     DE
         DEC     HL
         LD      (HL),D
         DEC     HL
         LD      (HL),E
+        DJNZ    rp1
         EXX
+        CALL    pollk
+        RST     30h
+rp1:    EXX
         RST     30h
 
 ; ---- machine code: the grave -----------------------------------------------
@@ -1026,21 +1040,6 @@ pdec:   LD      DE,10
         RST     28h
         RET
 
-; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
-; and return its value in A with the carry set; otherwise leave the IP and
-; return with the carry clear.
-hexc:   LD      A,(BC)
-        SUB     '0'
-        CP      10
-        JR      C,hc1
-        AND     0DFh
-        SUB     11h
-        CP      6
-        RET     NC
-        SUB     0F6h            ; + 10, and sets the carry
-hc1:    INC     BC
-        RET
-
 ; =============================================================================
 ;  Dispatch table: the low byte of each handler's address, in code order
 ;  (the table itself is the macro PTABLE, defined above the dispatcher).
@@ -1061,32 +1060,93 @@ PTAB:
 PTABEND:
         ENDIF
 
+; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
+; and return its value in A with the carry set; otherwise leave the IP and
+; return with the carry clear.
+hexc:   LD      A,(BC)
+        SUB     '0'
+        CP      10
+        JR      C,hc1
+        AND     0DFh
+        SUB     11h
+        CP      6
+        RET     NC
+        SUB     0F6h            ; + 10, and sets the carry
+hc1:    INC     BC
+        RET
+
 ; =============================================================================
-;  Console layer: getk returns a waiting key in A (zero flag clear), or
-;  A = 0 with the zero flag set when none is waiting. putc (RST 28h) prints
-;  A. Both keep BC, DE, HL and HL'. In the generic build they are the host's
-;  KEY and CONOUT routines themselves.
+;  Console layer. rawk is the host's key routine: a waiting key in A (zero
+;  flag clear), or A = 0 with the zero flag set when none is waiting. putc
+;  (RST 28h) prints A. Both keep BC, DE, HL and HL'. In the generic build
+;  they are the host's KEY and CONOUT routines themselves.
+;
+;  A running program reads the keyboard only through getk and pollk, which
+;  between them give the break key its rules:
+;    - Ctrl-C stops the program;
+;    - any other key that the break check reads is held in KEYBUF for the
+;      next '?', and a newer one takes its place;
+;    - '?' (getk) takes the held key first;
+;    - a program that has stored a non-zero byte at BRKOFF gets Ctrl-C as a
+;      key like any other, but two of them within about 250 ms still stop it.
+;  Both are called straight from a handler, never from a routine under one:
+;  the checked build's report counts on finding one return address above the
+;  data stack.
 ; =============================================================================
-        IF      (1-CPM)*(1-CHECKED)
-getk    EQU     KEY             ; the host's routine does the whole job
+        IFN     CPM
+rawk    EQU     KEY
         ENDIF
-        IF      CHECKED
-getk:   PUSH    HL              ; a key held back by the break check goes
-        LD      HL,KEYBUF       ;   first, and is taken out of the buffer
+; pollk: the break check (see rpushn).
+pollk:  CALL    rawk
+        RET     Z               ; no key
+        LD      (KEYBUF),A      ; held for the next '?'
+        CP      3
+        RET     NZ
+        JR      ctlc
+; getk: a key for '?', or A = 0 and the zero flag if there is none.
+getk:   PUSH    HL              ; a held key goes first, and is taken out of
+        LD      HL,KEYBUF       ;   the buffer
         LD      A,(HL)
         LD      (HL),0
         POP     HL
         OR      A
         RET     NZ
+        CALL    rawk
+        RET     Z
+        CP      3
+        RET     NZ
+; ctlc: Ctrl-C has been read. If the break key is on, that is the end. If
+; the program has turned it off, wait about 250 ms for one more key: a
+; second Ctrl-C is the end too; any other key is held (the newest wins),
+; and the Ctrl-C goes to the program: returns A = 3, zero flag clear.
+ctlc:   LD      A,(BRKOFF)
+        OR      A
+        JP      Z,brk
+        PUSH    DE
+        LD      DE,250*MSLOOP
+ct1:    CALL    rawk
+        JR      NZ,ct2
+        DEC     DE
+        LD      A,D
+        OR      E
+        JR      NZ,ct1
+ct2:    POP     DE              ; A = the second key, or 0 if none came
+        CP      3
+        JP      Z,brk
+        OR      A
+        JR      Z,ct3
+        LD      (KEYBUF),A
+ct3:    LD      A,3
+        OR      A
+        RET
+        IF      1-CHECKED
+brk     EQU     endprog         ; the unchecked build stops without a word;
         ENDIF
-        IF      (1-CPM)*CHECKED
-        JP      KEY
-        ENDIF
-        IF      CPM*(1-CHECKED)
-getk:
+        IF      CHECKED
+brk     EQU     e_break         ;   the checked build reports B
         ENDIF
         IF      CPM
-        LD      A,0FFh          ; BDOS 6 with E = FFh: a key, or 0
+rawk:   LD      A,0FFh          ; BDOS 6 with E = FFh: a key, or 0
 ; putc: BDOS 6 for every character. BDOS 2 would check for ^S while
 ; printing and could swallow a key that BDOS 6 then never sees.
 putc:   PUSH    DE
@@ -1245,15 +1305,6 @@ e_under:LD      SP,DSTOP        ; data stack underflow: it counts as empty
         LD      A,'s'
         JR      error
 
-; chkbrk: a waiting key is read now; Ctrl-C stops the program, anything
-; else is held for the next '?'.
-chkbrk: CALL    getk
-        RET     Z
-        CP      3
-        JR      Z,e_break
-        LD      (KEYBUF),A
-        RET
-
 ; e_hi: the inner loop read a reserved byte, 80h-FFh: X. But a word cell that
 ; was never defined still holds 0000h, and the byte there is a reserved one
 ; in every build (AFh or C3h): if the IP is in page zero, this was a call of
@@ -1267,7 +1318,7 @@ e_hi:   INC     B
         JR      error
 ; Error entries. Each loads its letter and then hides the next entry inside
 ; a 3-byte LD DE,nn (the 11h), so they all fall through to `error`.
-e_break:LD      A,'B'           ; Ctrl-C (found inside chkbrk)
+e_break:LD      A,'B'           ; Ctrl-C (found inside pollk or getk)
         DB      11h
 e_heap1:LD      A,'H'           ; heap (found inside chkhp)
         DB      11h
@@ -1473,11 +1524,11 @@ list:   INC     BC
 li1:    LD      A,(HL)
         OR      A
         JR      Z,edit          ; the end of the text
-        CALL    getk
+        CALL    rawk
         JR      Z,li3           ; no key: carry on
         CP      3
         JR      Z,edit          ; Ctrl-C
-li2:    CALL    getk            ; any other key: wait for one more
+li2:    CALL    rawk            ; any other key: wait for one more
         JR      Z,li2
         CP      3
         JR      Z,edit
@@ -1506,14 +1557,9 @@ de1:    LD      A,(HL)
         JR      NZ,de1          ; and fall into the editor
 
 edit:   LD      SP,DSTOP
-        ENDIF
-        IF      EDITOR*CPM*CHECKED
-        ; A key that the break check held back while a program ran is let
-        ; go: BDOS 10 would not see it, and it would turn up in the next
-        ; program that asked for a key. (This also serves at the start.)
-        XOR     A
-        LD      (KEYBUF),A
-        ENDIF
+        XOR     A               ; a key that the break check held while the
+        LD      (KEYBUF),A      ;   program ran is let go (the Ctrl-C that
+        ENDIF                   ;   stopped it, for one)
         IF      EDGEN
         LD      D,0FDh          ; 125 characters at most
         ENDIF
@@ -1546,8 +1592,11 @@ edit:   LD      SP,DSTOP
 
 ; st0: start running at BC. The heap starts after the stored program's NUL.
 st0:    POP     HL              ; (the end of what was typed: the stack is empty)
-        LD      HL,PROG
         XOR     A
+        LD      H,A             ; no key is held, and the break key is on: a
+        LD      L,A             ;   key left over from the last run is let go
+        LD      (KEYBUF),HL
+        LD      HL,PROG
 st1:    CP      (HL)
         INC     HL
         JR      NZ,st1

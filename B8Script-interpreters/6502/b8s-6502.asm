@@ -1,12 +1,12 @@
 ; =============================================================================
 ;  B8Script interpreter for the 6502 (NMOS opcodes only)
 ;  Spec: docs/b8script.md (2026-11-21). -n? does no more editing than
-;        Backspace. The break key is checked in the checked build only (at
-;        every ')' loop-back and every return).
+;        Backspace. Ctrl-C stops every build (see the console layer); the
+;        break-off cell is BRKOFF, $047B.
 ;  Design follows the Z80 interpreter; see b8s-z80.asm for the common ideas.
 ;
 ;  This interpreter keeps the data stack in pages 2 and 3 (252 cells) and
-;  uses 10 bytes of zero page. b8s-6502-zp.asm is a smaller interpreter that
+;  uses 10 bytes of zero page ($00-$09). b8s-6502-zp.asm is a smaller interpreter that
 ;  keeps the stack in zero page instead (112 cells); its memory map and
 ;  machine-code contract differ.
 ;
@@ -74,7 +74,7 @@ T1      EQU     05h
 T2      EQU     06h
 D0      EQU     08h             ; divisor (division, number printing)
 D1      EQU     09h
-RSV     EQU     07h             ; checked: S as it was before this character
+CDOWN   EQU     07h             ; the break check's countdown (see pnext)
 ; The error report (checked) runs after the program, so it may use the zero
 ; page that machine code has ($0A-$0F):
 P       EQU     0Ah             ; 0A-0B the place being reported
@@ -90,8 +90,9 @@ Q       EQU     0Ch             ; 0C-0D a pointer for counting lines
 ;    0400       LET  letter cells: A..Z at +00..+33, a..z at +40..+73 (a word
 ;               cell is 64 bytes below its variable), heap pointer at +7C,
 ;               the -n? line buffer at +80..+FF. The checked build's cells
-;               are in the gaps: KEYBUF at +34, PLACE at +36, PEND at +38.
-;               (+7A and +7B are kept free.)
+;               are in the gaps: RSV at +35, PLACE at +36, PEND at +38;
+;               and every build's: KEYBUF (the held key) at +7A, BRKOFF (the
+;               break-off cell) at +7B.
 ;    0500       PROG the program text, NUL-terminated; the heap follows
 ;    E000       the interpreter (ROM)
 ;
@@ -113,7 +114,10 @@ PROG    EQU     0500h           ; where the loader puts the program text
 PROG1   EQU     PROG+1
 HEAPLIM EQU     0E0h            ; the heap must stay below E000h (a page)
 HEAP    EQU     LET+7Ch         ; the heap pointer (the heap top)
-KEYBUF  EQU     LET+34h         ; a key held back by the break check
+KEYBUF  EQU     LET+7Ah         ; a key held back by the break check (0: none)
+BRKOFF  EQU     LET+7Bh         ; the break-off cell: a program that stores a
+                                ;   non-zero byte here gets Ctrl-C as a key
+RSV     EQU     LET+35h         ; checked: S as it was before this character
 PLACE   EQU     LET+36h         ; checked: the address of this character
 PEND    EQU     LET+38h         ; checked: the program's end, where the heap
                                 ;   starts: it may not be released below it
@@ -122,6 +126,9 @@ LBM1    EQU     LINEBUF-1       ; (for the error report)
 PROGM1  EQU     PROG-1
 RSLIM   EQU     20h             ; lowest S allowed (checked build)
 MSLOOP  EQU     40              ; n? inner loop count for about 1 ms; tune it
+                                ;   (each pass calls KEY once; the wait for a
+                                ;   second Ctrl-C uses it too: 250 ms)
+CWAIT   EQU     250*MSLOOP/256  ; (that wait, in 256s)
 
         ORG     0E000h
 
@@ -145,6 +152,10 @@ stz:    STA     LET,Y
         JSR     rstip
 st1:    JSR     getc
         BNE     st1             ; IP ends just past the NUL
+        IF      1-CHECKED
+        STA     KEYBUF          ; (A = 0) no key held, the break key on
+        STA     BRKOFF
+        ENDIF
         LDA     IP
         STA     HEAP
         IF      CHECKED
@@ -161,6 +172,31 @@ st1:    JSR     getc
 ; =============================================================================
 ;  The inner loop
 ; =============================================================================
+; -----------------------------------------------------------------------------
+;  The break key. A running program reads the keyboard only through getk
+;  (for '?') and pnext (the break check), which between them give the break
+;  key its rules:
+;    - Ctrl-C (03h) stops the program: silently to EXIT in the unchecked
+;      build, with the report (B) in the checked one;
+;    - any other key that the break check reads is held in KEYBUF for the
+;      next '?', and a newer one takes its place;
+;    - '?' (getk) takes the held key first;
+;    - a program that has stored a non-zero byte at BRKOFF gets Ctrl-C as a
+;      key like any other, but two of them within about 250 ms still stop it.
+;  KEY is the host's: a waiting key in A, or A = 0 with the zero flag set.
+; -----------------------------------------------------------------------------
+; pnext: the break check, then (falling through) next. A word call, a true
+; '(' and a true ')' end here, but the keyboard is looked at only once in 256
+; of them: CDOWN counts them down. A key found is held; a Ctrl-C goes on to ctlc. (Startup
+; falls in here too, which does no harm.)
+pnext:  DEC     CDOWN
+        BNE     next
+        JSR     KEY
+        BEQ     next            ; no key
+        STA     KEYBUF          ; held for the next '?'
+        CMP     #3
+        BNE     next
+        JSR     ctlc            ; (it comes back only if the break key is off)
 next:
         IF      CHECKED
         ; Both stacks are checked once per character, after it has run. The
@@ -339,7 +375,7 @@ pushn:  PLA
         STA     IP
         LDA     LET+1,Y
         STA     IP+1
-nxt:    JMP     next
+nxt:    JMP     pnext
 
 
 ; '[' followed by a letter stores the body's address in that letter's cell:
@@ -642,9 +678,6 @@ h_close:JSR     flag
         DB      24h             ; (BIT zp: steps over the SEC)
 ; ']' returns: pull an address and jump to it.
 h_ret:  SEC
-        IF      CHECKED
-        JSR     chkbrk          ; Ctrl-C is checked at every loop-back and
-        ENDIF                   ;   every word return (it keeps the carry)
         PLA
         PLA                     ; drop the step frame
         PLA
@@ -655,7 +688,7 @@ h_ret:  SEC
         PHA                     ; ')': keep the block start
         LDA     IP
         PHA
-        BCC     nxt2            ; always
+        JMP     pnext           ; a loop-back: the break check
 
 ; '\' ( flag -- ): true skips to the next ')' or ']' at this level; ')'
 ; drops the block start, ']' returns.
@@ -1122,40 +1155,56 @@ rdhex:  JSR     isdig
 rh1:    JMP     incip
 rh9:    RTS
 
-; =============================================================================
-;  Console layer: getk returns a waiting key in A (zero flag clear), or
-;  A = 0 with the zero flag set when none is waiting. CONOUT prints A.
-;  Both keep X and Y. In the unchecked build getk is the host's KEY itself.
-; =============================================================================
-        IF      1-CHECKED
-getk    EQU     KEY             ; the host's routine does the whole job
-        ENDIF
-        IF      CHECKED
-getk:   LDA     KEYBUF          ; a key held back by the break check
+
+; getk: a key for '?' in A (zero flag clear), or A = 0 with the zero flag
+; set when there is none. Keeps X and Y. The held key goes first, and is
+; taken out of KEYBUF.
+getk:   LDA     KEYBUF
         BEQ     gk1
         PHA
         LDA     #0
         STA     KEYBUF
         PLA
         RTS
-gk1:    JMP     KEY
+gk1:    JSR     KEY
+        BEQ     gk9
+        CMP     #3
+        BEQ     ctlc            ; Ctrl-C: ctlc gives the 03h back, if at all
+gk9:    RTS
+
+; ctlc: Ctrl-C has been read. If the break key is on, that is the end. If
+; the program has turned it off, wait about 250 ms (about 250 times MSLOOP
+; looks: D0 counts the 256s, D1 runs on from whatever it holds) for one more
+; key: a second Ctrl-C is the end too; any other key is held (the newest
+; wins). Returns A = 03h with the zero flag clear. Keeps X and Y.
+ctlc:   LDA     BRKOFF
+        BEQ     cbreak
+        LDA     #CWAIT+1
+        STA     D0
+ct2:    JSR     KEY
+        BNE     ct3
+        DEC     D1
+        BNE     ct2
+        DEC     D0
+        BNE     ct2
+        BEQ     ct9             ; always: none came
+ct3:    CMP     #3
+        BEQ     cbreak
+        STA     KEYBUF
+ct9:    LDA     #3
+        RTS
+        IF      1-CHECKED
+cbreak: JMP     EXIT            ; the unchecked build stops without a word
+        ENDIF
+        IF      CHECKED
+cbreak:                         ; the checked build reports B, the stacks as
+e_break:LDA     #'B'            ;   they stand (it falls into error)
         ENDIF
 
-; =============================================================================
-;  Checked build: break key and error reports
-; =============================================================================
         IF      CHECKED
-; chkbrk: a waiting key is read now; Ctrl-C stops the program, anything
-; else is held for the next '?'. Keeps the flags.
-chkbrk: PHP
-        JSR     getk
-        BEQ     cb9
-        CMP     #3
-        BEQ     e_break
-        STA     KEYBUF
-cb9:    PLP
-        RTS
-e_break:LDA     #'B'            ; Ctrl-C
+; =============================================================================
+;  Checked build: the error report
+; =============================================================================
 
 ; error: the report, then EXIT. A = the letter, PLACE = the place, X = the
 ; data stack to show, RSV = S for the Rtn line. Nothing here relies on S: an

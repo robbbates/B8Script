@@ -5,6 +5,18 @@ loaded at PROG (from the listing) and NUL-terminated. KEY, CONOUT and EXIT
 are traps: when the PC reaches one, the harness does the job and simulates
 an RTS. KEY returns a waiting key in A, or 0, with the Z flag matching A.
 Execution starts at the symbol `start`.
+
+Keys are typed as a person types them: only when the program is waiting for
+one. Every build looks at the keyboard now and then for the break key, and a
+key it finds then is held, the newest winning (the spec); a queue of keys
+handed over as fast as they are read would mostly be lost. So a key from the
+input is given only when KEY is called twice within GAP emulated
+instructions, which is a program sitting in a key loop ('?', a line read),
+not the break check, whose looks are hundreds of characters apart. Keys to
+be pressed while the program is busy are given at once: `brk_at` presses
+Ctrl-C once that many characters have been printed, and `timed` is a list of
+(n, keys): the keys are pressed once n characters have been printed.
+`looks` counts the calls of KEY.
 """
 import os, sys, logging
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -13,6 +25,11 @@ from MC6809.components.cpu6809 import CPU
 from MC6809.components.memory import Memory
 from MC6809.core.configs import BaseConfig
 from harness_z80 import load_hex, symbols
+
+GAP = 1000           # instructions: two looks at the keyboard closer than this
+                     # are a key loop (one pass of one is about a dozen; 256
+                     # loop-backs or word calls are many thousands)
+IDLE = 20000         # empty looks in a row before a run counts as waiting
 
 
 class Cfg(BaseConfig):
@@ -23,7 +40,7 @@ class Cfg(BaseConfig):
 
 
 class Run:
-    def __init__(self, hexf, lst, prog, inp=b'', maxops=2_000_000_000, brk_at=None):
+    def __init__(self, hexf, lst, prog, inp=b'', maxops=2_000_000_000, brk_at=None, timed=()):
         self.sy = symbols(lst)
         cfg = Cfg({"verbosity": None, "trace": None})
         self.mem = Memory(cfg)
@@ -40,7 +57,12 @@ class Run:
         self.out = bytearray()
         self.ended = None
         self.maxops = maxops
-        self.brk_at = brk_at    # inject Ctrl-C once the output reaches this many bytes
+        self.brk_at = brk_at    # press Ctrl-C once the output reaches this many bytes
+        self.timed = list(timed)
+        self.pressed = []       # keys pressed: given at the next looks, gap or no gap
+        self.looks = 0          # how many times KEY was called
+        self.now = 0            # instructions run so far
+        self.last_look = -GAP
         self.cpu.program_counter.set(self.sy['START'])
 
     def _sex(self, opcode):
@@ -49,11 +71,22 @@ class Run:
         cpu.clear_NZ()
         cpu.update_NZ_16(cpu.accu_d.value)
 
-    def key_ready(self):
+    def key(self):
+        """The key that a look at the keyboard finds now, or 0."""
+        self.looks += 1
         if self.brk_at is not None and len(self.out) >= self.brk_at:
-            self.inp.insert(0, 3)
+            self.pressed.append(3)
             self.brk_at = None
-        return bool(self.inp)
+        while self.timed and len(self.out) >= self.timed[0][0]:
+            k = self.timed.pop(0)[1]
+            self.pressed += list(k) if isinstance(k, (bytes, list, tuple)) else [k]
+        waiting = self.now - self.last_look < GAP
+        self.last_look = self.now
+        if self.pressed:
+            return self.pressed.pop(0)
+        if self.inp and waiting:
+            return self.inp.pop(0)
+        return 0
 
     def rts(self):
         cpu = self.cpu
@@ -74,18 +107,20 @@ class Run:
         while n < self.maxops:
             step()
             n += 1
+            self.now = n
             t = traps.get(pc.value)
             if t is None:
                 continue
             if t == 'out':
                 self.out.append(a.value); idle = 0; self.rts()
             elif t == 'key':
-                if self.key_ready():
-                    a.set(self.inp.pop(0)); idle = 0
+                a.set(self.key())
+                if a.value or self.inp or self.timed or self.pressed:
+                    idle = 0
                 else:
                     # a program polling for a key that will never come
-                    a.set(0); idle += 1
-                    if idle > 20000:
+                    idle += 1
+                    if idle > IDLE:
                         self.ended = 'needkey'; break
                 # the host routine's contract: Z (and N) follow A
                 v = a.value

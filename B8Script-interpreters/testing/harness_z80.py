@@ -3,10 +3,14 @@
 generic: the image is ROM at 0000h, the program text is loaded at PROG (taken
 from the listing) and NUL-terminated, and KEY/CONOUT/EXIT are traps. KEY
 returns a waiting key in A, or 0, with the zero flag matching A.
-cpm: the image is a .COM at 0100h; BDOS 6, 10, 15, 20 and 26 are emulated,
-and the program is the 'file' that fn 15/20 read.
+cpm: the image is a .COM at 0100h; BDOS 6, 10, 15, 16, 19, 20, 21, 22 and
+26 are emulated. `files` is the disk: a dict of 11-character names (as in an
+FCB) to contents, and it holds what the build wrote when the run is over.
+If it is not given, the program is the one file on it, PROG.B8S, which is
+the name on the command line.
 editor: a generic image built with EDITOR = 1. No program is loaded (the RAM
-at PROG starts as junk, as after power-on) and everything goes in through KEY.
+at PROG starts as junk, as after power-on) and everything goes in through
+KEY. The run ends as 'exit' when the editor is left (LEAVE).
 cpm-editor: a .COM built with EDITOR = 1; the program is the file it loads.
 In both editor modes the input is a list of chunks: the next chunk is typed
 only when the machine has been left waiting for a key, as a person would, and
@@ -71,7 +75,7 @@ def plat(lst, cpm=False):
 
 class Run:
     def __init__(self, hexf, lst, prog, inp=b'', cpu='z80', mode='generic',
-                 maxticks=4_000_000_000, brk_at=None, timed=()):
+                 maxticks=4_000_000_000, brk_at=None, timed=(), files=None):
         self.m = z80.I8080Machine() if cpu == '8080' else z80.Z80Machine()
         self.sy = symbols(lst)
         org, img = load_hex(hexf)
@@ -85,6 +89,7 @@ class Run:
         self.now = 0           # clock ticks so far
         self.last_look = -GAP  # when the keyboard was last looked at
         self.pressed = []      # keys pressed while the program is busy: given at once
+        self.looks = 0         # how many times the keyboard was looked at
         self.inp = list(inp)
         self.out = bytearray()
         self.mode = mode
@@ -101,8 +106,9 @@ class Run:
             self.m.pc = 0
         elif mode == 'editor':
             self.m.set_memory_block(self.sy['PROG'], b'\xAA' * 2048)
-            for k in ('KEY', 'CONOUT'):
-                self.m.set_breakpoint(self.sy[k])
+            for k in ('KEY', 'CONOUT', 'LEAVE'):
+                if k in self.sy:
+                    self.m.set_breakpoint(self.sy[k])
             self.m.pc = 0
         else:
             # page zero: JP WBOOT at 0, JP BDOS at 5
@@ -113,7 +119,8 @@ class Run:
             fcb = bytearray(36)
             fcb[1:12] = b'PROG    B8S'
             self.m.set_memory_block(0x5C, bytes(fcb))
-            self.file = prog
+            self.files = {b'PROG    B8S': prog} if files is None else files
+            self.cur = None        # the file that is open
             self.fpos = 0
             self.dma = 0x80
             self.m.sp = 0xFF00
@@ -129,6 +136,7 @@ class Run:
 
     def key(self):
         """The key that a look at the keyboard finds now, or 0."""
+        self.looks += 1
         if self.brk_at is not None and len(self.out) >= self.brk_at:
             self.pressed.append(3)
             self.brk_at = None
@@ -182,7 +190,7 @@ class Run:
                     # the host routine's contract: Z (and S) follow A
                     m.f = (m.f & 0x3F) | (0x40 if m.a == 0 else 0) | (m.a & 0x80)
                     self.ret()
-                elif pc == sy['EXIT'] and self.mode == 'generic':
+                elif pc == (sy['EXIT'] if self.mode == 'generic' else sy.get('LEAVE')):
                     self.ended = 'exit'; break
                 # anything else: the tick budget ran out; carry on
             else:
@@ -238,19 +246,32 @@ class Run:
                         break
             self.out.append(13)
             m.set_memory_block(de + 1, bytes([len(buf)]) + bytes(buf))
-        elif f == 15:
+        elif f in (15, 19, 22):                 # open, delete, make
+            name = bytes(self.mem(m.de + 1 + i) for i in range(11))
+            if f == 22:
+                self.files[name] = b''
+            found = name in self.files
+            if f == 19:
+                self.files.pop(name, None)
+            self.cur, self.fpos = (name if found and f != 19 else None), 0
+            m.a = 0 if found else 0xFF
+        elif f == 16:                           # close
             m.a = 0
         elif f == 26:
             self.dma = m.de
-        elif f == 20:
-            if self.fpos >= len(self.file):
+        elif f == 20:                           # read a record
+            file = self.files.get(self.cur, b'')
+            if self.fpos >= len(file):
                 m.a = 1
             else:
-                rec = self.file[self.fpos:self.fpos + 128]
+                rec = file[self.fpos:self.fpos + 128]
                 rec = rec + b'\x1a' * (128 - len(rec))
                 m.set_memory_block(self.dma, rec)
                 self.fpos += 128
                 m.a = 0
+        elif f == 21:                           # write a record
+            self.files[self.cur] += bytes(self.mem(self.dma + i) for i in range(128))
+            m.a = 0
         elif f == 9:
             a = m.de
             while self.mem(a) != ord('$'):

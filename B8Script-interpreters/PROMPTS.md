@@ -65,9 +65,10 @@ bytes, one CPU at a time. Ideas not yet tried:
   than the two ranges of the one-byte scheme. A third range, or moving the
   checked-only routines, might get it back.
 - Z80/8080: the first 256 bytes are packed by hand around the RST vectors.
-- Z80 with EDITOR = 1: 876 bytes, 182 of them the editor. It has no prompt
-  and prints nothing after a program ends; a CHECKED editor build (errors
-  and Ctrl-C coming back to the editor) doesn't exist yet.
+- Z80 with EDITOR = 1: 877 bytes, 183 of them the editor (four builds:
+  with or without CPM and CHECKED). It has no prompt and prints nothing
+  after a program ends; the CP/M builds load a file but can't save one;
+  a checked build's error gives a byte offset, not a line number.
 
 Report a table of bytes before and after for every variant, the techniques
 that paid off, and the ones you tried that didn't.

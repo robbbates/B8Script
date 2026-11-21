@@ -10,8 +10,8 @@
 ;  Three switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
-;    EDITOR   1 = generic build with a small line editor built in (see the
-;                 end of this file). It needs CPM = 0 and CHECKED = 0.
+;    EDITOR   1 = with a small line editor built in (see the end of this
+;                 file). It goes with either setting of the other two.
 ;    CHECKED  0 = no checks (spec: "B8Script checks nothing")
 ;             1 = stops on stack overrun, Ctrl-C, heap past the limit, a store
 ;                 outside the program's own space, and a bad character after [,
@@ -22,7 +22,9 @@
 
 CPM     EQU     0               ; 1 = CP/M .COM build
 CHECKED EQU     0               ; 1 = checked build
-EDITOR  EQU     0               ; 1 = with the line editor (generic only)
+EDITOR  EQU     0               ; 1 = with the line editor
+EDGEN   EQU     EDITOR*(1-CPM)  ; (the generic build with the editor)
+TABP0   EQU     EDGEN*(1-CHECKED) ; (the build with its table in page zero)
 
 ; -----------------------------------------------------------------------------
 ;  Register use, everywhere in the interpreter
@@ -78,8 +80,10 @@ EDITOR  EQU     0               ; 1 = with the line editor (generic only)
 
         IF      CPM
 BDOS    EQU     0005h
-EXIT    EQU     0000h           ; warm boot
 BASE    EQU     0100h           ; where the image starts
+        ENDIF
+        IF      CPM*(1-EDITOR)
+EXIT    EQU     0000h           ; warm boot
         ENDIF
         IFN     CPM
 ; ---- generic machine: edit these to suit -----------------------------------
@@ -125,17 +129,24 @@ DSTOP   EQU     DSPAGE*256+0FEh ; empty data stack
 ;  page zero (see the header).
 ; =============================================================================
         ORG     BASE
-        IF      1-EDITOR
+        IF      1-EDGEN
         LD      SP,DSTOP        ; 00  reset, or the start of the .COM file
         ENDIF
         IF      (1-CPM)*(1-EDITOR)
         LD      BC,PROG         ; 03  the IP
         JR      st0             ; 06  (the rest of the startup is close by)
         ENDIF
-        IF      EDITOR
+        IF      EDGEN
         XOR     A               ; 00  reset: no program yet
         LD      (PROG),A
+        ENDIF
+        IF      EDGEN*(1-CHECKED)
         JP      edit            ; 04
+        ENDIF
+        IF      EDGEN*CHECKED
+        JP      init            ; 04  (and no key held back)
+        ENDIF
+        IF      EDGEN
         NOP                     ; 07  spare
         ENDIF
         IF      CPM
@@ -270,11 +281,11 @@ p3a:    ADD     A,5             ; 3Ah-40h: index 15-21
 ; untouched, and A, DE free.
 punct:  ADD     A,PTAB & 0FFh   ; PTAB never crosses a page
         LD      E,A
-        LD      D,PTAB / 256    ; (0 in the editor build)
+        LD      D,PTAB / 256    ; (0 if the table is in page zero)
         CP      (PTAB & 0FFh) + NPG1 ; carry: one of the first NPG1
         LD      A,(DE)
         LD      E,A             ; the handler's low byte
-        IF      (1-CPM)*(1-EDITOR)
+        IF      (1-CPM)*(1-TABP0)
         LD      D,0
         ENDIF
         IFN     CPM
@@ -314,10 +325,10 @@ st2:    LD      (HEAP),HL
         RST     30h             ; (its return address is thrown away)
         ENDIF
 
-; In the editor build the table is here, in the first page, which saves
-; loading D twice. (The other builds have no room for it here: theirs is
-; further down.)
-        IF      EDITOR
+; In the unchecked generic editor build the table is here, in the first
+; page, which saves loading D twice. (The other builds have no room for it
+; here: theirs is further down.)
+        IF      TABP0
 PTAB:
         PTABLE
 PTABEND:
@@ -721,6 +732,15 @@ line:   LD      DE,127          ; TOS is minus the count: adding 127 carries
         SBC     A,A
         AND     L               ; (0 for a count that is too big)
         XOR     127             ; A = the count, 127 at most
+        ENDIF
+        IF      CPM*EDITOR
+        CALL    rdline          ; (the editor calls rdline too)
+        LD      L,LINEBUF & 0FFh
+        RST     30h
+; rdline: read a line of at most A characters; HL -> the CR that ends it
+rdline:
+        ENDIF
+        IF      CPM
         LD      (LBHDR),A
         LD      DE,LBHDR
         LD      A,10
@@ -731,8 +751,13 @@ line:   LD      DE,127          ; TOS is minus the count: adding 127 carries
         ADD     A,L             ;   adding the count to L can't carry
         LD      L,A
         LD      (HL),13
+        ENDIF
+        IF      CPM*(1-EDITOR)
         LD      L,LINEBUF & 0FFh
         RST     30h
+        ENDIF
+        IF      CPM*EDITOR
+        RET
         ENDIF
         IFN     CPM
         ; Generic: Backspace takes the last character back (and is echoed as
@@ -749,7 +774,7 @@ line:   LD      DE,127          ; TOS is minus the count: adding 127 carries
         CPL
         LD      D,A             ; D = the L of a full line: 80h + count, FFh
         ENDIF                   ;   at most
-        IF      EDITOR
+        IF      EDGEN
         CALL    rdline          ; (the editor calls rdline too)
         LD      L,LINEBUF & 0FFh
         RST     30h
@@ -783,7 +808,7 @@ ln5:    LD      (HL),A          ; the CR
         LD      L,LINEBUF & 0FFh
         RST     30h
         ENDIF
-        IF      EDITOR
+        IF      EDGEN
         RET
         ENDIF
 
@@ -921,7 +946,7 @@ PGBRK   EQU     (h_break-BASE)/256
 PGDEF   EQU     (h_def-BASE)/256
 PGFET   EQU     (h_fetch-BASE)/256
 NPG1    EQU     21 + PGFET + PGDEF + PGBRK + PGRET
-        IF      1-EDITOR
+        IF      1-TABP0
 PTAB:
         PTABLE
 PTABEND:
@@ -1100,8 +1125,19 @@ error:  LD      SP,DSTOP        ; the stacks may be wrecked: start clean
 ;  that character is not stored. The text is kept as it is typed, each line
 ;  ending in CR LF, at PROG. Nothing is checked.
 ;
+;  With CPM = 1 the file named on the command line is the program to start
+;  with (no file, or no such file: no program). Lines are read by BDOS 10, so
+;  its editing keys work, and Ctrl-C as the first key of a line goes back to
+;  CP/M. Nothing is written back: there is no command to save.
+;
+;  With CHECKED = 1 a program that is stopped (an error, or Ctrl-C) prints
+;  its letter and place and comes back here. The place is counted from the
+;  start of the program, so in a line typed here it is 65408 plus the
+;  character's place in the line (the line buffer is 128 bytes below the
+;  program).
+;
 ;  Things to know:
-;    - Reset empties the program.
+;    - Reset empties the program (generic builds).
 ;    - Words and variables last from one line to the next. A word's address
 ;      points into the program, so run the program again after editing it.
 ;    - Nothing is printed between a program's output and what is typed next.
@@ -1109,6 +1145,10 @@ error:  LD      SP,DSTOP        ; the stacks may be wrecked: start clean
 ;      a line that calls -n? and carries on afterwards runs what was typed.
 ;      (The stored program never comes back to the line, so it may.)
 ; =============================================================================
+        IF      EDGEN*CHECKED
+init:   LD      (KEYBUF),A      ; (A = 0) reset: no key held back
+        JR      edit
+        ENDIF
         IF      EDITOR
 ; -n: list from line n. DE = the number of the line at HL.
 list:   INC     BC
@@ -1152,7 +1192,21 @@ de1:    LD      A,(HL)
         JR      NZ,de1          ; and fall into the editor
 
 edit:   LD      SP,DSTOP
+        ENDIF
+        IF      EDITOR*CPM*CHECKED
+        ; A key that the break check held back while a program ran is let
+        ; go: BDOS 10 would not see it, and it would turn up in the next
+        ; program that asked for a key. (This also serves at the start.)
+        XOR     A
+        LD      (KEYBUF),A
+        ENDIF
+        IF      EDGEN
         LD      D,0FDh          ; 125 characters at most
+        ENDIF
+        IF      EDITOR*CPM
+        LD      A,125
+        ENDIF
+        IF      EDITOR
         CALL    rdline          ; HL -> the CR that ended the line
         INC     L
         LD      (HL),10         ; a LF after it,
@@ -1177,7 +1231,8 @@ edit:   LD      SP,DSTOP
         LD      BC,PROG         ;   0: run the program
 
 ; st0: start running at BC. The heap starts after the stored program's NUL.
-st0:    LD      HL,PROG
+st0:    POP     HL              ; (the end of what was typed: the stack is empty)
+        LD      HL,PROG
         XOR     A
 st1:    CP      (HL)
         INC     HL
@@ -1280,10 +1335,36 @@ ld1:    PUSH    DE
         ADD     HL,DE
         EX      DE,HL
         JR      ld1
-ld2:    LD      (HL),0          ; the end of the file counts as NUL
+ld2:
+        ENDIF
+        IF      CPM*(1-EDITOR)
+        LD      (HL),0          ; the end of the file counts as NUL
         INC     HL              ; the heap starts after it
         LD      BC,PROG         ; the IP
         JP      st2
+        ENDIF
+        IF      CPM*EDITOR
+        ; The editor wants the text to end where the file's text ends: at
+        ; the first ^Z (1Ah), which pads a text file's last record. One more
+        ; goes after the last record, so the search always stops. And every
+        ; line must end in LF: a last line without one is given a CR LF.
+        LD      (HL),1Ah
+        LD      HL,PROG-1
+        LD      A,10            ; (a file with no text needs nothing added)
+tr1:    INC     HL
+        LD      E,A             ; E = the character before this one
+        LD      A,(HL)
+        CP      1Ah
+        JR      NZ,tr1
+        LD      A,E
+        CP      10
+        JR      Z,tr2
+        LD      (HL),13
+        INC     HL
+        LD      (HL),10
+        INC     HL
+tr2:    LD      (HL),0
+        JP      edit
         ENDIF
 
         IF      CPM

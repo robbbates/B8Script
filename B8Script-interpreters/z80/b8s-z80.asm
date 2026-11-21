@@ -467,26 +467,16 @@ rdrop:  RST     08h
 ; '[' followed by a letter stores the body's address in that letter's cell:
 ; uppercase is a word, lowercase a variable. Followed by a space it pushes
 ; the body's address instead. Either way it then skips to the matching ']'.
-; (The unchecked build takes anything below 'A' as the space, and anything
-; from 'A' up as a letter.)
+; (The unchecked build takes anything that is not a letter as the space; the
+; checked build stops on it.)
 h_def:  LD      A,(BC)
         INC     BC
-        IF      CHECKED
-        CP      ' '
-        JR      Z,def2
-        LD      E,A
+        SUB     'A'             ; a letter gives 0-25 or 32-57: lowercase
+        LD      E,A             ;   lands 64 bytes up
         AND     0DFh            ; fold case
-        SUB     'A'
         CP      26
-        JP      NC,e_brack      ; anything but a letter or a space
-        LD      A,E
-        ENDIF
-        SUB     'A'             ; 0-25 or 32-57: lowercase lands 64 bytes up
-        IF      1-CHECKED
-        JR      C,def2
-        ENDIF
-        ADD     A,A
-        LD      E,A
+        JR      NC,def2         ; not a letter
+        SLA     E
         LD      D,LETPAGE       ; DE -> cell
         LD      A,C
         LD      (DE),A
@@ -494,7 +484,13 @@ h_def:  LD      A,(BC)
         LD      A,B
         LD      (DE),A
         JR      skipnx
-def2:   PUSH    HL              ; an anonymous block: push its address
+def2:
+        IF      CHECKED
+        LD      A,E
+        CP      ' '-'A'+256
+        JP      NZ,e_brack      ; anything but a letter or a space
+        ENDIF
+        PUSH    HL              ; an anonymous block: push its address
         LD      H,B
         LD      L,C
 skipnx: CALL    skip

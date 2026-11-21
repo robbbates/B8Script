@@ -252,25 +252,26 @@ upper:  ASL
 ; '[' followed by a letter stores the body's address in that letter's cell:
 ; uppercase is a word, lowercase a variable. Followed by a space it pushes
 ; the body's address instead. Either way it then skips to the matching ']'.
-; (The unchecked build takes anything below 'A' as the space, and anything
-; from 'A' up as a letter.)
-h_def:  JSR     getc
+; (The unchecked build takes anything that is not a letter as the space; the
+; checked build stops on it.)
         IF      CHECKED
-        CMP     #' '
+def1:   CPY     #' '-'A'+256
         BEQ     def2
+        BNE     e_brack         ; anything but a letter or a space
         ENDIF
+h_def:  JSR     getc
         SEC
-        SBC     #'A'            ; 0-25 or 32-57: lowercase lands 64 bytes up
-        IF      1-CHECKED
-        BCC     def2
-        ENDIF
-        IF      CHECKED
-        TAY
+        SBC     #'A'            ; a letter gives 0-25 or 32-57: lowercase
+        TAY                     ;   lands 64 bytes up
         AND     #0DFh           ; fold case: 0-25 only for a letter
         CMP     #26
-        BCS     e_brack         ; anything but a letter or a space
-        TYA
+        IF      1-CHECKED
+        BCS     def2            ; not a letter
         ENDIF
+        IF      CHECKED
+        BCS     def1
+        ENDIF
+        TYA
         ASL
         TAY                     ; Y -> the cell
         LDA     IP

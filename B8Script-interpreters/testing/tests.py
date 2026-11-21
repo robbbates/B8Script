@@ -55,6 +55,12 @@ MC = {
     '8080': [('mcdouble', b'8_:d! `D1E129E5D5 ; 21 d@` #', b'', b'42')],
 }
 
+# Unchecked builds only: anything but a letter after [ is taken as the space,
+# so each of these pushes an address (the checked builds stop on them).
+LOOSE = [
+    ('brack', b'1 [@ 0#] ; # 2 [[ 0#] ; # 3 [{ 0#] ; # 4 [~ 0#] ; # 5 [^ 0#] ; # 6 [` 0#] ; # 7 [1 0#] ; # 8 [_ 0#] ; # 9 [\x7f 0#] ; # 1 [\xc1 0#] ; #', b''),
+]
+
 # Checked builds only: each should stop with "<letter> @ <offset>", where the
 # offset is the place in the program of the character just read. The stack
 # checks run once per character, so their offset can be a character late and
@@ -65,6 +71,9 @@ ERRS = [
     ('e_rund', b'] "no"$', b'R', None),
     ('e_rover', b'[R R] R', b'R', None),
     ('e_brack', b'[5 1] "no"$', b'D', 1),
+    ('e_brack2', b'[[ 1] "no"$', b'D', 1),
+    ('e_brack3', b'[{ 1] "no"$', b'D', 1),
+    ('e_brack4', b'[@ 1] "no"$', b'D', 1),
     ('e_store', b'1 0! "no"$', b'W', 3),
     ('e_store2', b'"ok"$ 7 0. "no"$', b'W', 9),
     ('e_heap', b'-1_ "no"$', b'H', 2),

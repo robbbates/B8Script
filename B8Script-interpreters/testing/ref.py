@@ -237,7 +237,7 @@ class Ref:
                     self.ip = self.rs.pop()
         elif C == '[':
             n = self.ch()
-            if chr(n).isalpha():
+            if (n | 0x20) in range(0x61, 0x7B):     # an ASCII letter
                 self.w(self.cell(n), self.ip)
             else:
                 P(self.ip)

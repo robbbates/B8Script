@@ -270,6 +270,23 @@ rd1:    BSR     isdig
         STD     ,U
         BRA     rd1
 
+; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
+; and return its value in A with the carry set; otherwise leave the IP and
+; return with the carry clear.
+; (In the unchecked build it is here, ahead of the table, to leave room in
+; the two ranges after it; the checked build has it next to the grave.)
+        IF      1-CHECKED
+hexc:   BSR     isdig
+        BLO     hv1             ; C = 1
+        ANDA    #0DFh
+        SUBA    #11h
+        CMPA    #6
+        BHS     hv9             ; C = 0
+        SUBA    #0F6h           ; + 10, and sets the carry
+hv1:    LEAY    1,Y             ; (LEAY leaves the carry alone)
+hv9:    RTS
+        ENDIF
+
 ; =============================================================================
 ;  Dispatch table, in code order.
 ;
@@ -446,9 +463,7 @@ hx2:
 exec:   LDX     ,U++
         JMP     ,X              ; the code's RTS returns to the dispatcher
 
-; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
-; and return its value in A with the carry set; otherwise leave the IP and
-; return with the carry clear.
+        IF      CHECKED
 hexc:   JSR     isdig
         BLO     hv1             ; C = 1
         ANDA    #0DFh
@@ -458,6 +473,7 @@ hexc:   JSR     isdig
         SUBA    #0F6h           ; + 10, and sets the carry
 hv1:    LEAY    1,Y             ; (LEAY leaves the carry alone)
 hv9:    RTS
+        ENDIF
 
         IF      1-CHECKED
 getk    EQU     KEY             ; the host's routine does the whole job
@@ -491,21 +507,23 @@ rdrop:  PULS    D,X             ; the return address and the block start
 ; '[' followed by a letter stores the body's address in that letter's cell:
 ; uppercase is a word, lowercase a variable. Followed by a space it pushes
 ; the body's address instead. Either way it then skips to the matching ']'.
-; (The unchecked build takes anything below 'A' as the space, and anything
-; from 'A' up as a letter.)
-h_def:  LDA     ,Y+
+; (The unchecked build takes anything that is not a letter as the space; the
+; checked build stops on it.)
         IF      CHECKED
-        CMPA    #' '
+def1:   CMPA    #' '-'A'+256
         BEQ     def2
-        TFR     A,B
-        ANDB    #0DFh           ; fold case
-        SUBB    #'A'
-        CMPB    #26
-        LBHS    e_brack         ; anything but a letter or a space
+        LBRA    e_brack         ; anything but a letter or a space
         ENDIF
-        SUBA    #'A'            ; 0-25 or 32-57: lowercase lands 64 bytes up
+h_def:  LDA     ,Y+
+        SUBA    #'A'            ; a letter gives 0-25 or 32-57: lowercase
+        TFR     A,B             ;   lands 64 bytes up
+        ANDB    #0DFh           ; fold case
+        CMPB    #26
         IF      1-CHECKED
-        BLO     def2
+        BHS     def2            ; not a letter
+        ENDIF
+        IF      CHECKED
+        BHS     def1
         ENDIF
         JSR     cellx
         TFR     Y,D

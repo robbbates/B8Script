@@ -375,23 +375,16 @@ h_break:MOV     A,H
 ; '[' followed by a letter stores the body's address in that letter's cell:
 ; uppercase is a word, lowercase a variable. Followed by a space it pushes
 ; the body's address instead. Either way it then skips to the matching ']'.
-; (The unchecked build takes anything below 'A' as the space, and anything
-; from 'A' up as a letter.)
+; (The unchecked build takes anything that is not a letter as the space; the
+; checked build stops on it.)
 h_def:  LDAX    B
         INX     B
-        SUI     'A'             ; 0-25 or 32-57: lowercase lands 64 bytes up
-        IF      1-CHECKED
-        JC      def2
-        ENDIF
-        IF      CHECKED
-        CPI     ' '-'A'+256
-        JZ      def2
-        MOV     E,A
+        SUI     'A'             ; a letter gives 0-25 or 32-57: lowercase
+        MOV     E,A             ;   lands 64 bytes up
         ANI     0DFh            ; fold case
         CPI     26
-        JNC     e_brack         ; anything but a letter or a space
+        JNC     def2            ; not a letter
         MOV     A,E
-        ENDIF
         ADD     A
         MOV     E,A
         MVI     D,LETPAGE       ; DE -> cell
@@ -401,7 +394,13 @@ h_def:  LDAX    B
         MOV     A,B
         STAX    D
         JMP     skipnx
-def2:   PUSH    H               ; an anonymous block: push its address
+def2:
+        IF      CHECKED
+        MOV     A,E
+        CPI     ' '-'A'+256
+        JNZ     e_brack         ; anything but a letter or a space
+        ENDIF
+        PUSH    H               ; an anonymous block: push its address
         MOV     H,B
         MOV     L,C
 skipnx: CALL    skip

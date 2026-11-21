@@ -1,24 +1,25 @@
 # B8Script interpreters: Z80, 8080, 6502, 6809
 
-Generic interpreters for minimal homebrew machines (serial console only), plus CP/M 2.2 versions for the Z80 and 8080. Each CPU has one source with switches at the top:
+Generic interpreters for minimal homebrew machines (serial console only), plus CP/M 2.2 versions for the Z80 and 8080. Each source has switches at the top:
 
 ```
 CPM     EQU     0               ; 1 = CP/M .COM build        (Z80, 8080)
-CHECKED EQU     0               ; 1 = checked build          (all four)
-ZPSTACK EQU     0               ; 1 = data stack in zero page (6502)
+CHECKED EQU     0               ; 1 = checked build          (all)
 EDITOR  EQU     0               ; 1 = with the line editor   (Z80, generic unchecked only)
 ```
+
+The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, and `b8s-6502-zp.asm` is a smaller interpreter that keeps it in zero page.
 
 ## Sizes (bytes, measured)
 
 | CPU | Generic | Generic, checked | CP/M | CP/M, checked |
 |---|---|---|---|---|
-| Z80 | 673 | 820 | 736 | 885 |
-| Z80 with the line editor | 768 | n/a | n/a | n/a |
-| 8080 | 749 | 904 | 796 | 953 |
-| 6502, stack in pages 2-3 | 1,087 | 1,252 | n/a | n/a |
-| 6502, stack in zero page | 1,053 | 1,218 | n/a | n/a |
-| 6809 | 741 | 920 | n/a | n/a |
+| Z80 | 694 | 834 | 759 | 901 |
+| Z80 with the line editor | 876 | n/a | n/a | n/a |
+| 8080 | 775 | 925 | 824 | 976 |
+| 6502, stack in pages 2-3 | 1,114 | 1,275 | n/a | n/a |
+| 6502, stack in zero page | 1,015 | 1,164 | n/a | n/a |
+| 6809 | 765 | 938 | n/a | n/a |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
@@ -29,18 +30,18 @@ EDITOR  EQU     0               ; 1 = with the line editor   (Z80, generic unche
 | File | What it is |
 |---|---|
 | `*/b8s-*.asm` | The source, with comments |
-| `*-rom-XXXX.bin` | Generic ROM image, to load at XXXXh (`-zp-` = 6502 with the stack in zero page, `-editor-` = Z80 with the line editor) |
+| `*-rom-XXXX.bin` | Generic ROM image, to load at XXXXh (`-zp-` = the zero-page 6502 interpreter, `-editor-` = Z80 with the line editor) |
 | `B8SZ80.COM`, `B8SZ80C.COM`, `B8S8080.COM`, `B8S8080C.COM` | CP/M builds; the C means checked. Run as `B8SZ80 PROG.B8S` |
 | `*.lst` | The assembler's listings |
 
 ## The language, where it differs from the 2026-10-09 spec
 
-- `[x` stores the address in a variable; `[` followed by a space pushes an anonymous block; any other character after `[` is an error.
+- `[x` stores the address in a variable; `[` followed by a space pushes an anonymous block. Any other character after `[` is an error: a checked build stops on it, and an unchecked build takes it as the space.
 - The heap pointer lives at `z10+`.
 - The string escape is `/` (it was `>`): `/M` is CR, `/"` a quote, `//` a slash. `>` is an ordinary character inside strings. A `/` directly before a closing quote escapes the quote, in comments too.
+- `/` is `( a b -- q r )`, as in the spec: the remainder is on top. Dividing by 2 or -2 is a single shift.
 - Dividing by zero is not checked. It returns two cells of no meaning (different on each CPU), and the stack stays balanced.
-- There is no fast path for dividing by 2.
-- `-n?` (generic builds): Backspace takes a character back and is echoed as it is; every other key but CR is stored and echoed, control keys and DEL included. `n` is not checked: the buffer holds 127 characters and the CR, so **a program must ask for 127 or fewer**, or the line can run into the start of the program text. The CP/M builds use BDOS 10, which does its own editing.
+- `-n?` (generic builds): Backspace takes a character back and is echoed as it is; every other key but CR is stored and echoed, control keys and DEL included. A count above 127 is taken as 127. The CP/M builds use BDOS 10, which does its own editing.
 
 ## Building
 
@@ -64,13 +65,14 @@ asm80 has some quirks the sources work around:
 
 ## Layout rules the assembler can't check
 
-To save the 32 bytes of a full address table, the Z80, the 8080 and the unchecked 6809 keep one byte per punctuation character and work the rest of the handler's address out from the character's place in the table. That puts rules on where handlers sit:
+To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6809 and the zero-page 6502 keep one byte per punctuation character and work the rest of the handler's address out from the character's place in the table. That puts rules on where handlers sit:
 
 - **Z80, 8080:** the handlers of the first `NPG1` characters (in code order) start in the image's second 256 bytes, the rest in its first. `NPG1` is worked out by the assembler from where `] \ [ @` landed, so the split moves by itself when code grows or shrinks.
 - **6809, unchecked:** the same idea with two 256-byte ranges after the table. The checked 6809 build is too big for that and keeps a table of whole addresses.
+- **6502, zero page:** three pages. The handlers of `! " # $ % & ' (` start in the image's first 256 bytes, those of `) * + , - . / : ; < = > ?` in its second, and the rest in its third. The split is fixed (`N1`, `N2`), so code that grows may have to move; the source marks the stretches where no handler starts, which are the places to move it to. The image must be assembled at a multiple of 512.
 - **Z80, 8080:** the RST routines must sit at their vectors.
 
-`testing/chktab.py` (Z80, 8080) and `testing/chktab09.py` (6809) check all of this on the listings. Run them after any change; each says how many bytes are to spare.
+`testing/chktab.py` (Z80, 8080), `testing/chktab09.py` (6809) and `testing/chktab6502.py` check all of this on the listings. Run them after any change; each says how many bytes are to spare. `b8s-6502.asm` has a table of whole addresses and no such rules.
 
 ## Generic machine interface (edit the equates)
 
@@ -81,7 +83,7 @@ To save the 32 bytes of a full address table, the Z80, the 8080 and the unchecke
 | EXIT | jumped to when the program ends | same | same |
 | KEY and CONOUT must keep | BC, DE, HL (and HL' on the Z80) | X, Y | B, X, Y, U, DP |
 | Where to start | reset at 0000h | label `start`, E000h (point the reset vector at it) | label `start`: F003h unchecked, F037h checked (point the reset vector at it) |
-| RAM | RS 8000h, DS 8100h, letters 8200h, PROG 8300h | RS = page 1, DS 0200h/0300h (or zero page), letters 0400h, PROG 0500h | RS 8000h (S), DS 8100h (U), letters 8200h (DP), PROG 8300h |
+| RAM | RS 8000h, DS 8100h, letters 8200h, PROG 8300h | RS = page 1, DS 0200h/0300h (or zero page 10h-EFh), letters 0400h, PROG 0500h | RS 8000h (S), DS 8100h (U), letters 8200h (DP), PROG 8300h |
 | Heap limit | `HEAPLIM` (page), default F0h | default E0h | default F0h |
 | Timing | `MSLOOP` = loop passes per millisecond for `n?` (1-255); tune it to your clock and KEY | same | same |
 
@@ -92,25 +94,27 @@ To save the 32 bytes of a full address table, the Z80, the 8080 and the unchecke
 
 ## The Z80 line editor (EDITOR = 1)
 
-The whole image is 768 bytes: the interpreter and an editor in the size of VTL-2. The interpreter starts in the editor, and a program that ends comes back to it. There is no prompt. Type a line and press Return:
+The interpreter starts in the editor, and a program that ends comes back to it. There is no prompt. Type a line and press Return:
 
 | You type | What happens |
 |---|---|
 | `n text` | The text goes in as line n, and the lines from n on move down. A number past the end adds the line at the end |
-| `n` | Line n is taken out |
-| `0` | The program is listed |
 | `0 text` | The text is added at the end |
-| anything not starting with a digit | It runs at once, as B8Script |
-| ` 33536{]` | Runs the program (a jump to PROG, 8300h; the leading space keeps the number from being a line number) |
+| `n` | Line n is taken out |
+| `0` | The program runs |
+| `-n` | The program is listed from line n on, each line with its number; `-1` lists all of it. Any key holds the list until the next key; Ctrl-C ends it |
+| anything else | It runs at once, as B8Script. Start such a line with a space if it would begin with a digit or a minus sign |
 
-What the 95 bytes don't buy:
-- Lines are counted, not numbered. The list shows no numbers, and only the first 128 lines; a line number above 128 lists part of the program on its way there.
-- A line holds 125 characters, the line number included. The one character after the line number separates it from the text and is not stored, whatever it is: `3 5#` stores `5#`, and so does `3x5#`. Type a space there.
+- Lines are counted, not numbered: the text holds no line numbers, and the list shows each line's place. There can be 65,535 lines.
+- A typed line holds 125 characters, the line number included. The one character after the line number separates it from the text and is not stored, whatever it is: `3 5#` stores `5#`, and so does `3x5#`. Type a space there.
+- Putting a line in opens the gap with one block move, so it is quick in a long program too.
 - Reset empties the program. There is no save or load.
 - Nothing is checked, and nothing is printed between a program's output and what you type next.
-- Putting a line in moves the rest of the program up one byte for each character typed: fine for a few hundred bytes, slow in a long program.
+- Keys typed while the list is running hold it, so wait for it to end before typing the next line.
 - Words and variables last from one line to the next, so you can call a word from the keyboard after running the program. A word's address points into the program text, so run the program again after editing it.
-- A line run at once sits in the line buffer, which `-n?` also reads into. A program started with `{]` never returns to the line, so it can use `-n?` freely; a typed line that calls `-n?` itself and carries on afterwards runs what was typed.
+- A line run at once sits in the line buffer, which `-n?` also reads into. The stored program never returns to the line, so it can use `-n?` freely; a typed line that calls `-n?` itself and carries on afterwards runs what was typed.
+
+The editor adds 182 bytes. The earlier, barer editor that brought the whole image to 768 bytes (with the leaner language of that day) is commit `4fbf418`.
 
 ## Checked builds
 
@@ -129,24 +133,31 @@ A checked build stops with a letter, ` @ ` and the offset in the program of the 
 - **Store range.** "The program's own space" runs from the letter page up to the heap limit, not just up to the heap top. Tiny BASIC keeps its program lines above the heap top without allocating them, so the stricter rule would stop it.
 - **Stack checks.** These happen once per character, not in every handler. An overrun is caught at most a cell late, so the offset printed can be one character late. A guard band above the return stack absorbs calls made while the data stack is full. The stacks hold 127 data cells and 112 return entries (Z80/8080), 252 or 112 and about 100 (6502), or 127 and 127 (6809).
 - **Ctrl-C** is checked at every word call, block entry, loop-back and `{` (Z80, 8080), or at every `)` loop-back and every return (6502, 6809). Other keys pressed meanwhile are held for the next `?`.
-- **Unchecked builds and `[`.** They don't look at the character: anything below `A` is taken as the space, anything from `A` up as a letter.
+- **Unchecked builds and `[`.** A letter defines; anything else is taken as the space.
+- **CP/M and typing ahead.** A key typed while a checked CP/M program is running is held for the next single-key `?`; a `-n?` line read (BDOS 10) does not see it.
 
 ## Machine-code contracts (the grave)
 
 - **Z80 / 8080:** as in the spec. Entered by CALL, with the data cells above the return address. The code must keep BC. On return, the top cell becomes TOS. The loader appends C9h.
   - Generic builds also need page zero left intact.
   - The Z80 saves and restores HL' itself, so the code may use the alternate registers.
-- **6502:** entered as a subroutine (`JMP (T0)`, with a return address on the stack), ending in RTS (60h, appended by the loader).
-  - TOS is at $02/$03. X is the data-stack index; NOS is $0200,X (low) and $0300,X (high), or $10,X and $80,X when the stack is in zero page.
-  - To push: DEX, store, then set TOS. To drop: load, then INX.
-  - The code may change A, X (consistently), Y, $04-$06 and $08-$09. It must keep the IP at $00/$01 and leave the hardware stack balanced. $0A-$0F is free for its own use.
+- **6502, both:** entered as a subroutine (`JMP (T0)`, with a return address on the stack), ending in RTS (60h, appended by the loader). The address has been dropped. The code must keep the IP at $00/$01 and leave the hardware stack balanced.
+  - **`b8s-6502.asm`:** TOS is at $02/$03. X is the data-stack index; NOS is $0200,X (low) and $0300,X (high). To push: DEX, store TOS there, then set TOS. To drop: load TOS from there, then INX. The code may change A, X (consistently), Y, $04-$06 and $08-$09; $0A-$0F is free for its own use.
+  - **`b8s-6502-zp.asm`:** X is the data-stack pointer. TOS is at 0,X (low) and 1,X (high), NOS at 2,X and 3,X. To push: DEX, DEX, then store. To drop: INX, INX. The code may change A, Y and X (consistently); $02, $03, $07 and $0A-$0D are free for its own use.
 - **6809:** entered by a jump, with the dispatcher's return address on S, so the code ends in RTS (39h, appended by the loader).
   - U points at the top data cell, which becomes TOS on return. Cells on the data stack are big-endian (6809 order); cells in memory stay little-endian, as the spec says.
   - The code may change A, B, X, CC and U (consistently). It must keep Y (the IP) and DP, and leave S balanced.
 
-## The 6502's two stack layouts
+## The two 6502 interpreters
 
-`ZPSTACK = 0` keeps the data stack in pages 2 and 3 (252 cells). `ZPSTACK = 1` moves it to zero page: low bytes at $10-$7F, high bytes at $80-$EF, 112 cells. The code is the same; the zero-page build is 34 bytes smaller because every stack access is a byte shorter. Machine code written for one layout needs its stack addresses changed for the other.
+| | `b8s-6502.asm` | `b8s-6502-zp.asm` |
+|---|---|---|
+| Data stack | pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS in zero page | zero page $10-$EF, 112 cells, each cell two bytes side by side |
+| Zero page used | $00-$09 | $00, $01, $04-$06, $08, $09, and the stack ($0E-$0F are scratch when it is full) |
+| Dispatch table | whole addresses (64 bytes) | one byte each (32 bytes), with the layout rules above |
+| Size | 1,114 / 1,275 checked | 1,015 / 1,164 checked |
+
+The zero-page one is smaller because a cell that holds an address is used as the pointer where it lies (`(0,X)`), a drop is two `INX`, and the 16-bit operators work a byte at a time through one short routine called twice. Machine code written for one needs changing for the other: see the contracts below.
 
 ## How they were tested
 
@@ -154,12 +165,12 @@ Every build runs, in an emulator, against a reference interpreter written from t
 - every example program in the spec;
 - edge cases for `/`, compares, number wrap, string escapes, skips over strings, `\`, `[x`, `[ `, `{]` jumps, heap mark and release, the hex loader, `0?`, `n?`, `-n?` with editing, and deep stacks;
 - your Tiny BASIC, driven with a typed program (entering, LIST, RUN, GOSUB, FOR, expressions);
-- a machine-code test per CPU (and per stack layout on the 6502);
+- a machine-code test per CPU (and per interpreter on the 6502);
 - for checked builds, every error plus Ctrl-C.
 
-The editor build is tested by typing at it (`testing/test_editor.py`): entering, inserting, deleting, listing, running, more than 128 lines, full-length lines, Backspace, and programs that read lines and keys.
+The editor build is tested by typing at it (`testing/test_editor.py`), a line at a time as a person would: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, Backspace, and programs that read lines and keys.
 
-The other eight games were also run on every CPU against the reference, for as far as a short run gets. The test setup is in `testing/` (see its README).
+The other eight games are also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`). The test setup is in `testing/` (see its README).
 
 ## Converting older programs
 

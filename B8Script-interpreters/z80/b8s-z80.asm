@@ -1086,65 +1086,64 @@ error:  LD      SP,DSTOP        ; the stacks may be wrecked: start clean
 ;  a line and press Return:
 ;
 ;    n text    put the text in as line n; the lines from n on move down.
-;              A number past the end adds the line at the end.
+;              A number past the end, or 0, adds the line at the end.
 ;    n         take line n out
-;    0         list the program
-;    anything that does not start with a digit is run at once, as B8Script
+;    0         run the program
+;    -n        list the program from line n on (-1 lists all of it). Any key
+;              stops the list until another key is pressed; Ctrl-C ends it.
+;    anything else is run at once, as B8Script. (Start such a line with a
+;    space if it would begin with a digit or a minus sign.)
 ;
-;  To run the program, jump to it from such a line:  33536{]   (33536 is
-;  PROG, 8300h). Lines are counted, not numbered: there are no line numbers in
-;  the text. Line numbers go from 1 to 128, a line holds 125 characters, and
-;  nothing is checked. The text is stored as it is typed, each line ending in
-;  CR LF, at PROG. The one character after the line number is not stored.
-;
-;  A line is put in one character at a time, each one rippling the rest of
-;  the program up by a byte: small code, but slow in a long program.
+;  Lines are counted, not numbered: the text holds no line numbers, and the
+;  list shows each line's place. There can be 65535 lines. A typed line holds
+;  125 characters, the line number and the one character after it included;
+;  that character is not stored. The text is kept as it is typed, each line
+;  ending in CR LF, at PROG. Nothing is checked.
 ;
 ;  Things to know:
 ;    - Reset empties the program.
-;    - The list shows no line numbers and only the first 128 lines. A line
-;      number above 128 lists part of the program on its way to the line.
 ;    - Words and variables last from one line to the next. A word's address
 ;      points into the program, so run the program again after editing it.
 ;    - Nothing is printed between a program's output and what is typed next.
 ;    - A line run at once sits in the line buffer, which -n? also reads into:
 ;      a line that calls -n? and carries on afterwards runs what was typed.
-;      (A program started with {] never comes back to the line, so it may.)
+;      (The stored program never comes back to the line, so it may.)
 ; =============================================================================
         IF      EDITOR
-; a line number came first: L = the number, BC -> what follows it
-ed1:    LD      D,L             ; D counts down to the line wanted. From 0 it
-        LD      HL,PROG         ;   wraps to FFh: bit 7 of D makes nxl list.
-f1:     DEC     D
-        JR      Z,found
-        CALL    nxl             ; step over one line
-        OR      A
-        JR      NZ,f1           ; (A = 0: that was the end of the text)
-found:  LD      A,(BC)          ; HL -> line n, or the end of the text
-        CP      13
-        JR      Z,del           ; nothing after the number: take the line out
-        INC     BC              ; step over the one character after the number
-; Put the typed text in at HL: CR, LF and all, up to the NUL after them.
-ins:    LD      A,(BC)
-        INC     BC
-        OR      A
-        JR      Z,edit
+; -n: list from line n. DE = the number of the line at HL.
+list:   INC     BC
+        CALL    rdnum           ; HL = n
         PUSH    HL
-        LD      D,A             ; D = the byte to put down
-in1:    LD      A,(HL)          ; pick up the byte that was there,
-        LD      (HL),D          ;   put ours down,
-        INC     HL
-        LD      D,A             ;   and carry the old one on,
-        OR      A
-        JR      NZ,in1          ;   until the NUL has been moved
-        LD      (HL),A          ; the new NUL
-        POP     HL
-        INC     HL
-        JR      ins
-; Take the line at HL out: copy everything after it down over it.
-del:    PUSH    HL
-        CALL    nxl             ; HL -> the next line (D is 0 here: no listing)
+        CALL    find
         POP     DE
+li1:    LD      A,(HL)
+        OR      A
+        JR      Z,edit          ; the end of the text
+        CALL    getk
+        JR      Z,li3           ; no key: carry on
+        CP      3
+        JR      Z,edit          ; Ctrl-C
+li2:    CALL    getk            ; any other key: wait for one more
+        JR      Z,li2
+        CP      3
+        JR      Z,edit
+li3:    PUSH    HL
+        PUSH    DE
+        EX      DE,HL
+        CALL    pdec            ; the line's number,
+        LD      A,' '
+        RST     28h             ;   a space,
+        POP     DE
+        POP     HL
+        INC     DE
+        CALL    prl             ;   and the line
+        JR      li1
+
+; Take line n (in HL) out: copy everything after it down over it.
+del:    CALL    find
+        LD      D,H
+        LD      E,L
+        CALL    nxl             ; HL -> the next line
 de1:    LD      A,(HL)
         LD      (DE),A
         INC     HL
@@ -1157,15 +1156,26 @@ edit:   LD      SP,DSTOP
         CALL    rdline          ; HL -> the CR that ended the line
         INC     L
         LD      (HL),10         ; a LF after it,
-        DEC     L               ; (D is FDh after rdline: bit 7 is set, so
-        CALL    nxl             ;   nxl echoes the CR LF as a new line)
+        DEC     L
+        CALL    prl             ; (print the CR LF: a new line)
         LD      (HL),0          ;   and a NUL after that
+        PUSH    HL              ; the end of what was typed
         LD      BC,LINEBUF
+        LD      A,(BC)
+        CP      '-'
+        JR      Z,list
         CALL    rdnum           ; HL = the number it starts with, BC -> after
         LD      A,C             ; C is still 80h if there was no number:
         ADD     A,A             ;   only then is twice it 0
-        JR      NZ,ed1          ; there was a number
-        ; No number: run the line where it is (BC = LINEBUF).
+        JR      Z,st0           ; no number: run the line where it is
+        LD      A,(BC)
+        SUB     13
+        JR      NZ,ins          ; text follows the number
+        OR      H               ; the number alone:
+        OR      L
+        JR      NZ,del          ;   not 0: take that line out
+        LD      BC,PROG         ;   0: run the program
+
 ; st0: start running at BC. The heap starts after the stored program's NUL.
 st0:    LD      HL,PROG
         XOR     A
@@ -1178,19 +1188,69 @@ st1:    CP      (HL)
         EXX
         RST     30h             ; (its return address is thrown away)
 
-; nxl: step HL over one line, to just past its LF, and return A = 10; or stop
-; at the NUL that ends the text and return A = 0. If bit 7 of D is set, print
-; the line on the way.
+; Put the typed text in as line n (in HL): open a gap of its length there,
+; CR and LF included, and copy it in.
+ins:    CALL    find            ; HL -> where it goes
+        INC     BC              ; step over the one character after the number
+        POP     DE              ; the end of what was typed
+        LD      A,E
+        SUB     C               ; A = the length of the text, with its CR LF
+        PUSH    BC              ; the text
+        LD      C,A
+        LD      B,0
+        PUSH    BC              ; its length
+        LD      D,H
+        LD      E,L             ; DE = where it goes
+        XOR     A
+        LD      C,A             ; BC = 0: CPIR looks as far as it needs to
+        CPIR                    ; HL -> one past the program's NUL
+        SBC     HL,DE           ; the number of bytes to move up, NUL included
+        LD      B,H
+        LD      C,L
+        ADD     HL,DE
+        DEC     HL              ; HL -> the NUL
+        EX      DE,HL
+        EX      (SP),HL         ; HL = the length; where it goes is kept
+        PUSH    HL
+        ADD     HL,DE           ; the NUL's new place
+        EX      DE,HL
+        LDDR                    ; move the rest of the program up
+        POP     BC              ; the length
+        POP     DE              ; where it goes
+        POP     HL              ; the text
+        LDIR
+        JR      edit
+
+; find: HL = a line number. Returns HL -> that line, or -> the NUL at the end
+; of the text if there are fewer lines (or the number is 0). Keeps BC.
+find:   EX      DE,HL
+        LD      HL,PROG
+fi1:    DEC     DE
+        LD      A,D
+        OR      E
+        RET     Z
+        CALL    nxl
+        JR      NZ,fi1
+        RET
+
+; nxl: step HL over one line, to just past its LF (and return not-zero), or
+; stop at the NUL that ends the text (and return zero).
 nxl:    LD      A,(HL)
         OR      A
         RET     Z
-        BIT     7,D
-        JR      Z,nx2
-        RST     28h
-nx2:    LD      A,(HL)
         INC     HL
         CP      10
         JR      NZ,nxl
+        OR      A
+        RET
+
+; prl: print the line at HL, to its LF; HL -> just past it.
+prl:    LD      A,(HL)
+        RST     28h
+        LD      A,(HL)
+        INC     HL
+        CP      10
+        JR      NZ,prl
         RET
         ENDIF
 

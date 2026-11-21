@@ -6,8 +6,11 @@ returns a waiting key in A, or 0, with the zero flag matching A.
 cpm: the image is a .COM at 0100h; BDOS 6, 10, 15, 20 and 26 are emulated,
 and the program is the 'file' that fn 15/20 read.
 editor: a generic image built with EDITOR = 1. No program is loaded (the RAM
-at PROG starts as junk, as after power-on) and everything goes in through KEY;
-the run ends when the editor is left waiting for a key.
+at PROG starts as junk, as after power-on) and everything goes in through KEY.
+The input is a list of chunks: the next chunk is typed only when the machine
+has been left waiting for a key, as a person would, and the run ends when it
+waits with no chunks left. `timed` is a list of (n, key): the key is pressed
+once n characters have been printed.
 """
 import re
 import z80
@@ -46,12 +49,16 @@ def symbols(lst):
 
 class Run:
     def __init__(self, hexf, lst, prog, inp=b'', cpu='z80', mode='generic',
-                 maxticks=4_000_000_000, brk_at=None):
+                 maxticks=4_000_000_000, brk_at=None, timed=()):
         self.m = z80.I8080Machine() if cpu == '8080' else z80.Z80Machine()
         self.sy = symbols(lst)
         org, img = load_hex(hexf)
         self.img_size = len(img)
         self.m.set_memory_block(org, img)
+        self.stages = []
+        if mode == 'editor':
+            self.stages, inp = [bytes(c) for c in inp], b''
+        self.timed = list(timed)
         self.inp = list(inp)
         self.out = bytearray()
         self.mode = mode
@@ -98,6 +105,8 @@ class Run:
         if self.brk_at is not None and len(self.out) >= self.brk_at:
             self.inp.insert(0, 3)
             self.brk_at = None
+        if self.timed and len(self.out) >= self.timed[0][0]:
+            self.inp.append(self.timed.pop(0)[1])
         return bool(self.inp)
 
     def run(self):
@@ -122,7 +131,9 @@ class Run:
                     else:
                         # a program polling for a key that will never come
                         m.a = 0; idle += 1
-                        if idle > IDLE:
+                        if idle > IDLE and self.stages:
+                            self.inp = list(self.stages.pop(0)); idle = 0
+                        elif idle > IDLE:
                             self.ended = 'needkey'; break
                     # the host routine's contract: Z (and S) follow A
                     m.f = (m.f & 0x3F) | (0x40 if m.a == 0 else 0) | (m.a & 0x80)

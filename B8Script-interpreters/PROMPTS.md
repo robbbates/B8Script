@@ -73,3 +73,111 @@ bytes, one CPU at a time. Ideas not yet tried:
 Report a table of bytes before and after for every variant, the techniques
 that paid off, and the ones you tried that didn't.
 ```
+
+---
+
+## 3. Bring the interpreters up to the 2026-11-21 spec
+
+Model: Claude Opus 5.5, effort high.
+
+```
+I'm Robb. Read, in this order: docs/b8script.md (the new spec, now the
+source of truth), B8Script-interpreters/README.md, testing/README.md, and
+prompt 1 in B8Script-interpreters/PROMPTS.md, whose rules all apply here.
+Work on a branch off the spec branch (spec-2026-11) and open one pull
+request. Commit after each stage below, with every build of every CPU
+passing its tests at each commit.
+
+The spec changed in the ways listed here. Where this list and the spec
+disagree, the spec wins; ask me if it is unclear.
+
+Stage 1: language and checked builds (all CPUs, all variants)
+ 1. `_` takes a signed count: a negative count releases. Unchecked builds
+    need no change (a 16-bit add is the same signed or unsigned). Checked
+    builds stop with H when the new top is past the heap limit OR below
+    the program's end (the first byte after the program's NUL).
+ 2. Error letters change: data stack overflow S / underflow s, return
+    stack overflow R / underflow r, store outside the program's space O
+    (was W), bad character after [ is W (was D). New: U undefined word,
+    Q missing closing quote (a string skip reaching NUL, or $ reaching
+    NUL), X reserved byte 80h-FFh outside a string, Z divide by zero,
+    N unbalanced or mismatched brackets. B stays.
+ 3. N: a skip started by a false ( or by [ that reaches NUL, or reaches a
+    closer of the wrong kind at its own level (( expects ), [ expects ]).
+    \ with no closer still ends the program. Report the place of the
+    opener where the skip started.
+ 4. U: at startup a checked build points every word cell at one internal
+    byte that stops with U, reporting the return address on top of the
+    return stack as the place. Checked builds also zero all 26 variables
+    at startup. One-shot CP/M builds may keep the word and variable cells
+    over their startup code if the fill loop sits outside that area.
+ 5. The hex loader's stores are no longer range-checked (remove chkst or
+    its equivalent there). Machine code is never checked.
+ 6. The error report, exactly as in the spec: CR LF, then
+      Err X @ line,col
+      <up to 16 raw characters from the place, stopping at CR, LF or NUL>
+      Stk n: <up to the top 8 values, bottom to top, "..." if more>
+      Rtn n
+    Lines and columns count from 1; a line typed at the editor is line 0;
+    values up to 32767 must print right (the unsigned routine is fine).
+    The stack lines show the stacks as they were at the error.
+ 7. After an error or a break: one-shot builds go to EXIT; editor builds
+    go back to the editor with both stacks cleared, words and variables
+    kept. On every stop restore the host's stack pointer (see "Host
+    stacks" under The break key in the spec).
+ 8. Unchanged but check it: dividing by 2 or -2 stays fast; reserved
+    bytes stay ignored in unchecked builds.
+
+Stage 2: the break key in every build
+ 9. Unchecked builds now stop on Ctrl-C too. Poll at the true ) loop-back
+    and at every word call, through an 8-bit countdown so KEY is called
+    at most once every 256 such points (checked builds may poll every
+    time, as now, or use the countdown). A key other than Ctrl-C is held
+    for the next ?, and a newer key replaces the held one. ? takes the
+    held key first.
+10. A break-off cell: one byte in the letter page's gaps. Nonzero means
+    a single Ctrl-C is passed to the program as an ordinary key (03h).
+    Two Ctrl-Cs within about 250 ms always break. Fill in its address in
+    every appendix of docs/b8script.md (hex, unsigned, signed), replacing
+    the TBD entries.
+11. What an unchecked build prints on a break is up to you; keep it tiny
+    (nothing, or "B").
+
+Stage 3: the Z80 line editor (EDITOR = 1, with either CHECKED setting)
+12. Replace the editor's commands with the suggested standard in the
+    spec's Environments chapter: n text inserts, n alone deletes,
+    anything else runs at once; ^G run, n^L list (held by a key, ended by
+    Ctrl-C), n^E edit line n, ^R and name^R read, ^W and name^W write,
+    ^N ^N new, ^V view (both stacks, program size, free memory, line
+    count, build name and version), ^X exit, Esc cancels the line (wait
+    about 5 ms after Esc; if [ follows, read the sequence, act on C and D
+    as right and left, ignore the rest), ^B ^F and the arrows move the
+    cursor with insert and delete mid-line, Backspace and DEL delete.
+    The old 0 (run) and -n (list) forms go.
+13. The editor reads keys itself in the CP/M builds too (BDOS 6, not
+    BDOS 10, which swallows control keys). -n? may keep BDOS 10.
+14. Read and write: CP/M builds use files (open, read records to the
+    first ^Z, make, write, close; a name typed before the key sets the
+    current name). Generic builds read by paste (raw text until ^Z or
+    ^@ replaces the program) and write by printing the raw text with
+    CR LF line ends.
+15. The data stack carries over between typed lines.
+
+Tests and documents
+16. Update testing/ref.py to the new spec (drop the z10+ assumption from
+    its docstring; keep the heap where it is), add tests for every new
+    error and its report, the startup fills, signed _, the break key in
+    unchecked builds (held key, newest wins, break-off cell, double
+    Ctrl-C) and the new editor keys (test_editor.py). Tests that read
+    the old error format change to the new one.
+17. Update B8Script-interpreters/README.md: sizes, the error table, the
+    break key, the editor, and replace "The language, where it differs
+    from the 2026-10-09 spec" with a short note that the builds follow
+    docs/b8script.md. Fill in the measured sizes and any changed
+    addresses in the spec's appendices. Update prompt 1 and 2 in this
+    file if their facts changed.
+18. Rebuild and refresh every .bin, .COM and .lst with mkrel.py.
+
+Report a table of sizes before and after for every build, and anything in
+the spec you found unclear, contradictory or costly, so I can decide.
+```

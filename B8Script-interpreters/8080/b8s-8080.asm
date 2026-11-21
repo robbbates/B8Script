@@ -4,8 +4,8 @@
 ;        [x stores in a variable, "[ " pushes an anonymous block, any other
 ;        character after [ is an error, the heap pointer lives at z10+.
 ;        The string escape is '/' (it was '>').
-;        '/' leaves ( r q ), the quotient on top; dividing by zero is not
-;        checked. -n? does no more editing than Backspace.
+;        Dividing by zero is not checked. -n? does no more editing than
+;        Backspace.
 ;  Design follows the Z80 interpreter (z80/b8s-z80.asm), with 8080 opcodes
 ;  only.
 ;
@@ -375,23 +375,16 @@ h_break:MOV     A,H
 ; '[' followed by a letter stores the body's address in that letter's cell:
 ; uppercase is a word, lowercase a variable. Followed by a space it pushes
 ; the body's address instead. Either way it then skips to the matching ']'.
-; (The unchecked build takes anything below 'A' as the space, and anything
-; from 'A' up as a letter.)
+; (The unchecked build takes anything that is not a letter as the space; the
+; checked build stops on it.)
 h_def:  LDAX    B
         INX     B
-        SUI     'A'             ; 0-25 or 32-57: lowercase lands 64 bytes up
-        IF      1-CHECKED
-        JC      def2
-        ENDIF
-        IF      CHECKED
-        CPI     ' '-'A'+256
-        JZ      def2
-        MOV     E,A
+        SUI     'A'             ; a letter gives 0-25 or 32-57: lowercase
+        MOV     E,A             ;   lands 64 bytes up
         ANI     0DFh            ; fold case
         CPI     26
-        JNC     e_brack         ; anything but a letter or a space
+        JNC     def2            ; not a letter
         MOV     A,E
-        ENDIF
         ADD     A
         MOV     E,A
         MVI     D,LETPAGE       ; DE -> cell
@@ -401,7 +394,13 @@ h_def:  LDAX    B
         MOV     A,B
         STAX    D
         JMP     skipnx
-def2:   PUSH    H               ; an anonymous block: push its address
+def2:
+        IF      CHECKED
+        MOV     A,E
+        CPI     ' '-'A'+256
+        JNZ     e_brack         ; anything but a letter or a space
+        ENDIF
+        PUSH    H               ; an anonymous block: push its address
         MOV     H,B
         MOV     L,C
 skipnx: CALL    skip
@@ -523,7 +522,7 @@ mul2:   XCHG
         POP     B
         RST     6
 
-; '/' ( a b -- r q ): the quotient is on top. Truncates toward zero; r takes
+; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
 ; of a. Dividing by zero is not checked: it returns two cells of no meaning.
 h_div:  POP     D               ; DE = a, HL = b
@@ -549,8 +548,7 @@ h_div:  POP     D               ; DE = a, HL = b
         POP     PSW
         CM      neg16           ; r's sign
         POP     B
-        PUSH    H               ; r under q
-        XCHG                    ; HL = q
+        PUSH    D               ; q under r
         RST     6
 
 ; ---- stack and storage -----------------------------------------------------
@@ -628,9 +626,8 @@ h_cfetch:MOV    L,M             ;   as late as the unchecked one does: see
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
 ;   n = 0: wait for a key
-;   n < 0: read a line of at most -n characters, with echo. n is not
-;          checked: the buffer holds 127 characters and the CR, so a
-;          program must ask for 127 or fewer.
+;   n < 0: read a line of at most -n characters, with echo. The buffer
+;          holds 127 characters and the CR: a bigger count is taken as 127.
 h_key:  MOV     A,H
         ORA     A
         JM      line
@@ -657,8 +654,11 @@ kt3:    MOV     L,A
         IF      CPM
         ; CP/M: BDOS 10 does the editing (the spec allows the platform's
         ; own line editor). It doesn't store the CR, so it is added here.
-line:   XRA     A
-        SUB     L               ; A = the count (TOS is minus the count)
+line:   LXI     D,127           ; TOS is minus the count: adding 127 carries
+        DAD     D               ;   only for 1 to 127, and leaves 127 - count
+        SBB     A
+        ANA     L               ; (0 for a count that is too big)
+        XRI     127             ; A = the count, 127 at most
         STA     LBHDR
         PUSH    B
         LXI     D,LBHDR
@@ -680,9 +680,13 @@ line:   XRA     A
         ; echoed until the line is full. The line buffer starts at offset 80h
         ; of its page, so L alone is the place in the line: D holds the L of
         ; a full line.
-line:   MVI     A,LINEBUF & 0FFh
-        SUB     L               ; (TOS is minus the count)
-        MOV     D,A             ; D = the L of a full line
+line:   LXI     D,127           ; TOS is minus the count: adding 127 carries
+        DAD     D               ;   only for 1 to 127, and leaves 127 - count
+        SBB     A
+        ANA     L               ; (0 for a count that is too big)
+        CMA
+        MOV     D,A             ; D = the L of a full line: 80h + count, FFh
+                                ;   at most
         LXI     H,LINEBUF
 ln2:    CALL    getk
         JZ      ln2
@@ -794,8 +798,23 @@ rdn1:   LDAX    B
 ; Uses A, BC; the caller saves the IP. HL holds the dividend and, as its bits
 ; leave at the top, the quotient bits arrive at the bottom. The loop counter
 ; lives on the stack, since A is busy with the shifts.
+; Dividing by 2 is one shift (the spec wants that fast).
 udiv:   LXI     B,0
-        MVI     A,16
+        MOV     A,E
+        XRI     2
+        ORA     D
+        JNZ     udv0
+        ORA     H               ; A was 0, and the carry is clear
+        RAR
+        MOV     H,A
+        MOV     A,L
+        RAR
+        MOV     L,A             ; the quotient
+        MOV     A,B
+        RAL
+        MOV     C,A             ; the remainder: the bit that fell out
+        RET
+udv0:   MVI     A,16
         PUSH    PSW
 udv1:   DAD     H               ; next dividend bit into the carry
         MOV     A,C
@@ -839,8 +858,10 @@ pdec:   LXI     D,10
 ; was ')' and 2 if it was ']'. Brackets of both kinds count together;
 ; strings are stepped over whole. A NUL first ends the program (for '\' with
 ; no closer; anything else that runs into the NUL had unbalanced brackets
-; anyway). D counts the open levels, starting at 1 for the one we are in.
-skip:   MVI     D,1
+; anyway). D counts the open levels, starting at 1 for the one we are in:
+; skip sets it to 0 and falls through the INR that an opener comes back to.
+skip:   MVI     D,0
+sk3:    INR     D               ; an opener: one deeper
 sk1:    LDAX    B
         INX     B
         ORA     A
@@ -857,8 +878,6 @@ sk1:    LDAX    B
         JNZ     sk1
 sk4:    DCR     D
         RZ                      ; the closer at this level
-        JMP     sk1
-sk3:    INR     D
         JMP     sk1
 
 ; skipstr: IP is inside a string; step past its closing quote. '/' escapes

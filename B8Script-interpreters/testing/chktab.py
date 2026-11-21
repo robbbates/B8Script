@@ -22,7 +22,9 @@ def check(lst):
             bad.append(f'{name} is at {sym.get(name, 0):04X}h, not {base + off:04X}h')
     if sym['PTAB'] >> 8 != (sym['PTABEND'] - 1) >> 8:
         bad.append('PTAB crosses a page')
-    names = re.findall(r'\bDB\s+(H_\w+)\s*&\s*0FFh', text, re.I)
+    # (only lines that assembled to a byte: the table is a macro, and its
+    # definition is in the listing too)
+    names = re.findall(r'^[0-9A-F]{4}\s+[0-9A-F]{2}\s.*\bDB\s+(H_\w+)\s*&\s*0FFh', text, re.I | re.M)
     if len(names) != 32:
         bad.append(f'{len(names)} table entries found, not 32')
     npg1 = sym['NPG1']

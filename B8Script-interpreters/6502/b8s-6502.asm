@@ -4,16 +4,16 @@
 ;        [x stores in a variable, "[ " pushes an anonymous block, any other
 ;        character after [ is an error, the heap pointer lives at z10+.
 ;        The string escape is '/' (it was '>').
-;        '/' leaves ( r q ), the quotient on top; dividing by zero is not
-;        checked. -n? does no more editing than Backspace.
+;        Dividing by zero is not checked. -n? does no more editing than
+;        Backspace.
 ;  Design follows the Z80 interpreter; see b8s-z80.asm for the common ideas.
 ;
-;  Two switches, set in the EQU lines below:
-;    ZPSTACK  0 = the data stack is in pages 2 and 3: 252 cells
-;             1 = the data stack is in zero page: 112 cells, and a smaller
-;                 interpreter, because every stack access is a byte shorter.
-;                 The memory map and the machine-code contract differ: see
-;                 below.
+;  This interpreter keeps the data stack in pages 2 and 3 (252 cells) and
+;  uses 10 bytes of zero page. b8s-6502-zp.asm is a smaller interpreter that
+;  keeps the stack in zero page instead (112 cells); its memory map and
+;  machine-code contract differ.
+;
+;  One switch, set in the EQU line below:
 ;    CHECKED  0 = no checks (spec: "B8Script checks nothing")
 ;             1 = stops on stack overrun, Ctrl-C, heap past the limit, a store
 ;                 outside the program's own space, and a bad character after [,
@@ -22,7 +22,6 @@
 ;  Assembler: asm80, C6502 mode.
 ; =============================================================================
 
-ZPSTACK EQU     0               ; 1 = data stack in zero page
 CHECKED EQU     0               ; 1 = checked build
 
 ; -----------------------------------------------------------------------------
@@ -53,7 +52,7 @@ CHECKED EQU     0               ; 1 = checked build
 ;  stack, so it ends with RTS (60h, which the hex loader appends). On entry
 ;  TL/TH ($02/$03) hold the new TOS (the address is already consumed) and X is
 ;  the data-stack index: NOS is DSL,X (low) and DSH,X (high), which is
-;  $0200,X and $0300,X, or $10,X and $80,X when the stack is in zero page.
+;  $0200,X and $0300,X.
 ;  To push: DEX, store TL/TH at DSL,X/DSH,X, then set TL/TH. To drop: load
 ;  TL/TH from DSL,X/DSH,X and INX. The code may change A, Y, X (it is the
 ;  stack index, so it must stay consistent on return) and zero page $04-$06
@@ -72,13 +71,10 @@ D1      EQU     09h
 ; -----------------------------------------------------------------------------
 ;  Memory map
 ;
-;    0000-00FF  zero page: the variables above; with ZPSTACK = 1 also the data
-;               stack: low bytes at 10-7F, high bytes at 80-EF (X = 70 when
-;               empty: 112 cells)
+;    0000-00FF  zero page: the variables above
 ;    0100-01FF  hardware stack = return stack, S starts at FF
-;    0200       with ZPSTACK = 0: DSL, data stack, low bytes (X = FC when
-;    0300       empty: 252 cells) and DSH, high bytes. With ZPSTACK = 1 these
-;               two pages are not used.
+;    0200       DSL, data stack, low bytes (X = FC when empty: 252 cells)
+;    0300       DSH, data stack, high bytes
 ;    0400       LET  letter cells: A..Z at +00..+33, a..z at +40..+73 (a word
 ;               cell is 64 bytes below its variable), heap pointer at +7C
 ;               (= z10+), KEYBUF at +34, the -n? line buffer at +80..+FF
@@ -94,16 +90,9 @@ KEY     EQU     0FF06h          ; a waiting key in A, or A = 0 if none is
 CONOUT  EQU     0FF03h          ; print the character in A
 EXIT    EQU     0FF09h          ; where to go when the program ends
 ;   KEY and CONOUT must preserve X and Y.
-        IF      ZPSTACK
-DSL     EQU     10h             ; data stack, low bytes
-DSH     EQU     80h             ; data stack, high bytes
-DSE     EQU     70h             ; X when the data stack is empty
-        ENDIF
-        IFN     ZPSTACK
-DSL     EQU     0200h
-DSH     EQU     0300h
-DSE     EQU     0FCh
-        ENDIF
+DSL     EQU     0200h           ; data stack, low bytes
+DSH     EQU     0300h           ; data stack, high bytes
+DSE     EQU     0FCh            ; X when the data stack is empty
 LETPAGE EQU     04h
 LET     EQU     LETPAGE*256
 PROG    EQU     0500h           ; where the loader puts the program text
@@ -252,25 +241,26 @@ upper:  ASL
 ; '[' followed by a letter stores the body's address in that letter's cell:
 ; uppercase is a word, lowercase a variable. Followed by a space it pushes
 ; the body's address instead. Either way it then skips to the matching ']'.
-; (The unchecked build takes anything below 'A' as the space, and anything
-; from 'A' up as a letter.)
-h_def:  JSR     getc
+; (The unchecked build takes anything that is not a letter as the space; the
+; checked build stops on it.)
         IF      CHECKED
-        CMP     #' '
+def1:   CPY     #' '-'A'+256
         BEQ     def2
+        BNE     e_brack         ; anything but a letter or a space
         ENDIF
+h_def:  JSR     getc
         SEC
-        SBC     #'A'            ; 0-25 or 32-57: lowercase lands 64 bytes up
-        IF      1-CHECKED
-        BCC     def2
-        ENDIF
-        IF      CHECKED
-        TAY
+        SBC     #'A'            ; a letter gives 0-25 or 32-57: lowercase
+        TAY                     ;   lands 64 bytes up
         AND     #0DFh           ; fold case: 0-25 only for a letter
         CMP     #26
-        BCS     e_brack         ; anything but a letter or a space
-        TYA
+        IF      1-CHECKED
+        BCS     def2            ; not a letter
         ENDIF
+        IF      CHECKED
+        BCS     def1
+        ENDIF
+        TYA
         ASL
         TAY                     ; Y -> the cell
         LDA     IP
@@ -646,7 +636,7 @@ h_swap: LDY     DSL,X           ; '%'
         STY     TH
         RTS
 
-; '/' ( a b -- r q ): the quotient is on top. Truncates toward zero; r takes
+; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
 ; of a. Dividing by zero is not checked: it returns two cells of no meaning.
 h_div:  LDA     DSH,X
@@ -666,18 +656,25 @@ h_div:  LDA     DSH,X
         JSR     udiv            ; TOS = q, NOS = r
         PLA
         JSR     negm            ; q's sign
+        JSR     h_swap          ; r on top
         PLA
-        BPL     ud9             ; r's sign:
-        JSR     h_swap          ;   bring r up,
-        JSR     neg             ;   negate it,
-        JMP     h_swap          ;   and put it back
+        JMP     negm            ; r's sign
 
 ; udiv: unsigned TOS / D (D <= 8000h). TOS becomes the quotient and the NOS
 ; cell the remainder (whatever was there is lost).
+; Dividing by 2 is one shift (the spec wants that fast).
 udiv:   LDA     #0
         STA     DSL,X
         STA     DSH,X
-        LDY     #16
+        LDA     D0
+        EOR     #2
+        ORA     D1
+        BNE     ud0
+        LSR     TH
+        ROR     TL              ; the quotient
+        ROL     DSL,X           ; the remainder: the bit that fell out
+        RTS
+ud0:    LDY     #16
 ud1:    ASL     TL
         ROL     TH
         ROL     DSL,X
@@ -807,9 +804,8 @@ cf2:    STA     TL              ; TOS = A (Y = 0)
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
 ;   n = 0: wait for a key
-;   n < 0: read a line of at most -n characters, with echo. n is not
-;          checked: the buffer holds 127 characters and the CR, so a
-;          program must ask for 127 or fewer.
+;   n < 0: read a line of at most -n characters, with echo. The buffer
+;          holds 127 characters and the CR: a bigger count is taken as 127.
 h_key:  LDA     TH
         BMI     line
 kt1:    LDY     #MSLOOP         ; one millisecond, roughly
@@ -832,8 +828,13 @@ kt3:    LDY     #0
 ; Backspace takes the last character back (and is echoed as it is), CR ends
 ; (stored, not echoed), every other key is stored and echoed until the line
 ; is full. Y = the length so far; TL = the most allowed.
-line:   JSR     neg             ; TL = the count
-        LDY     #0
+line:   JSR     neg             ; TOS = the count, and A = its high byte
+        BNE     ln0
+        LDA     TL
+        BPL     ln1
+ln0:    LDA     #127            ; more than 127 is taken as 127
+        STA     TL
+ln1:    LDY     #0
         BEQ     ln2             ; always
 ln3:    JSR     CONOUT
 ln2:    JSR     getk

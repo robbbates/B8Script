@@ -1,5 +1,5 @@
 """Reference B8Script interpreter (spec of 2026-10-09 plus the 2026-11-20 changes,
-including '/' as the string escape and ( a b -- r q ) for the divide).
+including '/' as the string escape).
 
 Used only to produce expected output for the test suite. It models memory, the
 letter cells (packed layout: A at LET, a at LET+64, heap pointer at z+10), the
@@ -97,13 +97,14 @@ class Ref:
         return self.inp.pop(0)
 
     def readline(self, n):
-        """-n?: read a line of at most n characters; n is not checked.
+        """-n?: read a line of at most n characters, and 127 at the very most.
         Generic builds: Backspace takes one character back and is echoed as
         it is; every other key but CR is stored and echoed while there is
         room. CP/M builds: BDOS 10 does the editing (Backspace and DEL erase
         with BS, space, BS; other control keys are ignored; a full line ends
         by itself; CR is echoed)."""
         buf = bytearray()
+        n = min(n, 127)
         while True:
             c = self.key()
             if c == CR:
@@ -184,7 +185,7 @@ class Ref:
                 if (a < 0) != (b < 0):
                     q = -q
                 r = a - q * b
-            P(r); P(q)          # ( a b -- r q ): the quotient is on top
+            P(q); P(r)          # ( a b -- q r ): the remainder is on top
         elif C == '&':
             b = p(); a = p(); P(a & b)
         elif C == '|':
@@ -236,7 +237,7 @@ class Ref:
                     self.ip = self.rs.pop()
         elif C == '[':
             n = self.ch()
-            if chr(n).isalpha():
+            if (n | 0x20) in range(0x61, 0x7B):     # an ASCII letter
                 self.w(self.cell(n), self.ip)
             else:
                 P(self.ip)

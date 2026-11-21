@@ -4,12 +4,14 @@
 ;        [x stores in a variable, "[ " pushes an anonymous block, any other
 ;        character after [ is an error, the heap pointer lives at z10+.
 ;        The string escape is '/' (it was '>').
-;        '/' leaves ( r q ), the quotient on top; dividing by zero is not
-;        checked. -n? does no more editing than Backspace.
+;        Dividing by zero is not checked. -n? does no more editing than
+;        Backspace.
 ;
-;  Two switches, set in the two EQU lines below:
+;  Three switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
+;    EDITOR   1 = generic build with a small line editor built in (see the
+;                 end of this file). It needs CPM = 0 and CHECKED = 0.
 ;    CHECKED  0 = no checks (spec: "B8Script checks nothing")
 ;             1 = stops on stack overrun, Ctrl-C, heap past the limit, a store
 ;                 outside the program's own space, and a bad character after [,
@@ -20,6 +22,7 @@
 
 CPM     EQU     0               ; 1 = CP/M .COM build
 CHECKED EQU     0               ; 1 = checked build
+EDITOR  EQU     0               ; 1 = with the line editor (generic only)
 
 ; -----------------------------------------------------------------------------
 ;  Register use, everywhere in the interpreter
@@ -84,7 +87,6 @@ KEY     EQU     0FF06h          ; a waiting key in A, or A = 0 if none is
                                 ;   waiting. The zero flag must match A
                                 ;   (end the routine with OR A / RET).
 CONOUT  EQU     0FF03h          ; print the character in A
-EXIT    EQU     0FF09h          ; where to go when the program ends
 ;   KEY and CONOUT must preserve BC, DE, HL and HL'.
 RSPAGE  EQU     80h             ; 8000h return stack
 DSPAGE  EQU     81h             ; 8100h data stack
@@ -92,6 +94,12 @@ LETPAGE EQU     82h             ; 8200h letter cells and line buffer
 PROG    EQU     8300h           ; where the loader puts the program text
 HEAPLIM EQU     0F0h            ; the heap must stay below F000h (a page)
 BASE    EQU     0000h           ; where the image starts
+        ENDIF
+        IF      (1-CPM)*(1-EDITOR)
+EXIT    EQU     0FF09h          ; where to go when the program ends
+        ENDIF
+        IF      EDITOR
+EXIT    EQU     edit            ; a program that ends goes back to the editor
         ENDIF
 
 MSLOOP  EQU     40              ; n? inner loop count for about 1 ms (1-255):
@@ -117,10 +125,18 @@ DSTOP   EQU     DSPAGE*256+0FEh ; empty data stack
 ;  page zero (see the header).
 ; =============================================================================
         ORG     BASE
+        IF      1-EDITOR
         LD      SP,DSTOP        ; 00  reset, or the start of the .COM file
-        IFN     CPM
+        ENDIF
+        IF      (1-CPM)*(1-EDITOR)
         LD      BC,PROG         ; 03  the IP
         JR      st0             ; 06  (the rest of the startup is close by)
+        ENDIF
+        IF      EDITOR
+        XOR     A               ; 00  reset: no program yet
+        LD      (PROG),A
+        JP      edit            ; 04
+        NOP                     ; 07  spare
         ENDIF
         IF      CPM
         JP      start           ; 03
@@ -215,16 +231,53 @@ next0:
 p5b:    SUB     9               ; 5Bh-60h: -4 in all, index 22-27
 p3a:    ADD     A,5             ; 3Ah-40h: index 15-21
 
+.macro  PTABLE
+        DB      h_store & 0FFh  ; !
+        DB      h_str & 0FFh    ; "
+        DB      h_num & 0FFh    ; #
+        DB      h_print & 0FFh  ; $
+        DB      h_swap & 0FFh   ; %
+        DB      h_and & 0FFh    ; &
+        DB      h_emit & 0FFh   ; '
+        DB      h_open & 0FFh   ; (
+        DB      h_close & 0FFh  ; )
+        DB      h_mul & 0FFh    ; *
+        DB      h_add & 0FFh    ; +
+        DB      h_cfetch & 0FFh ; ,
+        DB      h_sub & 0FFh    ; -
+        DB      h_cstore & 0FFh ; .
+        DB      h_div & 0FFh    ; /
+        DB      h_dup & 0FFh    ; :
+        DB      h_drop & 0FFh   ; ;
+        DB      h_lt & 0FFh     ; <
+        DB      h_eq & 0FFh     ; =
+        DB      h_gt & 0FFh     ; >
+        DB      h_key & 0FFh    ; ?
+        DB      h_fetch & 0FFh  ; @
+        DB      h_def & 0FFh    ; [
+        DB      h_break & 0FFh  ; \
+        DB      h_ret & 0FFh    ; ]
+        DB      h_xor & 0FFh    ; ^
+        DB      h_alloc & 0FFh  ; _
+        DB      h_grave & 0FFh  ; `
+        DB      h_tor & 0FFh    ; {
+        DB      h_or & 0FFh     ; |
+        DB      h_fromr & 0FFh  ; }
+        DB      h_not & 0FFh    ; ~
+.endm
+
 ; Punctuation: A = the PTAB index. The handler starts with HL = TOS,
 ; untouched, and A, DE free.
 punct:  ADD     A,PTAB & 0FFh   ; PTAB never crosses a page
         LD      E,A
-        LD      D,PTAB / 256
+        LD      D,PTAB / 256    ; (0 in the editor build)
         CP      (PTAB & 0FFh) + NPG1 ; carry: one of the first NPG1
         LD      A,(DE)
         LD      E,A             ; the handler's low byte
-        IFN     CPM
+        IF      (1-CPM)*(1-EDITOR)
         LD      D,0
+        ENDIF
+        IFN     CPM
         RL      D               ; its page: 0 + carry
         ENDIF
         IF      CPM
@@ -238,7 +291,8 @@ pu1:
 
 ; The rest of the startup: here so that the generic reset code can reach it
 ; with JR. st0: find the program's NUL; the heap starts after it.
-        IFN     CPM
+; (The editor build has its own copy of this, next to the editor.)
+        IF      (1-CPM)*(1-EDITOR)
 st0:    LD      H,B
         LD      L,C
         XOR     A
@@ -246,15 +300,28 @@ st1:    CP      (HL)
         INC     HL
         JR      NZ,st1
         ENDIF
+        IF      1-EDITOR
 st2:    LD      (HEAP),HL
         EXX
         LD      HL,RSTOP        ; the return stack is empty
         EXX
-        IF      CHECKED
+        ENDIF
+        IF      CHECKED*(1-EDITOR)
         XOR     A
         LD      (KEYBUF),A      ; no key held back
         ENDIF
+        IF      1-EDITOR
         RST     30h             ; (its return address is thrown away)
+        ENDIF
+
+; In the editor build the table is here, in the first page, which saves
+; loading D twice. (The other builds have no room for it here: theirs is
+; further down.)
+        IF      EDITOR
+PTAB:
+        PTABLE
+PTABEND:
+        ENDIF
 
 ; =============================================================================
 ;  Handlers that must start in the image's first page: ^ _ ` | ~
@@ -400,26 +467,16 @@ rdrop:  RST     08h
 ; '[' followed by a letter stores the body's address in that letter's cell:
 ; uppercase is a word, lowercase a variable. Followed by a space it pushes
 ; the body's address instead. Either way it then skips to the matching ']'.
-; (The unchecked build takes anything below 'A' as the space, and anything
-; from 'A' up as a letter.)
+; (The unchecked build takes anything that is not a letter as the space; the
+; checked build stops on it.)
 h_def:  LD      A,(BC)
         INC     BC
-        IF      CHECKED
-        CP      ' '
-        JR      Z,def2
-        LD      E,A
+        SUB     'A'             ; a letter gives 0-25 or 32-57: lowercase
+        LD      E,A             ;   lands 64 bytes up
         AND     0DFh            ; fold case
-        SUB     'A'
         CP      26
-        JP      NC,e_brack      ; anything but a letter or a space
-        LD      A,E
-        ENDIF
-        SUB     'A'             ; 0-25 or 32-57: lowercase lands 64 bytes up
-        IF      1-CHECKED
-        JR      C,def2
-        ENDIF
-        ADD     A,A
-        LD      E,A
+        JR      NC,def2         ; not a letter
+        SLA     E
         LD      D,LETPAGE       ; DE -> cell
         LD      A,C
         LD      (DE),A
@@ -427,7 +484,13 @@ h_def:  LD      A,(BC)
         LD      A,B
         LD      (DE),A
         JR      skipnx
-def2:   PUSH    HL              ; an anonymous block: push its address
+def2:
+        IF      CHECKED
+        LD      A,E
+        CP      ' '-'A'+256
+        JP      NZ,e_brack      ; anything but a letter or a space
+        ENDIF
+        PUSH    HL              ; an anonymous block: push its address
         LD      H,B
         LD      L,C
 skipnx: CALL    skip
@@ -534,7 +597,7 @@ mul2:   DJNZ    mul1
         POP     BC
         RST     30h
 
-; '/' ( a b -- r q ): the quotient is on top. Truncates toward zero; r takes
+; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
 ; of a. Dividing by zero is not checked: it returns two cells of no meaning.
 h_div:  POP     DE              ; DE = a, HL = b
@@ -555,9 +618,8 @@ h_div:  POP     DE              ; DE = a, HL = b
         POP     AF              ; A = a's high byte
         OR      A
         CALL    M,neg16         ; r's sign
-        EX      DE,HL           ; HL = q, DE = r
         POP     BC
-        PUSH    DE              ; r under q
+        PUSH    DE              ; q under r
         RST     30h
 
 ; ---- stack and storage -----------------------------------------------------
@@ -629,9 +691,8 @@ num1:   PUSH    BC
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
 ;   n = 0: wait for a key
-;   n < 0: read a line of at most -n characters, with echo. n is not
-;          checked: the buffer holds 127 characters and the CR, so a
-;          program must ask for 127 or fewer.
+;   n < 0: read a line of at most -n characters, with echo. The buffer
+;          holds 127 characters and the CR: a bigger count is taken as 127.
 h_key:  BIT     7,H
         JR      NZ,line
 kt1:    LD      E,MSLOOP        ; one millisecond, roughly
@@ -655,8 +716,11 @@ kt3:    LD      L,A
         IF      CPM
         ; CP/M: BDOS 10 does the editing (the spec allows the platform's
         ; own line editor). It doesn't store the CR, so it is added here.
-line:   XOR     A
-        SUB     L               ; A = the count (TOS is minus the count)
+line:   LD      DE,127          ; TOS is minus the count: adding 127 carries
+        ADD     HL,DE           ;   only for 1 to 127, and leaves 127 - count
+        SBC     A,A
+        AND     L               ; (0 for a count that is too big)
+        XOR     127             ; A = the count, 127 at most
         LD      (LBHDR),A
         LD      DE,LBHDR
         LD      A,10
@@ -676,9 +740,23 @@ line:   XOR     A
         ; echoed until the line is full. The line buffer starts at offset 80h
         ; of its page, so L alone is the place in the line: D holds the L of
         ; a full line.
-line:   LD      A,LINEBUF & 0FFh
-        SUB     L               ; (TOS is minus the count)
-        LD      D,A             ; D = the L of a full line
+        ENDIF
+        IFN     CPM
+line:   LD      DE,127          ; TOS is minus the count: adding 127 carries
+        ADD     HL,DE           ;   only for 1 to 127, and leaves 127 - count
+        SBC     A,A
+        AND     L               ; (0 for a count that is too big)
+        CPL
+        LD      D,A             ; D = the L of a full line: 80h + count, FFh
+        ENDIF                   ;   at most
+        IF      EDITOR
+        CALL    rdline          ; (the editor calls rdline too)
+        LD      L,LINEBUF & 0FFh
+        RST     30h
+; rdline: read a line that is full when L reaches D; HL -> the CR that ends it
+rdline:
+        ENDIF
+        IFN     CPM
         LD      HL,LINEBUF
 ln2:    CALL    getk
         JR      Z,ln2
@@ -700,8 +778,13 @@ ln4:    DEC     L               ; Backspace: one back, and echo it,
         INC     L               ;   upper half of the page)
         JR      ln2
 ln5:    LD      (HL),A          ; the CR
+        ENDIF
+        IF      (1-CPM)*(1-EDITOR)
         LD      L,LINEBUF & 0FFh
         RST     30h
+        ENDIF
+        IF      EDITOR
+        RET
         ENDIF
 
 ; =============================================================================
@@ -711,7 +794,17 @@ ln5:    LD      (HL),A          ; the CR
 ; udiv: unsigned HL / DE (DE <= 8000h). Returns HL = quotient, DE = remainder.
 ; Uses A, BC; the caller saves the IP. The dividend shifts up through A:C
 ; while the quotient bits arrive at the bottom of C.
-udiv:   LD      A,H
+; Dividing by 2 is one shift (the spec wants that fast).
+udiv:   LD      A,E
+        XOR     2
+        OR      D
+        JR      NZ,udv0
+        SRL     H
+        RR      L               ; the quotient
+        ADC     A,A
+        LD      E,A             ; the remainder: the bit that fell out (D is 0)
+        RET
+udv0:   LD      A,H
         LD      C,L
         LD      HL,0
         LD      B,16
@@ -763,8 +856,10 @@ skipstr:LD      A,(BC)
 ; was ')' and 2 if it was ']'. Brackets of both kinds count together;
 ; strings are stepped over whole. A NUL first ends the program (for '\' with
 ; no closer; anything else that runs into the NUL had unbalanced brackets
-; anyway). D counts the open levels, starting at 1 for the one we are in.
-skip:   LD      D,1
+; anyway). D counts the open levels, starting at 1 for the one we are in:
+; skip sets it to 0 and falls through the INC that an opener comes back to.
+skip:   LD      D,0
+sk3:    INC     D               ; an opener: one deeper
 sk1:    LD      A,(BC)
         INC     BC
         OR      A
@@ -781,8 +876,6 @@ sk1:    LD      A,(BC)
         JR      NZ,sk1
 sk4:    DEC     D
         RET     Z               ; the closer at this level
-        JR      sk1
-sk3:    INC     D
         JR      sk1
 
 ; pdec: print HL unsigned, by recursion on HL / 10 (the stack holds digits).
@@ -815,7 +908,8 @@ hc1:    INC     BC
         RET
 
 ; =============================================================================
-;  Dispatch table: the low byte of each handler's address, in code order.
+;  Dispatch table: the low byte of each handler's address, in code order
+;  (the table itself is the macro PTABLE, defined above the dispatcher).
 ;  It must not cross a page (the dispatcher only adds to its low byte).
 ; =============================================================================
 ; The handlers of the first NPG1 characters start in the image's second page.
@@ -827,39 +921,11 @@ PGBRK   EQU     (h_break-BASE)/256
 PGDEF   EQU     (h_def-BASE)/256
 PGFET   EQU     (h_fetch-BASE)/256
 NPG1    EQU     21 + PGFET + PGDEF + PGBRK + PGRET
-PTAB:   DB      h_store & 0FFh  ; !
-        DB      h_str & 0FFh    ; "
-        DB      h_num & 0FFh    ; #
-        DB      h_print & 0FFh  ; $
-        DB      h_swap & 0FFh   ; %
-        DB      h_and & 0FFh    ; &
-        DB      h_emit & 0FFh   ; '
-        DB      h_open & 0FFh   ; (
-        DB      h_close & 0FFh  ; )
-        DB      h_mul & 0FFh    ; *
-        DB      h_add & 0FFh    ; +
-        DB      h_cfetch & 0FFh ; ,
-        DB      h_sub & 0FFh    ; -
-        DB      h_cstore & 0FFh ; .
-        DB      h_div & 0FFh    ; /
-        DB      h_dup & 0FFh    ; :
-        DB      h_drop & 0FFh   ; ;
-        DB      h_lt & 0FFh     ; <
-        DB      h_eq & 0FFh     ; =
-        DB      h_gt & 0FFh     ; >
-        DB      h_key & 0FFh    ; ?
-        DB      h_fetch & 0FFh  ; @
-        DB      h_def & 0FFh    ; [
-        DB      h_break & 0FFh  ; \
-        DB      h_ret & 0FFh    ; ]
-        DB      h_xor & 0FFh    ; ^
-        DB      h_alloc & 0FFh  ; _
-        DB      h_grave & 0FFh  ; `
-        DB      h_tor & 0FFh    ; {
-        DB      h_or & 0FFh     ; |
-        DB      h_fromr & 0FFh  ; }
-        DB      h_not & 0FFh    ; ~
+        IF      1-EDITOR
+PTAB:
+        PTABLE
 PTABEND:
+        ENDIF
 
 ; =============================================================================
 ;  Console layer: getk returns a waiting key in A (zero flag clear), or
@@ -1011,6 +1077,181 @@ error:  LD      SP,DSTOP        ; the stacks may be wrecked: start clean
         ADD     HL,BC           ;   just read: HL = its offset
         CALL    pdec
         JP      endprog
+        ENDIF
+
+; =============================================================================
+;  The line editor (EDITOR = 1)
+;
+;  The interpreter starts here, and a program that ends comes back here. Type
+;  a line and press Return:
+;
+;    n text    put the text in as line n; the lines from n on move down.
+;              A number past the end, or 0, adds the line at the end.
+;    n         take line n out
+;    0         run the program
+;    -n        list the program from line n on (-1 lists all of it). Any key
+;              stops the list until another key is pressed; Ctrl-C ends it.
+;    anything else is run at once, as B8Script. (Start such a line with a
+;    space if it would begin with a digit or a minus sign.)
+;
+;  Lines are counted, not numbered: the text holds no line numbers, and the
+;  list shows each line's place. There can be 65535 lines. A typed line holds
+;  125 characters, the line number and the one character after it included;
+;  that character is not stored. The text is kept as it is typed, each line
+;  ending in CR LF, at PROG. Nothing is checked.
+;
+;  Things to know:
+;    - Reset empties the program.
+;    - Words and variables last from one line to the next. A word's address
+;      points into the program, so run the program again after editing it.
+;    - Nothing is printed between a program's output and what is typed next.
+;    - A line run at once sits in the line buffer, which -n? also reads into:
+;      a line that calls -n? and carries on afterwards runs what was typed.
+;      (The stored program never comes back to the line, so it may.)
+; =============================================================================
+        IF      EDITOR
+; -n: list from line n. DE = the number of the line at HL.
+list:   INC     BC
+        CALL    rdnum           ; HL = n
+        PUSH    HL
+        CALL    find
+        POP     DE
+li1:    LD      A,(HL)
+        OR      A
+        JR      Z,edit          ; the end of the text
+        CALL    getk
+        JR      Z,li3           ; no key: carry on
+        CP      3
+        JR      Z,edit          ; Ctrl-C
+li2:    CALL    getk            ; any other key: wait for one more
+        JR      Z,li2
+        CP      3
+        JR      Z,edit
+li3:    PUSH    HL
+        PUSH    DE
+        EX      DE,HL
+        CALL    pdec            ; the line's number,
+        LD      A,' '
+        RST     28h             ;   a space,
+        POP     DE
+        POP     HL
+        INC     DE
+        CALL    prl             ;   and the line
+        JR      li1
+
+; Take line n (in HL) out: copy everything after it down over it.
+del:    CALL    find
+        LD      D,H
+        LD      E,L
+        CALL    nxl             ; HL -> the next line
+de1:    LD      A,(HL)
+        LD      (DE),A
+        INC     HL
+        INC     DE
+        OR      A
+        JR      NZ,de1          ; and fall into the editor
+
+edit:   LD      SP,DSTOP
+        LD      D,0FDh          ; 125 characters at most
+        CALL    rdline          ; HL -> the CR that ended the line
+        INC     L
+        LD      (HL),10         ; a LF after it,
+        DEC     L
+        CALL    prl             ; (print the CR LF: a new line)
+        LD      (HL),0          ;   and a NUL after that
+        PUSH    HL              ; the end of what was typed
+        LD      BC,LINEBUF
+        LD      A,(BC)
+        CP      '-'
+        JR      Z,list
+        CALL    rdnum           ; HL = the number it starts with, BC -> after
+        LD      A,C             ; C is still 80h if there was no number:
+        ADD     A,A             ;   only then is twice it 0
+        JR      Z,st0           ; no number: run the line where it is
+        LD      A,(BC)
+        SUB     13
+        JR      NZ,ins          ; text follows the number
+        OR      H               ; the number alone:
+        OR      L
+        JR      NZ,del          ;   not 0: take that line out
+        LD      BC,PROG         ;   0: run the program
+
+; st0: start running at BC. The heap starts after the stored program's NUL.
+st0:    LD      HL,PROG
+        XOR     A
+st1:    CP      (HL)
+        INC     HL
+        JR      NZ,st1
+        LD      (HEAP),HL
+        EXX
+        LD      HL,RSTOP        ; the return stack is empty
+        EXX
+        RST     30h             ; (its return address is thrown away)
+
+; Put the typed text in as line n (in HL): open a gap of its length there,
+; CR and LF included, and copy it in.
+ins:    CALL    find            ; HL -> where it goes
+        INC     BC              ; step over the one character after the number
+        POP     DE              ; the end of what was typed
+        LD      A,E
+        SUB     C               ; A = the length of the text, with its CR LF
+        PUSH    BC              ; the text
+        LD      C,A
+        LD      B,0
+        PUSH    BC              ; its length
+        LD      D,H
+        LD      E,L             ; DE = where it goes
+        XOR     A
+        LD      C,A             ; BC = 0: CPIR looks as far as it needs to
+        CPIR                    ; HL -> one past the program's NUL
+        SBC     HL,DE           ; the number of bytes to move up, NUL included
+        LD      B,H
+        LD      C,L
+        ADD     HL,DE
+        DEC     HL              ; HL -> the NUL
+        EX      DE,HL
+        EX      (SP),HL         ; HL = the length; where it goes is kept
+        PUSH    HL
+        ADD     HL,DE           ; the NUL's new place
+        EX      DE,HL
+        LDDR                    ; move the rest of the program up
+        POP     BC              ; the length
+        POP     DE              ; where it goes
+        POP     HL              ; the text
+        LDIR
+        JR      edit
+
+; find: HL = a line number. Returns HL -> that line, or -> the NUL at the end
+; of the text if there are fewer lines (or the number is 0). Keeps BC.
+find:   EX      DE,HL
+        LD      HL,PROG
+fi1:    DEC     DE
+        LD      A,D
+        OR      E
+        RET     Z
+        CALL    nxl
+        JR      NZ,fi1
+        RET
+
+; nxl: step HL over one line, to just past its LF (and return not-zero), or
+; stop at the NUL that ends the text (and return zero).
+nxl:    LD      A,(HL)
+        OR      A
+        RET     Z
+        INC     HL
+        CP      10
+        JR      NZ,nxl
+        OR      A
+        RET
+
+; prl: print the line at HL, to its LF; HL -> just past it.
+prl:    LD      A,(HL)
+        RST     28h
+        LD      A,(HL)
+        INC     HL
+        CP      10
+        JR      NZ,prl
+        RET
         ENDIF
 
 ; =============================================================================

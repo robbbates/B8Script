@@ -4,8 +4,8 @@
 ;        [x stores in a variable, "[ " pushes an anonymous block, any other
 ;        character after [ is an error, the heap pointer lives at z10+.
 ;        The string escape is '/' (it was '>').
-;        '/' leaves ( r q ), the quotient on top; dividing by zero is not
-;        checked. -n? does no more editing than Backspace.
+;        Dividing by zero is not checked. -n? does no more editing than
+;        Backspace.
 ;  Follows the design of the Z80 interpreter (z80/b8s-z80.asm).
 ;
 ;  Two builds, selected by the CHECKED line below (CPM is always 0: the 6809
@@ -270,6 +270,23 @@ rd1:    BSR     isdig
         STD     ,U
         BRA     rd1
 
+; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
+; and return its value in A with the carry set; otherwise leave the IP and
+; return with the carry clear.
+; (In the unchecked build it is here, ahead of the table, to leave room in
+; the two ranges after it; the checked build has it next to the grave.)
+        IF      1-CHECKED
+hexc:   BSR     isdig
+        BLO     hv1             ; C = 1
+        ANDA    #0DFh
+        SUBA    #11h
+        CMPA    #6
+        BHS     hv9             ; C = 0
+        SUBA    #0F6h           ; + 10, and sets the carry
+hv1:    LEAY    1,Y             ; (LEAY leaves the carry alone)
+hv9:    RTS
+        ENDIF
+
 ; =============================================================================
 ;  Dispatch table, in code order.
 ;
@@ -446,9 +463,7 @@ hx2:
 exec:   LDX     ,U++
         JMP     ,X              ; the code's RTS returns to the dispatcher
 
-; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
-; and return its value in A with the carry set; otherwise leave the IP and
-; return with the carry clear.
+        IF      CHECKED
 hexc:   JSR     isdig
         BLO     hv1             ; C = 1
         ANDA    #0DFh
@@ -458,6 +473,7 @@ hexc:   JSR     isdig
         SUBA    #0F6h           ; + 10, and sets the carry
 hv1:    LEAY    1,Y             ; (LEAY leaves the carry alone)
 hv9:    RTS
+        ENDIF
 
         IF      1-CHECKED
 getk    EQU     KEY             ; the host's routine does the whole job
@@ -491,21 +507,23 @@ rdrop:  PULS    D,X             ; the return address and the block start
 ; '[' followed by a letter stores the body's address in that letter's cell:
 ; uppercase is a word, lowercase a variable. Followed by a space it pushes
 ; the body's address instead. Either way it then skips to the matching ']'.
-; (The unchecked build takes anything below 'A' as the space, and anything
-; from 'A' up as a letter.)
-h_def:  LDA     ,Y+
+; (The unchecked build takes anything that is not a letter as the space; the
+; checked build stops on it.)
         IF      CHECKED
-        CMPA    #' '
+def1:   CMPA    #' '-'A'+256
         BEQ     def2
-        TFR     A,B
-        ANDB    #0DFh           ; fold case
-        SUBB    #'A'
-        CMPB    #26
-        LBHS    e_brack         ; anything but a letter or a space
+        LBRA    e_brack         ; anything but a letter or a space
         ENDIF
-        SUBA    #'A'            ; 0-25 or 32-57: lowercase lands 64 bytes up
+h_def:  LDA     ,Y+
+        SUBA    #'A'            ; a letter gives 0-25 or 32-57: lowercase
+        TFR     A,B             ;   lands 64 bytes up
+        ANDB    #0DFh           ; fold case
+        CMPB    #26
         IF      1-CHECKED
-        BLO     def2
+        BHS     def2            ; not a letter
+        ENDIF
+        IF      CHECKED
+        BHS     def1
         ENDIF
         JSR     cellx
         TFR     Y,D
@@ -547,9 +565,8 @@ h_fetch:LDX     ,U              ; '@' (the cell in memory is little-endian)
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
 ;   n = 0: wait for a key
-;   n < 0: read a line of at most -n characters, with echo. n is not
-;          checked: the buffer holds 127 characters and the CR, so a
-;          program must ask for 127 or fewer.
+;   n < 0: read a line of at most -n characters, with echo. The buffer
+;          holds 127 characters and the CR: a bigger count is taken as 127.
 h_key:  LDX     ,U
         BMI     line
 kt1:    LDB     #MSLOOP         ; one millisecond, roughly
@@ -569,7 +586,11 @@ kt3:    CLR     ,U
 ; (stored, not echoed), every other key is stored and echoed until the line
 ; is full. B = the length so far; the low byte of the top cell becomes the
 ; most allowed (it holds minus the count on entry).
-line:   NEG     1,U
+line:   CMPX    #-127           ; (X = TOS, minus the count)
+        BHS     ln1
+        LDA     #-127           ; more than 127 is taken as 127
+        STA     1,U
+ln1:    NEG     1,U
         LDX     #LINEBUF
         CLRB
 ln2:    JSR     getk
@@ -769,7 +790,7 @@ h_sub:  JSR     isdig
 ; '/' is the last handler, so what follows its first byte may lie past the
 ; second range: the divide itself and the routines after it.
 
-; '/' ( a b -- r q ): the quotient is on top. Truncates toward zero; r takes
+; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
 ; of a. Dividing by zero is not checked: it returns two cells of no meaning.
 h_div:  LDA     2,U
@@ -781,15 +802,13 @@ h_div:  LDA     2,U
         TFR     U,X
         BSR     absx            ; |b|
         BSR     udiv            ; NOS = q, TOS = r
-        BSR     h_swap          ; NOS = r, TOS = q
-        TFR     U,X
+        LEAX    2,U
         TST     ,S+
         BPL     dv1
         BSR     negx            ; q's sign
-dv1:    LEAX    2,U
-        TST     ,S+
+dv1:    TST     ,S+
         BPL     ng9
-        BRA     negx            ; r's sign
+        BRA     negt            ; r's sign
 
 negnum: JSR     rdnum           ; a negative literal: read it, then negate
 negt:   TFR     U,X
@@ -808,7 +827,15 @@ absx:   TST     ,X              ; absx: negate the cell at X if negative
 ; divisor the TOS cell, both <= 8000h; the NOS cell becomes the quotient and
 ; the TOS cell the remainder. The remainder is built in D (always < the
 ; divisor, so 2R+1 fits in 16 bits).
-udiv:   LDX     #16
+; Dividing by 2 is one shift (the spec wants that fast).
+udiv:   LDD     ,U
+        SUBD    #2
+        BNE     ud0
+        LSR     2,U
+        ROR     3,U             ; the quotient
+        ROLB                    ; the remainder: the bit that fell out (D was 0)
+        BRA     ud3
+ud0:    LDX     #16
         CLRA
         CLRB
 ud1:    ASL     3,U
@@ -821,7 +848,7 @@ ud1:    ASL     3,U
         INC     3,U             ; a quotient bit
 ud2:    LEAX    -1,X
         BNE     ud1
-        STD     ,U
+ud3:    STD     ,U
         RTS
 
         IF      CHECKED

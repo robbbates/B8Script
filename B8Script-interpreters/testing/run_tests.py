@@ -1,7 +1,7 @@
 import sys, os, re
 sys.path.insert(0, os.path.dirname(__file__))
 from ref import Ref
-from tests import SUITE, MC, ERRS
+from tests import SUITE, MC, ERRS, LOOSE
 
 def expected(prog, inp, cpm, retbyte):
     return Ref(prog, inp, cpm=cpm, retbyte=retbyte).run(50_000_000)
@@ -9,6 +9,8 @@ def expected(prog, inp, cpm, retbyte):
 def check(runner, name, cpu, cpm, checked, retbyte, games=True, verbose=False):
     fails = 0
     cases = list(SUITE) + [(n, p, i) for n, p, i, _ in MC.get(cpu, [])]
+    if not checked:
+        cases += LOOSE
     for n, p, i in cases:
         exp = dict((k, e) for k, _, _, e in MC.get(cpu, [])).get(n) or expected(p, i, cpm, retbyte)
         out, ended = runner(p, i)

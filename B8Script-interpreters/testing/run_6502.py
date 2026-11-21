@@ -4,18 +4,21 @@ from harness_6502 import Run
 import tests
 from run_tests import check
 
-# Machine-code tests (6502 contract: TOS in zero page $02/$03, ends in RTS = 60h
-# which the loader writes; the loader reads hex pairs only, so no spaces).
-#  mcdouble: ASL $02 / ROL $03: doubles TOS.
-#  mcpush:   DEX / LDA $02 / STA DSL,X / LDA $03 / STA DSH,X /
-#            LDA #7 / STA $02 / LDA #0 / STA $03: pushes 7 over TOS.
-# The data stack is at $0200,X / $0300,X, or at $10,X / $80,X in the builds
-# with the stack in zero page (the -zp ones), so mcpush has two forms.
+# Machine-code tests (the loader reads hex pairs only, so no spaces; it
+# writes the RTS, 60h, itself). Each interpreter has its own contract:
+#  b8s-6502.asm     TOS in zero page $02/$03, the rest of the data stack at
+#                   $0200,X (low bytes) and $0300,X (high bytes)
+#    mcdouble: ASL $02 / ROL $03: doubles TOS.
+#    mcpush:   DEX / LDA $02 / STA $0200,X / LDA $03 / STA $0300,X /
+#              LDA #7 / STA $02 / LDA #0 / STA $03: pushes 7 over TOS.
+#  b8s-6502-zp.asm  every cell in zero page, TOS at 0,X and 1,X
+#    mcdouble: ASL 0,X / ROL 1,X
+#    mcpush:   DEX / DEX / LDA #7 / STA 0,X / LDA #0 / STA 1,X
 MC = {
     False: [('mcdouble', b'8_:d! `06022603 ; 21 d@` #', b'', b'42'),
             ('mcpush', b'20_:d! `CAA5029D0002A5039D0003A9078502A9008503 ; 5 d@` # #', b'', b'75')],
-    True: [('mcdouble', b'8_:d! `06022603 ; 21 d@` #', b'', b'42'),
-           ('mcpush', b'20_:d! `CAA5029510A5039580A9078502A9008503 ; 5 d@` # #', b'', b'75')],
+    True: [('mcdouble', b'8_:d! `16003601 ; 21 d@` #', b'', b'42'),
+           ('mcpush', b'20_:d! `CACAA9079500A9009501 ; 5 d@` # #', b'', b'75')],
 }
 
 games = '--nogames' not in sys.argv

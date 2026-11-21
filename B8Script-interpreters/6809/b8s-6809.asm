@@ -547,9 +547,8 @@ h_fetch:LDX     ,U              ; '@' (the cell in memory is little-endian)
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
 ;   n = 0: wait for a key
-;   n < 0: read a line of at most -n characters, with echo. n is not
-;          checked: the buffer holds 127 characters and the CR, so a
-;          program must ask for 127 or fewer.
+;   n < 0: read a line of at most -n characters, with echo. The buffer
+;          holds 127 characters and the CR: a bigger count is taken as 127.
 h_key:  LDX     ,U
         BMI     line
 kt1:    LDB     #MSLOOP         ; one millisecond, roughly
@@ -569,7 +568,11 @@ kt3:    CLR     ,U
 ; (stored, not echoed), every other key is stored and echoed until the line
 ; is full. B = the length so far; the low byte of the top cell becomes the
 ; most allowed (it holds minus the count on entry).
-line:   NEG     1,U
+line:   CMPX    #-127           ; (X = TOS, minus the count)
+        BHS     ln1
+        LDA     #-127           ; more than 127 is taken as 127
+        STA     1,U
+ln1:    NEG     1,U
         LDX     #LINEBUF
         CLRB
 ln2:    JSR     getk

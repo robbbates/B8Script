@@ -814,9 +814,8 @@ cf2:    STA     TL              ; TOS = A (Y = 0)
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
 ;   n = 0: wait for a key
-;   n < 0: read a line of at most -n characters, with echo. n is not
-;          checked: the buffer holds 127 characters and the CR, so a
-;          program must ask for 127 or fewer.
+;   n < 0: read a line of at most -n characters, with echo. The buffer
+;          holds 127 characters and the CR: a bigger count is taken as 127.
 h_key:  LDA     TH
         BMI     line
 kt1:    LDY     #MSLOOP         ; one millisecond, roughly
@@ -839,8 +838,13 @@ kt3:    LDY     #0
 ; Backspace takes the last character back (and is echoed as it is), CR ends
 ; (stored, not echoed), every other key is stored and echoed until the line
 ; is full. Y = the length so far; TL = the most allowed.
-line:   JSR     neg             ; TL = the count
-        LDY     #0
+line:   JSR     neg             ; TOS = the count, and A = its high byte
+        BNE     ln0
+        LDA     TL
+        BPL     ln1
+ln0:    LDA     #127            ; more than 127 is taken as 127
+        STA     TL
+ln1:    LDY     #0
         BEQ     ln2             ; always
 ln3:    JSR     CONOUT
 ln2:    JSR     getk

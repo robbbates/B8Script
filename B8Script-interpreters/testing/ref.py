@@ -97,13 +97,14 @@ class Ref:
         return self.inp.pop(0)
 
     def readline(self, n):
-        """-n?: read a line of at most n characters; n is not checked.
+        """-n?: read a line of at most n characters, and 127 at the very most.
         Generic builds: Backspace takes one character back and is echoed as
         it is; every other key but CR is stored and echoed while there is
         room. CP/M builds: BDOS 10 does the editing (Backspace and DEL erase
         with BS, space, BS; other control keys are ignored; a full line ends
         by itself; CR is echoed)."""
         buf = bytearray()
+        n = min(n, 127)
         while True:
             c = self.key()
             if c == CR:

@@ -695,9 +695,8 @@ num1:   PUSH    BC
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
 ;   n = 0: wait for a key
-;   n < 0: read a line of at most -n characters, with echo. n is not
-;          checked: the buffer holds 127 characters and the CR, so a
-;          program must ask for 127 or fewer.
+;   n < 0: read a line of at most -n characters, with echo. The buffer
+;          holds 127 characters and the CR: a bigger count is taken as 127.
 h_key:  BIT     7,H
         JR      NZ,line
 kt1:    LD      E,MSLOOP        ; one millisecond, roughly
@@ -721,8 +720,11 @@ kt3:    LD      L,A
         IF      CPM
         ; CP/M: BDOS 10 does the editing (the spec allows the platform's
         ; own line editor). It doesn't store the CR, so it is added here.
-line:   XOR     A
-        SUB     L               ; A = the count (TOS is minus the count)
+line:   LD      DE,127          ; TOS is minus the count: adding 127 carries
+        ADD     HL,DE           ;   only for 1 to 127, and leaves 127 - count
+        SBC     A,A
+        AND     L               ; (0 for a count that is too big)
+        XOR     127             ; A = the count, 127 at most
         LD      (LBHDR),A
         LD      DE,LBHDR
         LD      A,10
@@ -743,20 +745,22 @@ line:   XOR     A
         ; of its page, so L alone is the place in the line: D holds the L of
         ; a full line.
         ENDIF
+        IFN     CPM
+line:   LD      DE,127          ; TOS is minus the count: adding 127 carries
+        ADD     HL,DE           ;   only for 1 to 127, and leaves 127 - count
+        SBC     A,A
+        AND     L               ; (0 for a count that is too big)
+        CPL
+        LD      D,A             ; D = the L of a full line: 80h + count, FFh
+        ENDIF                   ;   at most
         IF      EDITOR
-line:   CALL    rdline          ; (the editor calls rdline too)
+        CALL    rdline          ; (the editor calls rdline too)
         LD      L,LINEBUF & 0FFh
         RST     30h
-; rdline: read a line of at most -L characters; HL -> the CR that ends it
+; rdline: read a line that is full when L reaches D; HL -> the CR that ends it
 rdline:
         ENDIF
-        IF      (1-CPM)*(1-EDITOR)
-line:
-        ENDIF
         IFN     CPM
-        LD      A,LINEBUF & 0FFh
-        SUB     L               ; (TOS is minus the count)
-        LD      D,A             ; D = the L of a full line
         LD      HL,LINEBUF
 ln2:    CALL    getk
         JR      Z,ln2
@@ -1153,7 +1157,7 @@ de1:    LD      A,(HL)
         JR      NZ,de1          ; and fall into the editor
 
 edit:   LD      SP,DSTOP
-        LD      L,83h           ; (minus 125)
+        LD      D,0FDh          ; 125 characters at most
         CALL    rdline          ; HL -> the CR that ended the line
         INC     L
         LD      (HL),10         ; a LF after it,

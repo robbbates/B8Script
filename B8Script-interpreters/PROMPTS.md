@@ -61,8 +61,10 @@ bytes, one CPU at a time. Ideas not yet tried:
 - 6809, checked: it keeps a whole-address table because its code is bigger
   than the two ranges of the one-byte scheme. A third range, or moving the
   checked-only routines, might get it back.
-- Z80/8080: the first 256 bytes are packed by hand around the RST vectors;
-  one spare byte remains on the Z80.
+- Z80/8080: the first 256 bytes are packed by hand around the RST vectors.
+- Z80 with EDITOR = 1: 767 bytes, with the target at 768 (VTL-2's size).
+  Any byte saved in the interpreter is a byte the editor can spend; see
+  the list of what it leaves out in README.md.
 
 Report a table of bytes before and after for every variant, the techniques
 that paid off, and the ones you tried that didn't.

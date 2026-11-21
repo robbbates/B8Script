@@ -26,7 +26,11 @@ python3 sizes.py out/z80                           # bytes per variant
 python3 mkrel.py                                   # copy out/ to the .bin, .COM and .lst files
 ```
 
-- A variant line for `build.sh` is `CPM CHECKED`, or `CPM CHECKED ZPSTACK` for the 6502. The 6502's zero-page builds are named `-zp`.
+- A variant line for `build.sh` is `CPM CHECKED`, then `ZPSTACK` for the 6502, then `EDITOR` for the Z80. The 6502's zero-page builds are named `-zp` and the Z80's editor build `-ed`.
+- The Z80 editor build is one more variant, built into the same folder. `run_z80.py` tests it by typing at it (`test_editor.py`, which can also be run by itself):
+  ```
+  VARIANTS='0 0 0 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80
+  ```
 - Run the layout and branch checks after every change. They catch mistakes the assembler lets through and the tests may not reach.
 - Each CPU's full run takes a few minutes at most.
 
@@ -39,6 +43,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `run_tests.py` | `check()` runs one build against everything, including Tiny BASIC and the Ctrl-C test |
 | `harness_z80.py` | Z80/8080 emulator wrapper. In generic builds it traps KEY/CONOUT/EXIT; in CP/M builds it emulates BDOS 6, 10, 15, 20 and 26 and loads the program as a file |
 | `harness_6502.py`, `harness_6809.py` | The same wrapper for py65 and MC6809 |
+| `test_editor.py` | Types sessions at the Z80 editor build and compares the output with a model of the editor (which uses `ref.py` for whatever a line runs) |
 | `chktab.py`, `chktab09.py` | Check the dispatch-table layout rules on Z80/8080 and 6809 listings |
 | `chkbr6502.py` | Checks every 6502 branch against its target |
 | `games/` | Your programs. `TINYBAS.B8S` is part of the suite |

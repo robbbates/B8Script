@@ -5,6 +5,9 @@ from the listing) and NUL-terminated, and KEY/CONOUT/EXIT are traps. KEY
 returns a waiting key in A, or 0, with the zero flag matching A.
 cpm: the image is a .COM at 0100h; BDOS 6, 10, 15, 20 and 26 are emulated,
 and the program is the 'file' that fn 15/20 read.
+editor: a generic image built with EDITOR = 1. No program is loaded (the RAM
+at PROG starts as junk, as after power-on) and everything goes in through KEY;
+the run ends when the editor is left waiting for a key.
 """
 import re
 import z80
@@ -63,6 +66,11 @@ class Run:
             for k in ('KEY', 'CONOUT', 'EXIT'):
                 self.m.set_breakpoint(self.sy[k])
             self.m.pc = 0
+        elif mode == 'editor':
+            self.m.set_memory_block(self.sy['PROG'], b'\xAA' * 2048)
+            for k in ('KEY', 'CONOUT'):
+                self.m.set_breakpoint(self.sy[k])
+            self.m.pc = 0
         else:
             # page zero: JP WBOOT at 0, JP BDOS at 5
             self.m.set_memory_block(0, bytes([0xC3, WBOOT & 255, WBOOT >> 8, 0, 0,
@@ -104,7 +112,7 @@ class Run:
                 self.ended = 'timeout'
                 break
             pc = m.pc
-            if self.mode == 'generic':
+            if self.mode in ('generic', 'editor'):
                 sy = self.sy
                 if pc == sy['CONOUT']:
                     self.out.append(m.a); idle = 0; self.ret()
@@ -119,7 +127,7 @@ class Run:
                     # the host routine's contract: Z (and S) follow A
                     m.f = (m.f & 0x3F) | (0x40 if m.a == 0 else 0) | (m.a & 0x80)
                     self.ret()
-                elif pc == sy['EXIT']:
+                elif pc == sy['EXIT'] and self.mode == 'generic':
                     self.ended = 'exit'; break
                 # anything else: the tick budget ran out; carry on
             else:

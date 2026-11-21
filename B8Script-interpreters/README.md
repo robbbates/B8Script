@@ -6,14 +6,16 @@ Generic interpreters for minimal homebrew machines (serial console only), plus C
 CPM     EQU     0               ; 1 = CP/M .COM build        (Z80, 8080)
 CHECKED EQU     0               ; 1 = checked build          (all four)
 ZPSTACK EQU     0               ; 1 = data stack in zero page (6502)
+EDITOR  EQU     0               ; 1 = with the line editor   (Z80, generic unchecked only)
 ```
 
 ## Sizes (bytes, measured)
 
 | CPU | Generic | Generic, checked | CP/M | CP/M, checked |
 |---|---|---|---|---|
-| Z80 | 675 | 822 | 738 | 887 |
-| 8080 | 752 | 907 | 799 | 956 |
+| Z80 | 673 | 820 | 736 | 885 |
+| Z80 with the line editor | 767 | n/a | n/a | n/a |
+| 8080 | 749 | 904 | 796 | 953 |
 | 6502, stack in pages 2-3 | 1,087 | 1,252 | n/a | n/a |
 | 6502, stack in zero page | 1,053 | 1,218 | n/a | n/a |
 | 6809 | 741 | 920 | n/a | n/a |
@@ -27,7 +29,7 @@ ZPSTACK EQU     0               ; 1 = data stack in zero page (6502)
 | File | What it is |
 |---|---|
 | `*/b8s-*.asm` | The source, with comments |
-| `*-rom-XXXX.bin` | Generic ROM image, to load at XXXXh (`-zp-` = 6502 with the stack in zero page) |
+| `*-rom-XXXX.bin` | Generic ROM image, to load at XXXXh (`-zp-` = 6502 with the stack in zero page, `-editor-` = Z80 with the line editor) |
 | `B8SZ80.COM`, `B8SZ80C.COM`, `B8S8080.COM`, `B8S8080C.COM` | CP/M builds; the C means checked. Run as `B8SZ80 PROG.B8S` |
 | `*.lst` | The assembler's listings |
 
@@ -89,6 +91,28 @@ To save the 32 bytes of a full address table, the Z80, the 8080 and the unchecke
 - The generic Z80 and 8080 images start at 0000h and use RST 08h, 18h, 20h, 28h and 30h as one-byte calls.
 - The CP/M builds copy those routines to 0008h-0033h when they start (they used 0008h-0014h before). A system whose interrupts use RST 1 to RST 6 can't run them.
 
+## The Z80 line editor (EDITOR = 1)
+
+The whole image is 767 bytes: the interpreter and an editor in one byte less than VTL-2's 768. The interpreter starts in the editor, and a program that ends comes back to it. There is no prompt. Type a line and press Return:
+
+| You type | What happens |
+|---|---|
+| `n text` | The text goes in as line n, and the lines from n on move down. A number past the end adds the line at the end |
+| `n` | Line n is taken out |
+| `0` | The program is listed |
+| `0 text` | The text is added at the end |
+| anything not starting with a digit | It runs at once, as B8Script |
+| ` 33536{]` | Runs the program (a jump to PROG, 8300h; the leading space keeps the number from being a line number) |
+
+What the 94 bytes don't buy:
+- Lines are counted, not numbered. The list shows no numbers, and only the first 128 lines; a line number above 128 lists part of the program on its way there.
+- A line holds 125 characters. The space after the line number is stored with the text.
+- Reset empties the program. There is no save or load.
+- Nothing is checked, and nothing is printed between a program's output and what you type next.
+- Putting a line in moves the rest of the program up one byte for each character typed: fine for a few hundred bytes, slow in a long program.
+- Words and variables last from one line to the next, so you can call a word from the keyboard after running the program. A word's address points into the program text, so run the program again after editing it.
+- A line run at once sits in the line buffer, which `-n?` also reads into. A program started with `{]` never returns to the line, so it can use `-n?` freely; a typed line that calls `-n?` itself and carries on afterwards runs what was typed.
+
 ## Checked builds
 
 A checked build stops with a letter, ` @ ` and the offset in the program of the character it was reading, like `S @ 245`:
@@ -133,6 +157,8 @@ Every build runs, in an emulator, against a reference interpreter written from t
 - your Tiny BASIC, driven with a typed program (entering, LIST, RUN, GOSUB, FOR, expressions);
 - a machine-code test per CPU (and per stack layout on the 6502);
 - for checked builds, every error plus Ctrl-C.
+
+The editor build is tested by typing at it (`testing/test_editor.py`): entering, inserting, deleting, listing, running, more than 128 lines, full-length lines, Backspace, and programs that read lines and keys.
 
 The other eight games were also run on every CPU against the reference, for as far as a short run gets. The test setup is in `testing/` (see its README).
 

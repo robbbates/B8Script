@@ -8,6 +8,10 @@ verbose = '-v' in sys.argv
 total = 0
 for hexf in sorted(glob.glob(d + '/*.hex')):
     base = hexf[:-4]
+    if base.endswith('-ed'):        # the editor build runs no program file: it is typed at
+        from test_editor import check_editor
+        total += check_editor(base, verbose=verbose)
+        continue
     cpm = '-cpm' in base
     checked = base.endswith('-chk')
     def runner(p, i, brk=None, base=base, cpm=cpm):

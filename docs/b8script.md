@@ -183,7 +183,70 @@ One pair of round brackets gives every structure. The closing flag decides wheth
 
 `[x body]` does the same, but stores the address in variable x: call it with `x@X`, using the eval word `[X{]` (see Idioms). `[ body]` pushes the address instead, so code can be handed to a word on the stack: `[ 7#]X`.
 
-**Skipping.** A false `(`, a `[` and a true `\` skip text without running it. The skipper counts brackets of both kinds together, `(` and `[` as openers and `)` and `]` as closers, and steps over strings whole, so brackets inside strings never count.
+### How skipping works
+
+Three things skip text without running it: a false `(`, a `[` (after reading the character that follows it) and a true `\`. All three use the same routine, the **skipper**. It reads forward from where it was called and stops at the first closer that belongs to the level it started at. It does not run anything, and it looks at only five characters: `(` `[` `)` `]` `"`.
+
+1. Start with a depth of 0.
+2. Read the next character.
+3. If it is `"`, step over the whole string: read on to the closing `"`, stepping over `/` and the character after it each time. Go to 2.
+4. If it is `(` or `[`, add 1 to the depth. Go to 2.
+5. If it is `)` or `]`:
+   - at depth 0, this is the closer: stop, just after it;
+   - otherwise subtract 1 from the depth and go to 2.
+6. If it is NUL, the text has run out: stop (see below).
+7. Anything else is passed over. Go to 2.
+
+```mermaid
+flowchart TD
+    S([called by a false &#40;, a &#91; or a true &#92;]) --> D0[depth = 0]
+    D0 --> R[read next character]
+    R --> Q{"&quot; ?"}
+    Q -- yes --> STR[step over the string:<br>read to the closing &quot;,<br>stepping over / and the next character] --> R
+    Q -- no --> O{"&#40; or &#91; ?"}
+    O -- yes --> INC[depth + 1] --> R
+    O -- no --> C{"&#41; or &#93; ?"}
+    C -- yes --> Z{depth = 0 ?}
+    Z -- yes --> STOP([stop after this closer:<br>the caller acts on its kind])
+    Z -- no --> DEC[depth - 1] --> R
+    C -- no --> N{NUL ?}
+    N -- yes --> EOT([out of text])
+    N -- no --> R
+```
+
+What the caller does with the closer:
+
+| Called by | Closer found at depth 0 | Then |
+|---|---|---|
+| False `(` | `)` | Carry on after it |
+| `[` | `]` | Carry on after it (the body has been passed over, its address stored or pushed) |
+| True `\` | `)` | Pop the block start, carry on after it: the block is left |
+| True `\` | `]` | Return: pop an address and jump to it |
+| False `(` or `[` | the other kind, or NUL | Unsafe: a checked build stops with `N` |
+| True `\` | NUL | The program ends (this is how `1\` halts at the top level) |
+
+Two consequences are worth remembering:
+
+- **The two kinds are counted together.** For the skipper `(` and `[` are both "open", and `)` and `]` both "close". It never checks that they pair up by kind; that is the programmer's job (see the next paragraph).
+- **Only brackets and quotes matter.** Numbers, letters, other punctuation, and the digits read by the hex loader are passed over, and a hex load never contains a bracket or quote, so the skipper can never be misled by them. Brackets inside strings never count, which is why `"("` and `")"` are safe in skipped code. A `/` just before the closing quote escapes it, so the string goes on: write `//` to end a string with a slash.
+
+An example. Here a false `(` skips from just after itself:
+
+```text
+0( "(" [A 1#] 2# ")/"" ) 3#
+```
+
+| Text | What the skipper does | Depth |
+|---|---|---|
+| `"("` | Steps over the string; the `(` inside doesn't count | 0 |
+| `[` | Opener | 1 |
+| `A 1#` | Passed over | 1 |
+| `]` | Closer, not at depth 0 | 0 |
+| `2#` | Passed over | 0 |
+| `")/""` | Steps over the string; `/"` is an escaped quote, so the string ends at the second `"` | 0 |
+| `)` | Closer at depth 0: stop | — |
+
+Then `3#` runs and prints 3. Nothing else printed, and word A was never defined, because a skip runs nothing.
 
 **Brackets must balance.** Any text that may be skipped must balance by the skipper's count, and each opener must close with its own kind: `(` with `)`, `[` with `]`. Mixed kinds are unsafe. They balance for the skipper but run differently, and nothing useful comes of it. A checked build stops with `N` when a skip from `(` or `[` reaches NUL or reaches a closer of the wrong kind at its own level. A `\` that finds no closer still ends the program, as `1\` does.
 
@@ -547,8 +610,8 @@ This chapter is for anyone writing an interpreter. The first part lists what the
 - **Characters.** Every character in the Character reference, with exactly the effects given, including the look-ahead of `"`, `-`, `[` and `` ` ``.
 - **Cells.** 16-bit, little-endian in memory, unaligned; arithmetic wraps.
 - **Numbers.** Decimal only, wrapping at 16 bits; `-` before a digit negates.
-- **Strings.** The `/` escape, decoded only by `$`; skips step over `/` and the next character.
-- **Skipping.** Both bracket kinds counted together; strings stepped over whole.
+- **Strings.** The `/` escape is decoded only by `$`, and decoding is nothing more than clearing bit 6 of the character after the `/` (AND BFh). There are no other tests: whatever follows the `/` is accepted and printed with bit 6 cleared, so `//` and `/"` give themselves because they have no bit 6. Skips step over `/` and the next character.
+- **Skipping.** The skipper as described under [How skipping works](#how-skipping-works): both bracket kinds counted together, strings stepped over whole.
 - **`/`.** Truncates toward zero, remainder on top with the dividend's sign; fast for 2 and −2.
 - **`_`.** Signed count; `0_` reads the top.
 - **`?`.** The guarantees listed under `?`, and a -n? cap of at least 127.

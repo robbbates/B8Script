@@ -8,12 +8,12 @@
 ;        Backspace.
 ;  Design follows the Z80 interpreter; see b8s-z80.asm for the common ideas.
 ;
-;  Two switches, set in the EQU lines below:
-;    ZPSTACK  0 = the data stack is in pages 2 and 3: 252 cells
-;             1 = the data stack is in zero page: 112 cells, and a smaller
-;                 interpreter, because every stack access is a byte shorter.
-;                 The memory map and the machine-code contract differ: see
-;                 below.
+;  This interpreter keeps the data stack in pages 2 and 3 (252 cells) and
+;  uses 10 bytes of zero page. b8s-6502-zp.asm is a smaller interpreter that
+;  keeps the stack in zero page instead (112 cells); its memory map and
+;  machine-code contract differ.
+;
+;  One switch, set in the EQU line below:
 ;    CHECKED  0 = no checks (spec: "B8Script checks nothing")
 ;             1 = stops on stack overrun, Ctrl-C, heap past the limit, a store
 ;                 outside the program's own space, and a bad character after [,
@@ -22,7 +22,6 @@
 ;  Assembler: asm80, C6502 mode.
 ; =============================================================================
 
-ZPSTACK EQU     0               ; 1 = data stack in zero page
 CHECKED EQU     0               ; 1 = checked build
 
 ; -----------------------------------------------------------------------------
@@ -53,7 +52,7 @@ CHECKED EQU     0               ; 1 = checked build
 ;  stack, so it ends with RTS (60h, which the hex loader appends). On entry
 ;  TL/TH ($02/$03) hold the new TOS (the address is already consumed) and X is
 ;  the data-stack index: NOS is DSL,X (low) and DSH,X (high), which is
-;  $0200,X and $0300,X, or $10,X and $80,X when the stack is in zero page.
+;  $0200,X and $0300,X.
 ;  To push: DEX, store TL/TH at DSL,X/DSH,X, then set TL/TH. To drop: load
 ;  TL/TH from DSL,X/DSH,X and INX. The code may change A, Y, X (it is the
 ;  stack index, so it must stay consistent on return) and zero page $04-$06
@@ -72,13 +71,10 @@ D1      EQU     09h
 ; -----------------------------------------------------------------------------
 ;  Memory map
 ;
-;    0000-00FF  zero page: the variables above; with ZPSTACK = 1 also the data
-;               stack: low bytes at 10-7F, high bytes at 80-EF (X = 70 when
-;               empty: 112 cells)
+;    0000-00FF  zero page: the variables above
 ;    0100-01FF  hardware stack = return stack, S starts at FF
-;    0200       with ZPSTACK = 0: DSL, data stack, low bytes (X = FC when
-;    0300       empty: 252 cells) and DSH, high bytes. With ZPSTACK = 1 these
-;               two pages are not used.
+;    0200       DSL, data stack, low bytes (X = FC when empty: 252 cells)
+;    0300       DSH, data stack, high bytes
 ;    0400       LET  letter cells: A..Z at +00..+33, a..z at +40..+73 (a word
 ;               cell is 64 bytes below its variable), heap pointer at +7C
 ;               (= z10+), KEYBUF at +34, the -n? line buffer at +80..+FF
@@ -94,16 +90,9 @@ KEY     EQU     0FF06h          ; a waiting key in A, or A = 0 if none is
 CONOUT  EQU     0FF03h          ; print the character in A
 EXIT    EQU     0FF09h          ; where to go when the program ends
 ;   KEY and CONOUT must preserve X and Y.
-        IF      ZPSTACK
-DSL     EQU     10h             ; data stack, low bytes
-DSH     EQU     80h             ; data stack, high bytes
-DSE     EQU     70h             ; X when the data stack is empty
-        ENDIF
-        IFN     ZPSTACK
-DSL     EQU     0200h
-DSH     EQU     0300h
-DSE     EQU     0FCh
-        ENDIF
+DSL     EQU     0200h           ; data stack, low bytes
+DSH     EQU     0300h           ; data stack, high bytes
+DSE     EQU     0FCh            ; X when the data stack is empty
 LETPAGE EQU     04h
 LET     EQU     LETPAGE*256
 PROG    EQU     0500h           ; where the loader puts the program text

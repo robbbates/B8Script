@@ -25,8 +25,8 @@ for cpu, (org, com) in CPUS.items():
     for variant, name in (('gen', f'b8s-{cpu}-rom-{org}.bin'),
                           ('gen-chk', f'b8s-{cpu}-rom-checked-{org}.bin'),
                           ('ed', f'b8s-{cpu}-rom-editor-{org}.bin'),
-                          ('zp', f'b8s-{cpu}-rom-zp-{org}.bin'),
-                          ('zp-chk', f'b8s-{cpu}-rom-zp-checked-{org}.bin'),
+                          ('zp-gen', f'b8s-{cpu}-rom-zp-{org}.bin'),
+                          ('zp-gen-chk', f'b8s-{cpu}-rom-zp-checked-{org}.bin'),
                           ('cpm', com and com + '.COM'),
                           ('cpm-chk', com and com + 'C.COM')):
         base = f'{src}/b8s-{cpu}-{variant}'

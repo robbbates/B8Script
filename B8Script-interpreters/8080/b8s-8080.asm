@@ -839,8 +839,10 @@ pdec:   LXI     D,10
 ; was ')' and 2 if it was ']'. Brackets of both kinds count together;
 ; strings are stepped over whole. A NUL first ends the program (for '\' with
 ; no closer; anything else that runs into the NUL had unbalanced brackets
-; anyway). D counts the open levels, starting at 1 for the one we are in.
-skip:   MVI     D,1
+; anyway). D counts the open levels, starting at 1 for the one we are in:
+; skip sets it to 0 and falls through the INR that an opener comes back to.
+skip:   MVI     D,0
+sk3:    INR     D               ; an opener: one deeper
 sk1:    LDAX    B
         INX     B
         ORA     A
@@ -857,8 +859,6 @@ sk1:    LDAX    B
         JNZ     sk1
 sk4:    DCR     D
         RZ                      ; the closer at this level
-        JMP     sk1
-sk3:    INR     D
         JMP     sk1
 
 ; skipstr: IP is inside a string; step past its closing quote. '/' escapes

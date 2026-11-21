@@ -1,5 +1,5 @@
 """Reference B8Script interpreter (spec of 2026-10-09 plus the 2026-11-20 changes,
-including '/' as the string escape and ( a b -- r q ) for the divide).
+including '/' as the string escape).
 
 Used only to produce expected output for the test suite. It models memory, the
 letter cells (packed layout: A at LET, a at LET+64, heap pointer at z+10), the
@@ -184,7 +184,7 @@ class Ref:
                 if (a < 0) != (b < 0):
                     q = -q
                 r = a - q * b
-            P(r); P(q)          # ( a b -- r q ): the quotient is on top
+            P(q); P(r)          # ( a b -- q r ): the remainder is on top
         elif C == '&':
             b = p(); a = p(); P(a & b)
         elif C == '|':

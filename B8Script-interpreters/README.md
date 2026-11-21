@@ -38,7 +38,6 @@ EDITOR  EQU     0               ; 1 = with the line editor   (Z80, generic unche
 - `[x` stores the address in a variable; `[` followed by a space pushes an anonymous block; any other character after `[` is an error.
 - The heap pointer lives at `z10+`.
 - The string escape is `/` (it was `>`): `/M` is CR, `/"` a quote, `//` a slash. `>` is an ordinary character inside strings. A `/` directly before a closing quote escapes the quote, in comments too.
-- `/` is `( a b -- r q )`: the quotient is on top. `/;` gives the remainder and `/%;` the quotient.
 - Dividing by zero is not checked. It returns two cells of no meaning (different on each CPU), and the stack stays balanced.
 - There is no fast path for dividing by 2.
 - `-n?` (generic builds): Backspace takes a character back and is echoed as it is; every other key but CR is stored and echoed, control keys and DEL included. `n` is not checked: the buffer holds 127 characters and the CR, so **a program must ask for 127 or fewer**, or the line can run into the start of the program text. The CP/M builds use BDOS 10, which does its own editing.
@@ -165,5 +164,4 @@ The other eight games were also run on every CPU against the reference, for as f
 ## Converting older programs
 
 - `testing/esc2slash.py FILE...` rewrites sources that still use `>` as the string escape. Printed strings (`"..."$`) get the full conversion, so they print what they did before. Comments (`"...";`) and data strings are only touched where the closing quote would move. It lists every data string that holds a `/` or `>`, so you can check those by hand.
-- `testing/divswap.py FILE...` rewrites sources written for `( a b -- q r )`: every `/` outside a string becomes `/%`, and a `/%%` that makes is cancelled. It lists data strings that hold a `/`, in case they are code.
-- Both take `-n` to report without changing anything.
+- `-n` reports without changing anything.

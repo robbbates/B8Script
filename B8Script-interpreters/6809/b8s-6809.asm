@@ -4,8 +4,8 @@
 ;        [x stores in a variable, "[ " pushes an anonymous block, any other
 ;        character after [ is an error, the heap pointer lives at z10+.
 ;        The string escape is '/' (it was '>').
-;        '/' leaves ( r q ), the quotient on top; dividing by zero is not
-;        checked. -n? does no more editing than Backspace.
+;        Dividing by zero is not checked. -n? does no more editing than
+;        Backspace.
 ;  Follows the design of the Z80 interpreter (z80/b8s-z80.asm).
 ;
 ;  Two builds, selected by the CHECKED line below (CPM is always 0: the 6809
@@ -769,7 +769,7 @@ h_sub:  JSR     isdig
 ; '/' is the last handler, so what follows its first byte may lie past the
 ; second range: the divide itself and the routines after it.
 
-; '/' ( a b -- r q ): the quotient is on top. Truncates toward zero; r takes
+; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
 ; of a. Dividing by zero is not checked: it returns two cells of no meaning.
 h_div:  LDA     2,U
@@ -781,15 +781,13 @@ h_div:  LDA     2,U
         TFR     U,X
         BSR     absx            ; |b|
         BSR     udiv            ; NOS = q, TOS = r
-        BSR     h_swap          ; NOS = r, TOS = q
-        TFR     U,X
+        LEAX    2,U
         TST     ,S+
         BPL     dv1
         BSR     negx            ; q's sign
-dv1:    LEAX    2,U
-        TST     ,S+
+dv1:    TST     ,S+
         BPL     ng9
-        BRA     negx            ; r's sign
+        BRA     negt            ; r's sign
 
 negnum: JSR     rdnum           ; a negative literal: read it, then negate
 negt:   TFR     U,X

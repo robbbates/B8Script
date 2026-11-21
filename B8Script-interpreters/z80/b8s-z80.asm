@@ -4,8 +4,8 @@
 ;        [x stores in a variable, "[ " pushes an anonymous block, any other
 ;        character after [ is an error, the heap pointer lives at z10+.
 ;        The string escape is '/' (it was '>').
-;        '/' leaves ( r q ), the quotient on top; dividing by zero is not
-;        checked. -n? does no more editing than Backspace.
+;        Dividing by zero is not checked. -n? does no more editing than
+;        Backspace.
 ;
 ;  Three switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
@@ -601,7 +601,7 @@ mul2:   DJNZ    mul1
         POP     BC
         RST     30h
 
-; '/' ( a b -- r q ): the quotient is on top. Truncates toward zero; r takes
+; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
 ; of a. Dividing by zero is not checked: it returns two cells of no meaning.
 h_div:  POP     DE              ; DE = a, HL = b
@@ -622,9 +622,8 @@ h_div:  POP     DE              ; DE = a, HL = b
         POP     AF              ; A = a's high byte
         OR      A
         CALL    M,neg16         ; r's sign
-        EX      DE,HL           ; HL = q, DE = r
         POP     BC
-        PUSH    DE              ; r under q
+        PUSH    DE              ; q under r
         RST     30h
 
 ; ---- stack and storage -----------------------------------------------------

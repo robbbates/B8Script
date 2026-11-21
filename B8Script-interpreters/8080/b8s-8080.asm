@@ -4,8 +4,8 @@
 ;        [x stores in a variable, "[ " pushes an anonymous block, any other
 ;        character after [ is an error, the heap pointer lives at z10+.
 ;        The string escape is '/' (it was '>').
-;        '/' leaves ( r q ), the quotient on top; dividing by zero is not
-;        checked. -n? does no more editing than Backspace.
+;        Dividing by zero is not checked. -n? does no more editing than
+;        Backspace.
 ;  Design follows the Z80 interpreter (z80/b8s-z80.asm), with 8080 opcodes
 ;  only.
 ;
@@ -523,7 +523,7 @@ mul2:   XCHG
         POP     B
         RST     6
 
-; '/' ( a b -- r q ): the quotient is on top. Truncates toward zero; r takes
+; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
 ; of a. Dividing by zero is not checked: it returns two cells of no meaning.
 h_div:  POP     D               ; DE = a, HL = b
@@ -549,8 +549,7 @@ h_div:  POP     D               ; DE = a, HL = b
         POP     PSW
         CM      neg16           ; r's sign
         POP     B
-        PUSH    H               ; r under q
-        XCHG                    ; HL = q
+        PUSH    D               ; q under r
         RST     6
 
 ; ---- stack and storage -----------------------------------------------------

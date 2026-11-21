@@ -4,8 +4,8 @@
 ;        [x stores in a variable, "[ " pushes an anonymous block, any other
 ;        character after [ is an error, the heap pointer lives at z10+.
 ;        The string escape is '/' (it was '>').
-;        '/' leaves ( r q ), the quotient on top; dividing by zero is not
-;        checked. -n? does no more editing than Backspace.
+;        Dividing by zero is not checked. -n? does no more editing than
+;        Backspace.
 ;  Design follows the Z80 interpreter; see b8s-z80.asm for the common ideas.
 ;
 ;  Two switches, set in the EQU lines below:
@@ -646,7 +646,7 @@ h_swap: LDY     DSL,X           ; '%'
         STY     TH
         RTS
 
-; '/' ( a b -- r q ): the quotient is on top. Truncates toward zero; r takes
+; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
 ; of a. Dividing by zero is not checked: it returns two cells of no meaning.
 h_div:  LDA     DSH,X
@@ -666,11 +666,9 @@ h_div:  LDA     DSH,X
         JSR     udiv            ; TOS = q, NOS = r
         PLA
         JSR     negm            ; q's sign
+        JSR     h_swap          ; r on top
         PLA
-        BPL     ud9             ; r's sign:
-        JSR     h_swap          ;   bring r up,
-        JSR     neg             ;   negate it,
-        JMP     h_swap          ;   and put it back
+        JMP     negm            ; r's sign
 
 ; udiv: unsigned TOS / D (D <= 8000h). TOS becomes the quotient and the NOS
 ; cell the remainder (whatever was there is lost).

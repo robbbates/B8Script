@@ -47,7 +47,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `chktab.py`, `chktab09.py` | Check the dispatch-table layout rules on Z80/8080 and 6809 listings |
 | `chkbr6502.py` | Checks every 6502 branch against its target |
 | `games/` | Your programs. `TINYBAS.B8S` is part of the suite |
-| `esc2slash.py`, `divswap.py` | Convert older programs to the `/` escape and to the `( r q )` divide |
+| `esc2slash.py` | Converts older programs to the `/` escape |
 | `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM` and `.lst` files next to each source |
 
 Notes on the harnesses:

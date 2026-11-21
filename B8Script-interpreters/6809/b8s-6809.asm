@@ -806,7 +806,15 @@ absx:   TST     ,X              ; absx: negate the cell at X if negative
 ; divisor the TOS cell, both <= 8000h; the NOS cell becomes the quotient and
 ; the TOS cell the remainder. The remainder is built in D (always < the
 ; divisor, so 2R+1 fits in 16 bits).
-udiv:   LDX     #16
+; Dividing by 2 is one shift (the spec wants that fast).
+udiv:   LDD     ,U
+        SUBD    #2
+        BNE     ud0
+        LSR     2,U
+        ROR     3,U             ; the quotient
+        ROLB                    ; the remainder: the bit that fell out (D was 0)
+        BRA     ud3
+ud0:    LDX     #16
         CLRA
         CLRB
 ud1:    ASL     3,U
@@ -819,7 +827,7 @@ ud1:    ASL     3,U
         INC     3,U             ; a quotient bit
 ud2:    LEAX    -1,X
         BNE     ud1
-        STD     ,U
+ud3:    STD     ,U
         RTS
 
         IF      CHECKED

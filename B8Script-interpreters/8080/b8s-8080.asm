@@ -793,8 +793,23 @@ rdn1:   LDAX    B
 ; Uses A, BC; the caller saves the IP. HL holds the dividend and, as its bits
 ; leave at the top, the quotient bits arrive at the bottom. The loop counter
 ; lives on the stack, since A is busy with the shifts.
+; Dividing by 2 is one shift (the spec wants that fast).
 udiv:   LXI     B,0
-        MVI     A,16
+        MOV     A,E
+        XRI     2
+        ORA     D
+        JNZ     udv0
+        ORA     H               ; A was 0, and the carry is clear
+        RAR
+        MOV     H,A
+        MOV     A,L
+        RAR
+        MOV     L,A             ; the quotient
+        MOV     A,B
+        RAL
+        MOV     C,A             ; the remainder: the bit that fell out
+        RET
+udv0:   MVI     A,16
         PUSH    PSW
 udv1:   DAD     H               ; next dividend bit into the carry
         MOV     A,C

@@ -672,10 +672,19 @@ h_div:  LDA     DSH,X
 
 ; udiv: unsigned TOS / D (D <= 8000h). TOS becomes the quotient and the NOS
 ; cell the remainder (whatever was there is lost).
+; Dividing by 2 is one shift (the spec wants that fast).
 udiv:   LDA     #0
         STA     DSL,X
         STA     DSH,X
-        LDY     #16
+        LDA     D0
+        EOR     #2
+        ORA     D1
+        BNE     ud0
+        LSR     TH
+        ROR     TL              ; the quotient
+        ROL     DSL,X           ; the remainder: the bit that fell out
+        RTS
+ud0:    LDY     #16
 ud1:    ASL     TL
         ROL     TH
         ROL     DSL,X

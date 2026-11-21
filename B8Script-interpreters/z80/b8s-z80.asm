@@ -794,7 +794,17 @@ ln5:    LD      (HL),A          ; the CR
 ; udiv: unsigned HL / DE (DE <= 8000h). Returns HL = quotient, DE = remainder.
 ; Uses A, BC; the caller saves the IP. The dividend shifts up through A:C
 ; while the quotient bits arrive at the bottom of C.
-udiv:   LD      A,H
+; Dividing by 2 is one shift (the spec wants that fast).
+udiv:   LD      A,E
+        XOR     2
+        OR      D
+        JR      NZ,udv0
+        SRL     H
+        RR      L               ; the quotient
+        ADC     A,A
+        LD      E,A             ; the remainder: the bit that fell out (D is 0)
+        RET
+udv0:   LD      A,H
         LD      C,L
         LD      HL,0
         LD      B,16

@@ -14,7 +14,7 @@ EDITOR  EQU     0               ; 1 = with the line editor   (Z80, generic unche
 | CPU | Generic | Generic, checked | CP/M | CP/M, checked |
 |---|---|---|---|---|
 | Z80 | 673 | 820 | 736 | 885 |
-| Z80 with the line editor | 767 | n/a | n/a | n/a |
+| Z80 with the line editor | 768 | n/a | n/a | n/a |
 | 8080 | 749 | 904 | 796 | 953 |
 | 6502, stack in pages 2-3 | 1,087 | 1,252 | n/a | n/a |
 | 6502, stack in zero page | 1,053 | 1,218 | n/a | n/a |
@@ -93,7 +93,7 @@ To save the 32 bytes of a full address table, the Z80, the 8080 and the unchecke
 
 ## The Z80 line editor (EDITOR = 1)
 
-The whole image is 767 bytes: the interpreter and an editor in one byte less than VTL-2's 768. The interpreter starts in the editor, and a program that ends comes back to it. There is no prompt. Type a line and press Return:
+The whole image is 768 bytes: the interpreter and an editor in the size of VTL-2. The interpreter starts in the editor, and a program that ends comes back to it. There is no prompt. Type a line and press Return:
 
 | You type | What happens |
 |---|---|
@@ -104,9 +104,9 @@ The whole image is 767 bytes: the interpreter and an editor in one byte less tha
 | anything not starting with a digit | It runs at once, as B8Script |
 | ` 33536{]` | Runs the program (a jump to PROG, 8300h; the leading space keeps the number from being a line number) |
 
-What the 94 bytes don't buy:
+What the 95 bytes don't buy:
 - Lines are counted, not numbered. The list shows no numbers, and only the first 128 lines; a line number above 128 lists part of the program on its way there.
-- A line holds 125 characters. The space after the line number is stored with the text.
+- A line holds 125 characters, the line number included. The one character after the line number separates it from the text and is not stored, whatever it is: `3 5#` stores `5#`, and so does `3x5#`. Type a space there.
 - Reset empties the program. There is no save or load.
 - Nothing is checked, and nothing is printed between a program's output and what you type next.
 - Putting a line in moves the rest of the program up one byte for each character typed: fine for a few hundred bytes, slow in a long program.

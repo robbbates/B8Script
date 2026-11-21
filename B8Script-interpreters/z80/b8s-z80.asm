@@ -1086,7 +1086,7 @@ error:  LD      SP,DSTOP        ; the stacks may be wrecked: start clean
 ;  PROG, 8300h). Lines are counted, not numbered: there are no line numbers in
 ;  the text. Line numbers go from 1 to 128, a line holds 125 characters, and
 ;  nothing is checked. The text is stored as it is typed, each line ending in
-;  CR LF, at PROG; the space after the line number is stored too.
+;  CR LF, at PROG. The one character after the line number is not stored.
 ;
 ;  A line is put in one character at a time, each one rippling the rest of
 ;  the program up by a byte: small code, but slow in a long program.
@@ -1114,6 +1114,7 @@ f1:     DEC     D
 found:  LD      A,(BC)          ; HL -> line n, or the end of the text
         CP      13
         JR      Z,del           ; nothing after the number: take the line out
+        INC     BC              ; step over the one character after the number
 ; Put the typed text in at HL: CR, LF and all, up to the NUL after them.
 ins:    LD      A,(BC)
         INC     BC

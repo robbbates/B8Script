@@ -43,7 +43,7 @@ def model(lines):
             cells = bytes(r.m[LET:LET + 0x7C])
             continue
         n = int(typed[:digits]) & 0xFF
-        rest = typed[digits:]
+        rest = typed[digits:]               # the first character of it is not stored
         if n == 0:
             for ln in prog[:128]:
                 out += ln
@@ -51,7 +51,7 @@ def model(lines):
         else:
             at = min(n - 1, len(prog))
         if rest:
-            prog.insert(at, rest + b'\r\n')
+            prog.insert(at, rest[1:] + b'\r\n')
         elif at < len(prog):
             del prog[at]
     return bytes(out)
@@ -72,6 +72,8 @@ SESSIONS = {
         [b'%d %s' % (i + 1, b'"' + bytes([65 + i % 26]) * 100 + b'"$') for i in range(20)]
         + [b'5', b'5', b'7 "new"$', b'0', b' 33536{]']),
     'a line of the full 125 characters': [b'1 ' + b'x' * 140, b'0'],
+    'the character after the line number': [
+        b'1 5#', b'2 7 8+#', b'3x9#', b'2 ', b'0', b' 33536{]', b'2', b'0', b'1  1#', b'0'],
     'Backspace while typing': [b'\x08\x081 "abX\x08c"$', b'2 9#\x08\x08\x08\x08\x08\x08\x08 5 5*#', b'0', b' 33536{]'],
     'run, then use what the program defined': [b'1 "one"$', b'2 [W "w"$]', b' 33536{]', b' W 33536{] W', b' W'],
     '140 lines: the list shows the first 128': (

@@ -62,7 +62,7 @@ bytes, one CPU at a time. Ideas not yet tried:
   than the two ranges of the one-byte scheme. A third range, or moving the
   checked-only routines, might get it back.
 - Z80/8080: the first 256 bytes are packed by hand around the RST vectors.
-- Z80 with EDITOR = 1: 767 bytes, with the target at 768 (VTL-2's size).
+- Z80 with EDITOR = 1: 768 bytes, and that is the limit (VTL-2's size).
   Any byte saved in the interpreter is a byte the editor can spend; see
   the list of what it leaves out in README.md.
 

@@ -1108,34 +1108,6 @@ putc:   PUSH    B
 ;  Checked build: the checks and the error report
 ; =============================================================================
         IF      CHECKED
-; chkst: stop unless HL is in the program's own space: from the letter page
-; up to the heap limit (the OS, or HEAPLIM), so the interpreter's stacks and
-; whatever lies above the limit are safe. Memory above the heap top but
-; below the limit is the program's own: Tiny BASIC keeps its lines there.
-; It is the page of HL + 1 that is tested, so that one test serves both
-; bytes of a cell: the last byte below the limit can't be stored to with '.'.
-; Keeps HL and BC.
-chkst:  INX     H
-        MOV     A,H
-        DCX     H
-        CPI     LETPAGE
-        JC      e_store
-        ENDIF
-        IF      CHECKED*(1-CPM)
-        CPI     HEAPLIM
-        RC
-        ENDIF
-        IF      CHECKED*CPM
-        MOV     E,A
-        LDA     0007h           ; the BDOS page is the heap limit
-        DCR     A
-        CMP     E
-        RNC
-        ENDIF
-        IF      CHECKED
-e_store:MVI     A,'O'           ; a store outside the program's space
-        JMP     errp
-
 ; chkhp: HL = the new heap top, DE = the count, the carry is from adding
 ; it, and the old top is on the stack under the return address. Stop if the
 ; new top is not below the limit page, or is below the program's end.
@@ -1171,8 +1143,41 @@ chkhp:
         XCHG
         RC
 e_heap: XCHG                    ; put the count back in TOS for the report,
-        POP     D               ;   and drop the return address and the old
-        MVI     A,'H'           ;   top
+        POP     D               ;   and drop the return address (errp drops
+        MVI     A,'H'           ;   the old top)
+        JMP     errp
+
+; chkst: stop unless HL is in the program's own space: from the letter page
+; up to the heap limit (the OS, or HEAPLIM), so the interpreter's stacks and
+; whatever lies above the limit are safe. Memory above the heap top but
+; below the limit is the program's own: Tiny BASIC keeps its lines there.
+; It is the page of HL + 1 that is tested, so that one test serves both
+; bytes of a cell: the last byte below the limit can't be stored to with '.'.
+; Keeps HL and BC. It runs on into its own error entry.
+chkst:  INX     H
+        MOV     A,H
+        DCX     H
+        CPI     LETPAGE
+        JC      e_store
+        ENDIF
+        IF      CHECKED*(1-CPM)
+        CPI     HEAPLIM
+        RC
+        ENDIF
+        IF      CHECKED*CPM
+        MOV     E,A
+        LDA     0007h           ; the BDOS page is the heap limit
+        DCR     A
+        CMP     E
+        RNC
+        ENDIF
+        IF      CHECKED
+; Two error entries for errors found inside a routine: the first hides the
+; second inside a 3-byte LXI D (the 11h); errp then drops the routine's
+; return address.
+e_store:MVI     A,'O'           ; a store outside the program's space
+        DB      11h
+e_break:MVI     A,'B'           ; Ctrl-C (found inside pollk or getk)
         JMP     errp
 
 ; prstr: print the string at HL, to its closing quote, decoding '/' (this is
@@ -1239,9 +1244,6 @@ e_over: MVI     A,'S'           ; data stack overflow
 e_under:LXI     SP,DSTOP        ; data stack underflow: it counts as empty
         MVI     A,'s'
         JMP     error
-
-e_break:MVI     A,'B'           ; Ctrl-C (found inside pollk or getk)
-        JMP     errp
 
 ; e_hi: the inner loop read a reserved byte, 80h-FFh: X. But a word cell that
 ; was never defined still holds 0000h, and the byte there is a JMP, C3h, in
@@ -1347,11 +1349,11 @@ er4:    MOV     A,M
         JNZ     er4
 er5:    CALL    pnl
         DB      "Stk ",22h
-        LXI     H,0
-        DAD     SP
-        XCHG
-        LXI     H,DSTOP-2       ; (the cell at DSTOP-2 was pushed with the
-        CALL    phalf           ;   first value and holds nothing): the depth
+        LXI     H,(2-DSTOP)&0FFFFh ; SP - (DSTOP-2) is minus twice the depth
+        DAD     SP              ;   (the cell at DSTOP-2 was pushed with the
+        RST     4               ;   first value and holds nothing)
+        MOV     A,H
+        CALL    phal2           ; the depth
         MVI     A,':'
         RST     5
         MOV     A,C
@@ -1391,7 +1393,7 @@ er8:    CALL    pnl
         JMP     endprog
 ; phalf: print half of HL - DE, and leave it in BC
 phalf:  CALL    sub16
-        ORA     A               ; (A = H; this clears the carry)
+phal2:  ORA     A               ; (A = H; this clears the carry)
         RAR
         MOV     H,A
         MOV     A,L

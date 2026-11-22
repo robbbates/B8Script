@@ -1169,32 +1169,51 @@ bdosx:  PUSH    BC
 ;  Checked build: the checks and the error report
 ; =============================================================================
         IF      CHECKED
-; chkst: stop unless HL is in the program's own space: from the letter page
-; up to the heap limit (the OS, or HEAPLIM), so the interpreter's stacks and
-; whatever lies above the limit are safe. Memory above the heap top but
-; below the limit is the program's own: Tiny BASIC keeps its lines there.
-; It is the page of HL + 1 that is tested, so that one test serves both
-; bytes of a cell: the last byte below the limit can't be stored to with '.'.
-; Keeps HL and BC.
-chkst:  INC     HL
-        LD      A,H
-        DEC     HL
-        CP      LETPAGE
-        JR      C,chs1
-        ENDIF
-        IF      CHECKED*(1-CPM)
-        CP      HEAPLIM
+; chkstk: both stacks are checked once per character, not in every handler.
+; The data stack is right when SP lies in the 256 bytes below DSTOP: adding
+; the constant carries if it is above (cells were popped that were never
+; pushed), and leaves a high byte of FFh if it is in range. Errors are found
+; a character late at most: the bytes above DSTOP and the guard band below
+; the page take what happens meanwhile. DE is free between characters.
+chkstk: EX      DE,HL
+        LD      HL,(1-DSTOP)&0FFFFh ; (SP is 2 lower here: the call)
+        ADD     HL,SP
+        EX      DE,HL
+        JR      C,e_under
+        INC     D
+        JR      NZ,e_over
+        EXX                     ; the return stack: in its page (or it has
+        LD      A,H             ;   overflowed), and not above its empty
+        CP      RSPAGE          ;   position (an underflow stays inside the
+        LD      A,L             ;   page, in the guard band)
+        EXX
+        JR      NZ,e_rover
+        CP      RSTOP&0FFh+1
         RET     C
-        ENDIF
-        IF      CHECKED*CPM
-        LD      E,A
-        LD      A,(0007h)       ; the BDOS page is the heap limit
-        DEC     A
-        CP      E
-        RET     NC
-        ENDIF
-        IF      CHECKED
-chs1:   JP      e_store
+        EXX                     ; return stack underflow: it counts as empty
+        LD      L,RSTOP&0FFh    ;   (H is right: the pointer is in its page)
+        EXX
+        LD      A,'r'
+        JR      errp
+e_rover:LD      A,'R'           ; return stack overflow
+        DB      11h             ; (LD DE,nn hides the next entry)
+e_over: LD      A,'S'           ; data stack overflow
+        JR      errp
+e_under:LD      SP,DSTOP        ; data stack underflow: it counts as empty
+        LD      A,'s'
+        JR      error
+
+; e_hi: the inner loop read a reserved byte, 80h-FFh: X. But a word cell that
+; was never defined still holds 0000h, and the byte there is a reserved one
+; in every build (AFh or C3h): if the IP is in page zero, this was a call of
+; an undefined word. The call is undone, so the place is the call itself.
+e_hi:   INC     B
+        DJNZ    e_resv          ; (B is as it was, and is not 0)
+        RST     08h
+        LD      B,D
+        LD      C,E
+        LD      A,'U'
+        JR      error
 
 ; chkhp: HL = the new heap top, DE = the old one, the carry is from adding
 ; the count. Stop if the top is not below the limit page, or is below the
@@ -1231,60 +1250,39 @@ chkhp:
         RET     C
 e_heap: OR      A               ; put the count back in TOS for the report
         SBC     HL,DE
-        JP      e_heap1
+        LD      A,'H'
+        JR      errp
 
-; chkstk: both stacks are checked once per character, not in every handler.
-; The data stack is right when SP lies in the 256 bytes below DSTOP: adding
-; the constant carries if it is above (cells were popped that were never
-; pushed), and leaves a high byte of FFh if it is in range. Errors are found
-; a character late at most: the bytes above DSTOP and the guard band below
-; the page take what happens meanwhile. DE is free between characters.
-chkstk: EX      DE,HL
-        LD      HL,(1-DSTOP)&0FFFFh ; (SP is 2 lower here: the call)
-        ADD     HL,SP
-        EX      DE,HL
-        JR      C,e_under
-        INC     D
-        JR      NZ,e_over
-        EXX                     ; the return stack: in its page (or it has
-        LD      A,H             ;   overflowed), and not above its empty
-        CP      RSPAGE          ;   position (an underflow stays inside the
-        LD      A,L             ;   page, in the guard band)
-        EXX
-        JR      NZ,e_rover
-        CP      RSTOP&0FFh+1
+; chkst: stop unless HL is in the program's own space: from the letter page
+; up to the heap limit (the OS, or HEAPLIM), so the interpreter's stacks and
+; whatever lies above the limit are safe. Memory above the heap top but
+; below the limit is the program's own: Tiny BASIC keeps its lines there.
+; It is the page of HL + 1 that is tested, so that one test serves both
+; bytes of a cell: the last byte below the limit can't be stored to with '.'.
+; Keeps HL and BC. It runs on into its own error entry.
+chkst:  INC     HL
+        LD      A,H
+        DEC     HL
+        CP      LETPAGE
+        JR      C,e_store
+        ENDIF
+        IF      CHECKED*(1-CPM)
+        CP      HEAPLIM
         RET     C
-        EXX                     ; return stack underflow: it counts as empty
-        LD      HL,RSTOP
-        EXX
-        LD      A,'r'
-        JR      errp
-e_rover:LD      A,'R'           ; return stack overflow
-        DB      11h             ; (LD DE,nn hides the next entry)
-e_over: LD      A,'S'           ; data stack overflow
-        JR      errp
-e_under:LD      SP,DSTOP        ; data stack underflow: it counts as empty
-        LD      A,'s'
-        JR      error
-
-; e_hi: the inner loop read a reserved byte, 80h-FFh: X. But a word cell that
-; was never defined still holds 0000h, and the byte there is a reserved one
-; in every build (AFh or C3h): if the IP is in page zero, this was a call of
-; an undefined word. The call is undone, so the place is the call itself.
-e_hi:   INC     B
-        DJNZ    e_resv          ; (B is as it was, and is not 0)
-        RST     08h
-        LD      B,D
-        LD      C,E
-        LD      A,'U'
-        JR      error
+        ENDIF
+        IF      CHECKED*CPM
+        LD      E,A
+        LD      A,(0007h)       ; the BDOS page is the heap limit
+        DEC     A
+        CP      E
+        RET     NC
+        ENDIF
+        IF      CHECKED
 ; Error entries. Each loads its letter and then hides the next entry inside
 ; a 3-byte LD DE,nn (the 11h), so they all fall through to `error`.
+e_store:LD      A,'O'           ; a store outside the program's space
+        DB      11h
 e_break:LD      A,'B'           ; Ctrl-C (found inside pollk or getk)
-        DB      11h
-e_heap1:LD      A,'H'           ; heap (found inside chkhp)
-        DB      11h
-e_store:LD      A,'O'           ; a store outside the program's space (chkst)
 ; errp: an error found inside a routine: drop its return address first.
 errp:   POP     DE
         JR      error
@@ -1392,9 +1390,9 @@ SPADJ   EQU     2*EDITOR        ; (with the editor pstk is called, not fallen
 ; editor this is the end of `error`, which runs on into it.
 pstk:   CALL    pnl
         DB      "Stk ",22h
-        LD      HL,DSTOP-2-SPADJ ; (the cell at DSTOP-2 was pushed with the
-        OR      A               ;   first value and holds nothing)
-        SBC     HL,SP
+        LD      HL,(2+SPADJ-DSTOP)&0FFFFh ; SP - (DSTOP-2) is minus twice the
+        ADD     HL,SP           ;   depth (the cell at DSTOP-2 was pushed
+        RST     20h             ;   with the first value and holds nothing)
         CALL    phalf           ; the depth
         LD      A,':'
         RST     28h

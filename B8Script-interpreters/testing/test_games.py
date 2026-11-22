@@ -111,7 +111,7 @@ def sweep():
 TESTS += [
     ('MINES', 'clear the field', sweep() + b'n', [b'You cleared the field!', b'Bye.']),
     ('MINES', 'flags, then a mine', b'x ' + b'w' * 7 + b'a' * 4 + b'f af' + b'd' * 6 + b'ffd n',
-     [b'Mines 39', b'Mines 38', b'Mines 37', b'BOOM! You hit a mine.', b'\x1b[4;11HF', b'\x1b[4;9HX', b'Bye.']),
+     [b'Mines 39', b'Mines 38', b'Mines 37', b'BOOM! You hit a mine.', b"\x1b[4;11H'", b'\x1b[4;9HX', b'Bye.']),
 ]
 
 

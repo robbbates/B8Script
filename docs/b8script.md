@@ -925,14 +925,14 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 
 | Build | File | Bytes | Notes |
 |---|---|---|---|
-| Generic ROM | `b8s-z80-rom-0000.bin` | 773 | Starts at 0000h (reset); owns page zero |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,177 |  |
-| CP/M runner | `B8SZ80.COM` | 838 | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` | 1,257 |  |
-| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,528 | The suggested standard under [Environments](#environments); see the interpreters README |
-| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,834 |  |
-| CP/M with the line editor | `B8SZ80E.COM` | 1,712 | `B8SZ80E PROG.B8S`, or with no file |
-| The same, checked | `B8SZ80EC.COM` | 2,034 |  |
+| Generic ROM | `b8s-z80-rom-0000.bin` | 765 | Starts at 0000h (reset); owns page zero |
+| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,170 |  |
+| CP/M runner | `B8SZ80.COM` | 831 | `B8SZ80 PROG.B8S` |
+| CP/M runner, checked | `B8SZ80C.COM` | 1,250 |  |
+| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,489 | The suggested standard under [Environments](#environments); see the interpreters README |
+| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,803 |  |
+| CP/M with the line editor | `B8SZ80E.COM` | 1,664 | `B8SZ80E PROG.B8S`, or with no file |
+| The same, checked | `B8SZ80EC.COM` | 1,994 |  |
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), HL' is the return-stack pointer. A and DE are scratch.
 
@@ -960,7 +960,7 @@ Under CP/M the pages sit after the image and the heap limit is the BDOS. The bre
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`. Builds: `b8s-8080-rom-0000.bin` (858 bytes), `b8s-8080-rom-checked-0000.bin` (1,306), `B8S8080.COM` (907), `B8S8080C.COM` (1,371).
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`. Builds: `b8s-8080-rom-0000.bin` (854 bytes), `b8s-8080-rom-checked-0000.bin` (1,303), `B8S8080.COM` (904), `B8S8080C.COM` (1,368).
 
 The memory map, the break key, the console interface and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 077Bh in `B8S8080.COM` and 097Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
 

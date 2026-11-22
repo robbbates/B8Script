@@ -14,9 +14,9 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 | CPU | Generic | Generic, checked | CP/M | CP/M, checked |
 |---|---|---|---|---|
-| Z80 | 773 | 1,177 | 838 | 1,257 |
-| Z80 with the line editor | 1,528 | 1,834 | 1,712 | 2,034 |
-| 8080 | 858 | 1,306 | 907 | 1,371 |
+| Z80 | 765 | 1,170 | 831 | 1,250 |
+| Z80 with the line editor | 1,489 | 1,803 | 1,664 | 1,994 |
+| 8080 | 854 | 1,303 | 904 | 1,368 |
 | 6502, stack in pages 2-3 | 1,190 | 1,742 | n/a | n/a |
 | 6502, stack in zero page | 1,099 | 1,651 | n/a | n/a |
 | 6809 | 835 | 1,243 | n/a | n/a |
@@ -152,14 +152,14 @@ A command key ends the line too, and takes what was typed before it as its argum
 - The file named on the command line is the program to start with, and the name that ^R and ^W use until another is typed. With no file, or no such file, there is no program.
 - A name is up to 8 characters, a dot and up to 3 more, on the current drive. It is put in capitals.
 - The text ends at the file's first ^Z, and a last line with no CR LF is given one. ^W pads the last record with ^Z.
-- ^W deletes the old file first. It does not report a full disk or directory.
+- ^W deletes the old file first. It does not notice a full disk or directory: the file is then short, or missing.
 - The editor reads its keys with BDOS 6, so BDOS 10's editing keys don't apply to it, and Ctrl-C at the editor does nothing: ^X leaves.
 
 **Checked** (`-editor-checked-`, `B8SZ80EC`):
 - A program that is stopped, by an error or by Ctrl-C, prints its report and comes back to the editor, with both stacks empty.
 - A line typed at the editor is line 0 in the report; the column is the place in the line.
 
-The editor adds 755 bytes to the unchecked generic build and 874 to the CP/M one (657 and 777 to the checked ones, which have the report's routines already). ^V alone is about 190 of those in an unchecked build, because it brings in the stack listing. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
+The editor adds 724 bytes to the unchecked generic build and 833 to the CP/M one (633 and 744 to the checked ones, which have the report's routines already). ^V alone is about 170 of those in an unchecked build, because it brings in the stack listing. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
 
 ## Checked builds
 

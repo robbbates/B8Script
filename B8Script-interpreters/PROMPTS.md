@@ -77,12 +77,15 @@ bytes, one CPU at a time. Ideas not yet tried:
   than the two ranges of the one-byte scheme. A third range, or moving the
   checked-only routines, might get it back.
 - Z80/8080: the first 256 bytes are packed by hand around the RST vectors.
-- Z80 with EDITOR = 1: 1528 bytes, 755 of them the editor (four builds:
+- Z80 with EDITOR = 1: 1489 bytes, 724 of them the editor (four builds:
   with or without CPM and CHECKED). It was written for the spec's
-  suggested standard and has had no size pass yet. Places to look: the
-  key dispatch (seven compares and a 27-byte table), ^V (about 190 bytes
-  in an unchecked build, since it brings in the stack listing), the CP/M
-  file code (about 150 bytes).
+  suggested standard and has had one light size pass. What is left needs
+  a decision or a redesign: the key dispatch (seven compares and a
+  27-byte table: a chain of SUB and JR would be about 10 bytes smaller if
+  every unknown control key may drop the line), ^V (about 170 bytes in an
+  unchecked build, since it brings in the stack listing), the paste's
+  care with LF-only text (about 14 bytes), the CP/M file code (about
+  135 bytes).
 - Every checked build: the report (about 200 bytes on the Z80, 300 on the
   6502) was written once and not squeezed. The line and column count is
   the biggest part of it.

@@ -255,55 +255,95 @@ TESTS += [
 ]
 
 
-# Idol, seed 1: home is Xeva (Industry, policed). The chart chooses the nearest
+# Idol, seed 1 (n at once on the title starts a new game): home is Xeva (Industry, policed). The chart chooses the nearest
 # system in range; s steps to the next farther, Return jumps. Xeva makes
 # machinery (cheap) and Talo, the eighth system out, is agricultural and wants it
 TESTS += [
-    ('IDOL', 'fly: step, jump, refuel', b'xss\rf',
+    ('IDOL', 'fly: step, jump, refuel', b'nss\rf',
      [b'Docked at Xeva.', b'Docked at Kaxe.', b'Day 2', b'Fuel 4/7', b'Debt 5050',
       b'Refuelled 3 units for 60.', b'Cr 940']),
-    ('IDOL', 'a profitable trade', b'xmsssb\rcsssssss\rmsssx\r',
+    ('IDOL', 'a profitable trade', b'nmsssb\rcsssssss\rmsssx\r',
      [b'Buy Machinery: how many (Return for 18)? ', b'Bought 18 t of Machinery for 954.',
       b'Docked at Talo.', b'Sold 18 t of Machinery for 1188.', b'Cr 1234']),
-    ('IDOL', 'an upgrade, then too little money', b'xysbsbr',
+    ('IDOL', 'an upgrade, then too little money', b'nysbsbr',
      [b'Shield\x1b[5;17H0 of 2\x1b[5;46H  1000', b'Bought: Shield.',
       b'Courier L1 S1 M0', b'Cr 0\x1b', b"You can't pay for that.", b'The hull needs no repair.']),
-    ('IDOL', 'ships at a high-tech system, at the trade-in price', b'xsss\rysssssssb',
+    ('IDOL', 'ships at a high-tech system, at the trade-in price', b'nsss\rysssssssb',
      [b'Docked at Orelma.', b'Freighter\x1b[12;17H50 t, tank 8, hull 50\x1b[12;46H  6500',
       b'Clipper\x1b[14;17H70 t, tank 10, hull 80\x1b[14;46H 27500', b'You fly one already.']),
     # two missiles bought at home win against the level 0 pirate at Bequon
-    ('IDOL', 'a duel won with missiles', b'xyssbbc' + b's' * 11 + b'\rmm',
+    ('IDOL', 'a duel won with missiles', b'nyssbbc' + b's' * 11 + b'\rmm',
      [b'Bought: Missile.', b'Duel: pirate ship, level 0', b'Your missile hits for 15.',
       b'You win. A bounty of 250.', b'You salvage 3 t of Ore.', b'Docked at Bequon.']),
-    ('IDOL', 'a duel lost: game over', b'x' + b's' * 16 + b'\rc' + b'l' * 30 + b'x',
+    ('IDOL', 'a duel lost: game over', b'n' + b's' * 16 + b'\rc' + b'l' * 30 + b'x',
      [b'Duel: pirate ship, level 1', b'You close in.', b'The pirate hits you for ',
       b'Your ship is destroyed, and you with it. Game over.', b'Press a key.', b'Bye.']),
     # the police scan you on the way back home on day 3
-    ('IDOL', 'a police scan: submit', b'xmssssssb5\rc\r\rs',
+    ('IDOL', 'a police scan: submit', b'nmssssssb5\rc\r\rs',
      [b'Bought 5 t of Narcotics for 740.', b'The police find 5 t of contraband. s submits, r resists.',
       b'They take it and fine you 600.', b'Docked at Xeva.', b'Cr 260']),
-    ('IDOL', 'a police scan: resist', b'xmssssssb5\rc\r\rrf',
+    ('IDOL', 'a police scan: resist', b'nmssssssb5\rc\r\rrf',
      [b'You resist the police!', b'Duel: police ship, level 3', b'Wanted 20']),
-    ('IDOL', 'pay the loan', b'xl500\rl\rl',
+    ('IDOL', 'pay the loan', b'nl500\rl\rl',
      [b'Pay how much (Return for 1000)? ', b'You pay 500 off the loan.', b'Debt 4500',
       b'Debt 4000', b'You have no cash.']),
     # the Heart of the idol lies at Usis, the 14th system out
-    ('IDOL', 'an idol part found, its price, then known', b'x' + b's' * 13 + b'\rtct\rt',
+    ('IDOL', 'an idol part found, its price, then known', b'n' + b's' * 13 + b'\rtct\rt',
      [b'Docked at Usis.', b"The Idol's Heart is here: 18 t of Medicine and 19 t of Textiles (t trades).",
       b"The Idol's Heart wants 18 t of Medicine and 19 t of Textiles.",
       b"The Idol's Heart lies at Usis: 18 t of Medicine and 19 t of Textiles."]),
     # offers and rumours on docking; the second offer at Kaxe goes to Qucelo, by way of Rasoar
-    ('IDOL', 'offers and a rumour', b'x\rk\r',
+    ('IDOL', 'offers and a rumour', b'n\rk\r',
      [b'Docked at Xeva.', b"Rumour: the Idol's RHand lies at Damige.", b'Docked at Orbuso.',
       b"Rumour: the Idol's LHand lies at Suelne.", b'Offer 1: 9 t of Food to Tixeta, by day 7, pay 880.',
       b'Take which? ']),
-    ('IDOL', 'a contract delivered', b'xss\rk2fcsssssssssssss\rfcssssssssssssssssssssssssssss\r',
+    ('IDOL', 'a contract delivered', b'nss\rk2fcsssssssssssss\rfcssssssssssssssssssssssssssss\r',
      [b'Offer 2: 5 t of Ore to Qucelo, by day 9, pay 900.', b'Contract taken.', b'5 t Ore',
       b'to Qucelo by day 9', b'Docked at Qucelo.', b'You deliver: 900.', b'Cr 840']),
-    ('IDOL', 'sealed cargo sold', b'xss\rk2mssssssssx',
+    ('IDOL', 'sealed cargo sold', b'nss\rk2mssssssssx',
      [b'Sealed Ore', b'You sell the sealed cargo for 180. You are wanted, and owe more.',
       b'Debt 5200', b'Wanted 20']),
+    # a save code made, loaded back, and played on: the state cells and the stock
+    # here are checked by idol_save() below; here the messages
+    ('IDOL', 'a save code', b'nmsssb\rcss\rv',
+     [b'Save code: cMIVd2vD-7P5q_XvyuvjNOXj4es2fvBMuX4lS-KFd-iptMG']),
+    ('IDOL', 'a mistyped save code refused, then the right one', b'lcMIVd2vD-7P5q_XvyuvjNOXj4es2fvBMuX4lS-KFdXiptMG\rlcMIVd2vD-7P5q_XvyuvjNOXj4es2fvBMuX4lS-KFd-iptMG\r',
+     [b'That code is not right.', b'Docked at Kaxe.', b'Cr 46', b'Debt 5050', b'Fuel 4/7', b'Cargo 18/20']),
 ]
+
+
+# Idol's save code must load back to exactly the state it was made from, and the
+# game must play on the same: (keys that end with v, keys to play on). The state
+# cells 0 to 33 and the stock where you are are compared, after loading and
+# again after playing on.
+IDOL_SAVES = [
+    (b'nmsssb\rcss\rv', b'mb\rcs\r'),
+    (b'nss\rk2mssssssssbcs\rv', b'\rf\r'),
+    (b'n' + b's' * 13 + b'\rtv', b'sss\rf'),
+]
+
+
+def idol_state(r):
+    """The saved part of Idol's state, read from the reference machine."""
+    cell = lambda c: r.r(r.let + 2 * (ord(c) - 0x41))
+    g, h = cell('g'), cell('h')
+    pos = r.r(g + 10)
+    return [r.r(g + 2 * n) for n in range(34)] + list(r.m[h + 192 + 8 * pos:h + 200 + 8 * pos])
+
+
+def idol_saves(path):
+    bad = 0
+    for keys, more in IDOL_SAVES:
+        r, out = play(path, keys)
+        code = re.findall(rb'Save code: ([A-Za-z0-9_-]{47})', out)[-1]
+        for tail in (b'', more):
+            a, _ = play(path, keys + tail)
+            b, _ = play(path, b'l' + code + b'\r' + tail)
+            ok = idol_state(a) == idol_state(b) and a.error is None and b.error is None
+            bad += not ok
+            print(f'{"PASS" if ok else "FAIL"}  IDOL      save code {code.decode()} loads back'
+                  + (' and plays on the same' if tail else ''))
+    return bad
 
 
 def play(path, keys, steps=20_000_000):
@@ -345,5 +385,7 @@ if __name__ == '__main__':
             print(f'      B8S and TXT differ at byte {d}: {out[d-20:d+20]!r} {out2[d-20:d+20]!r}')
         for t in miss:
             print('      missing:', t.decode('latin-1'))
+    if not want or 'IDOL' in want:
+        bad += idol_saves(os.path.join(here, 'games', 'IDOL.B8S'))
     print('games:', 'all pass' if not bad else f'{bad} FAILED')
     sys.exit(1 if bad else 0)

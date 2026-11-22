@@ -197,7 +197,7 @@ Decided (Nov 22), apart from the exact list of what is saved.
 - **Alphabet:** base 64 with `A`–`Z`, `a`–`z`, `0`–`9`, `-` and `_` (no `/`, which would need escaping in the program's strings).
 - **A check character** at the end, so a mistyped or altered code is refused.
 - **A light obfuscation,** so the code can't simply be decoded and edited: each 6-bit value is XORed with a stream from a small generator, started from a fixed key and a salt character at the front (so two nearly equal saves look different). It stops casual editing; anyone who reads the program can undo it, which is fine.
-- **What is saved,** 220 bits, so 37 characters, plus the salt and check characters: 39 in all.
+- **What is saved,** 268 bits, so 45 characters, plus the salt and check characters: 47 in all. (changed: 220 bits and 39 characters; the stock where you are docked is saved too, so a loaded game shows the same prices there.)
 
 | Value | Range | Bits |
 |---|---|---|
@@ -212,8 +212,9 @@ Decided (Nov 22), apart from the exact list of what is saved.
 | Wanted days | 0–20 | 5 |
 | Idol parts held, and idol parts known | 6 + 6 | 12 |
 | Contract: kind, destination, good, tonnes, deadline, pay, passenger flag | | 44 |
+| Stock of the 8 goods where you are docked | 0–60 each | 48 |
 
-- **Not saved:** the chart's visited marks (after loading, every system looks unvisited again), the stock levels (rebuilt), and which contraband is in the hidden hold (contraband always fills the hidden hold first, so it follows from the cargo).
+- **Not saved:** the chart's visited marks (after loading, every system looks unvisited again), the stock levels elsewhere (rebuilt), and which contraband is in the hidden hold (contraband always fills the hidden hold first, so it follows from the cargo).
 - **The game ends at day 999,** which also bounds the score and fits the day in 10 bits.
 
 ### Names

@@ -31,6 +31,7 @@ python3 chktab6502.py out/6502/*.lst
 python3 chkbr6502.py out/6502/*.lst                # asm80 misses some bad 6502 branches
 python3 gamecheck.py out                           # every game on every build, briefly
 python3 test_games.py                              # scripted games played to an end on ref.py
+python3 b8strip.py games/NAME.TXT games/NAME.B8S    # after editing a game's commented version
 python3 sizes.py out/z80                           # bytes per variant
 python3 mkrel.py                                   # copy out/ to the .bin, .COM and .lst files
 ```
@@ -55,11 +56,12 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `harness_win32.py` | Runs a Windows .EXE in the Unicorn emulator: maps the file as Windows would, models the `kernel32` calls it makes, gives it a command line, a console (or redirected input) and a few files. Same interface as the others |
 | `run_win32.py` | Runs every Windows build through `check()`, the editor builds through `test_editor.py`, and all of them through a few Windows-only tests |
 | `chkpe.py` | Checks a Windows .EXE's header against the rules: alignments, sizes, the section, the entry point, the import table |
-| `gamecheck.py` | Runs every game on every build for a short while and compares the output with `ref.py` |
-| `test_games.py` | Types a fixed key sequence at a game on a checked `ref.py` and checks for the messages it should reach: a win, a loss or another known message. `test_games.py NAME` runs one game's tests |
+| `gamecheck.py` | Runs every game, both `.B8S` and `.TXT`, on every build for a short while and compares the output with `ref.py` |
+| `test_games.py` | Types a fixed key sequence at a game on a checked `ref.py` and checks for the messages it should reach: a win, a loss or another known message. It runs both versions, which must print the same. `test_games.py NAME` runs one game's tests |
 | `chktab.py`, `chktab09.py`, `chktab6502.py` | Check the dispatch-table layout rules on Z80/8080, 6809 and zero-page 6502 listings |
 | `chkbr6502.py` | Checks every 6502 branch against its target |
-| `games/` | Your programs. `TINYBAS.B8S` is part of the suite |
+| `games/` | The programs, each in two files: `NAME.TXT`, with comments that explain how it works, and `NAME.B8S`, the same code stripped of comments and white space. `TINYBAS.B8S` is part of the suite |
+| `b8strip.py` | Strips a program of comments and white space, keeping a space only where B8Script needs one (`b8strip.py games/NAME.TXT games/NAME.B8S` after editing a game). `--same A B` checks that two files hold the same code |
 | `esc2slash.py` | Converts older programs to the `/` escape |
 | `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files next to each source |
 

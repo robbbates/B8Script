@@ -2,6 +2,9 @@
 
 usage: test_games.py [NAME...]      (run by hand, like the other test scripts)
 
+Every test runs on both versions of the game, the stripped NAME.B8S and the
+commented NAME.TXT (where there is one), and the two must print exactly the same.
+
 Each test types a fixed key sequence at a game and checks that what it prints
 holds the messages expected: a win, a loss or some other known message. The
 games seed their random numbers from how long a key took to come. In ref.py a
@@ -177,9 +180,8 @@ TESTS += [
 ]
 
 
-def play(game, keys, steps=20_000_000):
-    prog = open(os.path.join(here, 'games', game + '.B8S'), 'rb').read()
-    r = Play(prog, keys, checked=True)
+def play(path, keys, steps=20_000_000):
+    r = Play(open(path, 'rb').read(), keys, checked=True)
     out = r.run(steps)
     return r, out
 
@@ -190,13 +192,21 @@ if __name__ == '__main__':
     for game, what, keys, texts in TESTS:
         if want and game not in want:
             continue
-        r, out = play(game, keys)
+        # both versions: the stripped NAME.B8S and the commented NAME.TXT. They
+        # hold the same code, so they must print exactly the same
+        paths = [os.path.join(here, 'games', game + ext) for ext in ('.B8S', '.TXT')]
+        runs = [play(p, keys) for p in paths if os.path.exists(p)]
+        (r, out), (r2, out2) = runs[0], runs[-1]
         miss = [t for t in texts if t not in out]
-        ok = not miss and r.error is None
+        ok = not miss and r.error is None and r2.error is None and out == out2
         bad += not ok
         print(f'{"PASS" if ok else "FAIL"}  {game:9} {what}')
-        if r.error:
-            print('      error report:', out[out.rfind(b'Err'):].decode('latin-1'))
+        for x, o, ext in ((r, out, 'B8S'), (r2, out2, 'TXT')):
+            if x.error:
+                print(f'      {ext} error report:', o[o.rfind(b'Err'):].decode('latin-1'))
+        if out != out2:
+            d = next((i for i in range(min(len(out), len(out2))) if out[i] != out2[i]), min(len(out), len(out2)))
+            print(f'      B8S and TXT differ at byte {d}: {out[d-20:d+20]!r} {out2[d-20:d+20]!r}')
         for t in miss:
             print('      missing:', t.decode('latin-1'))
     print('games:', 'all pass' if not bad else f'{bad} FAILED')

@@ -12,7 +12,7 @@ The game has to stay easy to write, read and test. These rules are part of the d
 - **One screen layout.** Every view fits the same panels; no special screens beyond the market, the chart and combat.
 - **Easy numbers.** Pick quantities and methods that keep the maths simple in 16-bit cells (no multiply past 32,767, halving rather than odd divisions where it can be) and that pack neatly into the save code's printable characters (a value that fits 6 bits fits one character).
 - **Generate, don't store.** The galaxy, its names and its prices come from the seed and the day. Only the player's own state is kept and saved.
-- **Budgets.** The stripped `.B8S` at most 12 KB, and heap data at most 4 KB. If a feature doesn't fit, something else goes, or it waits.
+- **Budgets.** The stripped `.B8S` at most 14 KB, and heap data at most 4 KB. If a feature doesn't fit, something else goes, or it waits. (changed: 12 KB; version 1 came to about 14 KB with every feature in it, and the smallest build has about 28 KB for program and heap.)
 - **Version 1 is the list under [Version 1](#version-1).** Everything under [Later](#later) stays out until version 1 plays well.
 
 ## Decisions
@@ -78,7 +78,7 @@ Decided (Nov 22).
 | Industrial | C | – | C | P | – | – |
 | High-tech | C | C | – | – | P | P |
 
-**Price.** Each good in each system has a normal stock N: 50 where it is produced, 10 where it is consumed, 30 otherwise. The buy price is base × (3N − stock) ÷ 2N: 1.5 × base when the stock is empty, base at N, 0.5 × base at 2N. The type needs no price factor of its own: the stock does the work. Base at most 200 and N at most 50 keep base × 3N under 32,767.
+**Price.** Each good in each system has a normal stock N: 100 where it is produced, 20 where it is consumed, 60 otherwise. The buy price is base × (180 − stock) ÷ 120: 1.5 × base when the stock is empty, base at 60, 0.5 × base at 120, the most a system holds. At rest (stock at N) that is ⅔ base where produced, base where neither, 1⅓ base where consumed. The type needs no price factor of its own: the stock does the work. Every base is a multiple of 10, so the program works out base ÷ 10 × (180 − stock) ÷ 12. (changed: N was 50, 10 and 30 and the price base × (3N − stock) ÷ 2N. With the stock recovering to that same N, every price rested at its base in every system, so no trade paid. And at 30 tonnes a step, a 20-tonne hold moved the price by a third of the base at each end, which with selling at 7⁄8 left about a fifth of the base a tonne: barely more than the loan's interest. The deeper market leaves about a third.)
 
 **Wobble.** Up to ±10% a day, worked out from the seed, the system, the good and the day, so nothing is stored.
 
@@ -86,7 +86,7 @@ Decided (Nov 22).
 
 **Large trades.** Every tonne of one trade goes at the price the stock would give halfway through the trade.
 
-**Stock.** A table of every system's stock (64 × 8 bytes), and each system's last-update day. On arrival the stock recovers by an eighth of its gap to N for each day since, for at most 8 days; only that one system is worked on. Trading moves the stock.
+**Stock.** A table of every system's stock (64 × 8 bytes, 0 to 120 tonnes each), and each system's last-update day. On arrival the stock recovers by an eighth of its gap to N for each day since, for at most 8 days; only that one system is worked on. Trading moves the stock.
 
 **Money.** Two cells, high × 10,000 + low, printed as the high part then the low part padded to four digits: up to 327 million. Adding and subtracting carry at 10,000. One transaction never passes 32,767: prices stay at most 300 and holds at most 100 tonnes, so every multiply fits one cell.
 
@@ -111,7 +111,7 @@ Decided (Nov 22).
 - **The duel** tracks hull, shields and a range, far or close.
 - **Your actions:** fire lasers (close only), launch a missile, close in, pull back, flee (far only), pay (credits or cargo). One key each.
 - **Damage:** a laser hit is level × a roll of 1 to 4, less the target's shield level, at least 1. A missile does 15 and ignores shields. Fleeing works on a 50% roll; on a failure the enemy gets a free shot.
-- **The enemy:** closes in, fires lasers when close and a missile when it has one, and flees below a quarter of its hull.
+- **The enemy:** when far, fires a missile when it has one and otherwise closes in on a roll of 1 in 2; fires lasers when close; and flees below a quarter of its hull. (changed: it always closed in, so fleeing, which needs the far range, worked only on the first turn, and pulling back was no use.)
 - **Winning:** a bounty for a pirate or a collector, and a chance of salvage (a few tonnes of a random good).
 - **Losing:** with an escape pod (2,000, used up), you lose the ship and cargo and wake at home in a new Courier, whose 5,000 is added to the loan (up to the cap). Debt and idol parts are kept. Without one, the game is over.
 
@@ -120,7 +120,7 @@ Decided (Nov 22).
 Decided (Nov 22).
 
 - **Safety levels:** policed, frontier, lawless, by distance from home (see the map).
-- **Contraband prices** use the economy's formula, with the normal stock set by safety instead of type: 50 in lawless systems (cheap), 30 in frontier ones, 10 in policed ones (dear). Buy at about half the base price at the edges and sell for about one and a half times it near the centre. No black market of its own.
+- **Contraband prices** use the economy's formula, with the normal stock set by safety instead of type: 100 in lawless systems (cheap), 60 in frontier ones, 20 in policed ones (dear). Buy at about two thirds of the base price at the edges and sell for about four thirds of it near the centre. No black market of its own. (changed: 50, 30 and 10, about half and one and a half, with the price formula.)
 - **A police encounter is a scan.** Contraband in the ordinary hold is always found. You then choose: **submit** (it is confiscated, and you are fined its base price per tonne) or **resist** (a duel with the police; win it and you are wanted).
 - **Wanted:** a counter of days. While it runs, police attack on sight in policed systems, and the police encounter chance there rises from 10% to 15% (to tune). It clears after 20 days without trouble.
 - **A hidden hold** (3,000, any class) carries up to 10 tonnes that a scan misses 3 times in 4.
@@ -197,7 +197,7 @@ Decided (Nov 22), apart from the exact list of what is saved.
 - **Alphabet:** base 64 with `A`–`Z`, `a`–`z`, `0`–`9`, `-` and `_` (no `/`, which would need escaping in the program's strings).
 - **A check character** at the end, so a mistyped or altered code is refused.
 - **A light obfuscation,** so the code can't simply be decoded and edited: each 6-bit value is XORed with a stream from a small generator, started from a fixed key and a salt character at the front (so two nearly equal saves look different). It stops casual editing; anyone who reads the program can undo it, which is fine.
-- **What is saved,** 220 bits, so 37 characters, plus the salt and check characters: 39 in all.
+- **What is saved,** 276 bits, so 46 characters, plus the salt and check characters: 48 in all. (changed: 220 bits and 39 characters; the stock where you are docked is saved too, so a loaded game shows the same prices there.)
 
 | Value | Range | Bits |
 |---|---|---|
@@ -212,8 +212,9 @@ Decided (Nov 22), apart from the exact list of what is saved.
 | Wanted days | 0–20 | 5 |
 | Idol parts held, and idol parts known | 6 + 6 | 12 |
 | Contract: kind, destination, good, tonnes, deadline, pay, passenger flag | | 44 |
+| Stock of the 8 goods where you are docked | 0–120 each | 56 |
 
-- **Not saved:** the chart's visited marks (after loading, every system looks unvisited again), the stock levels (rebuilt), and which contraband is in the hidden hold (contraband always fills the hidden hold first, so it follows from the cargo).
+- **Not saved:** the chart's visited marks (after loading, every system looks unvisited again), the stock levels elsewhere (rebuilt), and which contraband is in the hidden hold (contraband always fills the hidden hold first, so it follows from the cargo).
 - **The game ends at day 999,** which also bounds the score and fits the day in 10 bits.
 
 ### Names

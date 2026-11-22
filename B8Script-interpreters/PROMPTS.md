@@ -70,14 +70,15 @@ bytes, one CPU at a time. Ideas not yet tried:
   but this interpreter's handlers lean on each other more (falling into
   each other, sharing `fin`), and the jumps needed to split them into
   three groups leave only about 11 bytes of the 32.
-- 6502, b8s-6502-zp.asm: 1099 bytes. Its page layout has 64, 62 and 37
-  bytes to spare in its three pages (45, 68 and 22 in the checked build,
+- 6502, b8s-6502-zp.asm: 1095 bytes. Its page layout has 68, 66 and 41
+  bytes to spare in its three pages (46, 69 and 25 in the checked build,
   whose inner loop and skipper live after the third page).
 - 6809, checked: it keeps a whole-address table because its code is bigger
-  than the two ranges of the one-byte scheme. A third range, or moving the
-  checked-only routines, might get it back.
+  than the two ranges of the one-byte scheme (its handlers need about 550
+  bytes). A three-range split was worked out on paper: it would save 13
+  to 20 bytes, but needs a handler order the unchecked build can't share.
 - Z80/8080: the first 256 bytes are packed by hand around the RST vectors.
-- Z80 with EDITOR = 1: 1489 bytes, 724 of them the editor (four builds:
+- Z80 with EDITOR = 1: 1488 bytes, 723 of them the editor (four builds:
   with or without CPM and CHECKED). It was written for the spec's
   suggested standard and has had one light size pass. What is left needs
   a decision or a redesign: the key dispatch (seven compares and a

@@ -14,17 +14,17 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 | CPU | Generic | Generic, checked | CP/M | CP/M, checked |
 |---|---|---|---|---|
-| Z80 | 765 | 1,170 | 831 | 1,250 |
-| Z80 with the line editor | 1,489 | 1,803 | 1,664 | 1,994 |
-| 8080 | 854 | 1,303 | 904 | 1,368 |
-| 6502, stack in pages 2-3 | 1,190 | 1,742 | n/a | n/a |
-| 6502, stack in zero page | 1,099 | 1,651 | n/a | n/a |
-| 6809 | 835 | 1,243 | n/a | n/a |
+| Z80 | 765 | 1,163 | 831 | 1,243 |
+| Z80 with the line editor | 1,488 | 1,796 | 1,663 | 1,987 |
+| 8080 | 854 | 1,299 | 904 | 1,364 |
+| 6502, stack in pages 2-3 | 1,175 | 1,706 | n/a | n/a |
+| 6502, stack in zero page | 1,095 | 1,628 | n/a | n/a |
+| 6809 | 825 | 1,220 | n/a | n/a |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
-- Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 70 to 86 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 300 to 480 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
+- Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 60 to 80 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 280 to 470 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
 
 ## Files
 
@@ -85,7 +85,7 @@ To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6
 | CONOUT | print A | same | same |
 | EXIT | jumped to when the program ends | same | same |
 | KEY and CONOUT must keep | BC, DE, HL (and HL' on the Z80) | X, Y | B, X, Y, U, DP |
-| Where to start | reset at 0000h | label `start`, E000h (point the reset vector at it) | label `start`: F040h unchecked, F045h checked (point the reset vector at it) |
+| Where to start | reset at 0000h | label `start`, E000h (point the reset vector at it) | label `start`, F000h (point the reset vector at it) |
 | RAM | RS 8000h, DS 8100h, letters 8200h, PROG 8300h | RS = page 1, DS 0200h/0300h (or zero page 10h-EFh), letters 0400h, PROG 0500h | RS 8000h (S), DS 8100h (U), letters 8200h (DP), PROG 8300h |
 | Heap limit | `HEAPLIM` (page), default F0h | default E0h | default F0h |
 | Timing | `MSLOOP` = loop passes per millisecond for `n?` (1-255); tune it to your clock and KEY | same | same |
@@ -104,7 +104,7 @@ Every build stops a running program on Ctrl-C. An unchecked build prints nothing
 - **Where it is looked for.** At every word call and every true `)` loop-back (on the Z80 and 8080 also at block entry and `{`), but KEY is only called one time in 256: a counter gates it. A program stuck in `?` is stopped too, since `?` treats Ctrl-C the same way.
 - **Other keys.** A key the check reads is held for the next `?`. A newer key replaces it, and `?` takes the held key before it looks at KEY. So one key typed ahead is kept, not more.
 - **The break-off cell** is the byte at offset 7Bh of the letter page: 827Bh on the generic Z80, 8080 and 6809, $047B on the 6502. A program that stores a non-zero byte there gets Ctrl-C as key 03h. When it does, the interpreter waits about 250 ms (250 x `MSLOOP` calls of KEY) for one more key: a second Ctrl-C stops the program all the same, and any other key becomes the held key. Each build clears the cell when it starts; the editor clears it before every line.
-- **The held key** is the byte below it, at offset 7Ah.
+- **The held key** is a cell of the interpreter's own. Most builds keep it in the byte below the break-off cell; the appendices say where.
 
 ## The Z80 line editor (EDITOR = 1)
 
@@ -159,7 +159,7 @@ A command key ends the line too, and takes what was typed before it as its argum
 - A program that is stopped, by an error or by Ctrl-C, prints its report and comes back to the editor, with both stacks empty.
 - A line typed at the editor is line 0 in the report; the column is the place in the line.
 
-The editor adds 724 bytes to the unchecked generic build and 833 to the CP/M one (633 and 744 to the checked ones, which have the report's routines already). ^V alone is about 170 of those in an unchecked build, because it brings in the stack listing. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
+The editor adds 723 bytes to the unchecked generic build and 832 to the CP/M one (633 and 744 to the checked ones, which have the report's routines already). ^V alone is about 170 of those in an unchecked build, because it brings in the stack listing. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
 
 ## Checked builds
 
@@ -220,9 +220,9 @@ Rtn 0
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
 | Data stack | pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS in zero page | zero page $10-$EF, 112 cells, each cell two bytes side by side |
-| Zero page used | $00-$09 | $00, $01, $04-$06, $08, $09, and the stack ($0E-$0F are scratch when it is full). A checked build's report also uses $02, $03, $0A and $0B, after the program has stopped |
+| Zero page used | $00-$09 ($07 is the held key in the unchecked build, and with $06 the place of the character being run in the checked one) | $00, $01, $04-$06, $08, $09, and the stack ($0E-$0F are scratch when it is full). A checked build's report also uses $02, $03, $0A and $0B, after the program has stopped |
 | Dispatch table | whole addresses (64 bytes) | one byte each (32 bytes), with the layout rules above |
-| Size | 1,190 / 1,742 checked | 1,099 / 1,651 checked |
+| Size | 1,175 / 1,706 checked | 1,095 / 1,628 checked |
 
 The zero-page one is smaller because a cell that holds an address is used as the pointer where it lies (`(0,X)`), a drop is two `INX`, and the 16-bit operators work a byte at a time through one short routine called twice. Machine code written for one needs changing for the other: see the contracts below.
 

@@ -926,13 +926,13 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 | Build | File | Bytes | Notes |
 |---|---|---|---|
 | Generic ROM | `b8s-z80-rom-0000.bin` | 765 | Starts at 0000h (reset); owns page zero |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,170 |  |
+| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,163 |  |
 | CP/M runner | `B8SZ80.COM` | 831 | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` | 1,250 |  |
-| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,489 | The suggested standard under [Environments](#environments); see the interpreters README |
-| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,803 |  |
-| CP/M with the line editor | `B8SZ80E.COM` | 1,664 | `B8SZ80E PROG.B8S`, or with no file |
-| The same, checked | `B8SZ80EC.COM` | 1,994 |  |
+| CP/M runner, checked | `B8SZ80C.COM` | 1,243 |  |
+| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,488 | The suggested standard under [Environments](#environments); see the interpreters README |
+| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,796 |  |
+| CP/M with the line editor | `B8SZ80E.COM` | 1,663 | `B8SZ80E PROG.B8S`, or with no file |
+| The same, checked | `B8SZ80EC.COM` | 1,987 |  |
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), HL' is the return-stack pointer. A and DE are scratch.
 
@@ -960,7 +960,7 @@ Under CP/M the pages sit after the image and the heap limit is the BDOS. The bre
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`. Builds: `b8s-8080-rom-0000.bin` (854 bytes), `b8s-8080-rom-checked-0000.bin` (1,303), `B8S8080.COM` (904), `B8S8080C.COM` (1,368).
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`. Builds: `b8s-8080-rom-0000.bin` (854 bytes), `b8s-8080-rom-checked-0000.bin` (1,299), `B8S8080.COM` (904), `B8S8080C.COM` (1,364).
 
 The memory map, the break key, the console interface and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 077Bh in `B8S8080.COM` and 097Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
 
@@ -970,7 +970,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
-| Bytes (unchecked, checked) | 1,190 and 1,742 | 1,099 and 1,651 |
+| Bytes (unchecked, checked) | 1,175 and 1,706 | 1,095 and 1,628 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
 | Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |
@@ -978,7 +978,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 | Heap limit (default) | E000h (57344, −8192) | Same |
 | Heap pointer cell | $047C | $047C |
 | Break-off cell | $047B (1147, the same signed) | Same |
-| Held key | $047A (1146) | Same |
+| Held key | $07 in zero page (unchecked), $047A (1146) (checked) | $047A (1146) |
 
 **The break key.** The keyboard is looked at on every word call, block entry and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
 
@@ -989,7 +989,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 ## Appendix D: 6809
 
-Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switch: `CHECKED`. Builds: `b8s-6809-rom-F000.bin` (835 bytes), `b8s-6809-rom-checked-F000.bin` (1,243). The image starts at F000h; point the reset vector at label `start` (F040h unchecked, F045h checked).
+Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switch: `CHECKED`. Builds: `b8s-6809-rom-F000.bin` (825 bytes), `b8s-6809-rom-checked-F000.bin` (1,220). The image starts at F000h, with label `start`: point the reset vector at it.
 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|

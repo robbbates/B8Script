@@ -192,6 +192,19 @@ TESTS += [
 ]
 
 
+# Fifteen, seed 1: the 8-puzzle solved by a breadth-first search, and the
+# 15-puzzle by a weighted A* search (not the fewest moves), on a model of the
+# board read from the game. Then giving up
+TESTS += [
+    ('FIFTEEN', 'the 8-puzzle', b'x3ddwaawddsasawdsdwawan',
+     [b'Moves 20', b'Solved in 20 moves! Play again?', b'Bye.']),
+    ('FIFTEEN', 'the 15-puzzle', b'xywawwassawdsdsdwaasdwaasdwddwawdssawwdsssawwawasddwaassdddwwassawdwaasdsawwn',
+     [b'Moves 74', b'Solved in 74 moves! Play again?', b'Bye.']),
+    ('FIFTEEN', 'three slides down, the rest blocked, give up', b'xywwwwwwddddddqn',
+     [b'Moves 3', b'Play again?', b'Bye.']),
+]
+
+
 def play(path, keys, steps=20_000_000):
     r = Play(open(path, 'rb').read(), keys, checked=True)
     out = r.run(steps)

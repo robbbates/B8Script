@@ -26,6 +26,10 @@ Run(exe, prog, inp, timed=(), mode='runner', files=None, cmdline=None)
   or 'fault ...'. .looks counts the looks at the keyboard (waits on the
   input handle). .modes lists the SetConsoleMode calls. With `outcon=False`
   standard output is not a console (redirected), so SetConsoleMode fails on it.
+  With `hires=False` CreateWaitableTimerExW fails, as on Windows before 10
+  1803, and the timed waits are plain WaitForSingleObject ones. .calls counts
+  the calls of each function. A plain timed wait lasts to the next 15.625 ms
+  tick, as on Windows, so 1? there takes about 16 ms.
 
 Keys are typed as a person types them: a key of the input is given only
 when the program waits for one, which is a wait on the input handle with a
@@ -54,11 +58,13 @@ import chkpe
 
 ARGS = {'GetStdHandle': 1, 'GetConsoleMode': 2, 'SetConsoleMode': 2, 'GetCommandLineA': 0,
         'CreateFileA': 7, 'ReadFile': 5, 'WriteFile': 5, 'CloseHandle': 1,
-        'WaitForSingleObject': 2, 'ReadConsoleInputA': 4, 'GetTickCount': 0, 'ExitProcess': 1}
+        'WaitForSingleObject': 2, 'ReadConsoleInputA': 4, 'GetTickCount': 0, 'ExitProcess': 1,
+        'WaitForMultipleObjects': 4, 'CreateWaitableTimerExW': 4, 'SetWaitableTimer': 6}
 TRAP = 0x7FF00000          # the trap page: function i at TRAP + 16 * i
 CMDLINE = 0x7FF10000       # the command line string
 STACK_TOP = 0x00300000     # the thread's stack: 1 MB below this
 HIN, HOUT, HERR = 0x100, 0x104, 0x108
+HTIMER = 0x200             # the high-resolution timer
 INFINITE = 0xFFFFFFFF
 IPMS = 10000               # instructions per emulated millisecond
 CHUNK = 10000              # instructions run between looks at the clock
@@ -94,7 +100,7 @@ def keyrec(c, down):
 
 class Run:
     def __init__(self, exe, prog=b'', inp=b'', timed=(), mode='runner', files=None, cmdline=None,
-                 maxinstr=3_000_000_000, console=True, brk_at=None, outcon=True):
+                 maxinstr=3_000_000_000, console=True, brk_at=None, outcon=True, hires=True):
         self.pe = chkpe.parse(exe)
         self.mode = mode
         self.stages = []
@@ -116,6 +122,9 @@ class Run:
         self.maxinstr = maxinstr
         self.console = console
         self.outcon = outcon            # standard output is a console
+        self.hires = hires              # the high-resolution timer exists
+        self.tdue = None                # when the timer is due (ms, by now())
+        self.calls = {}                 # how often each function was called
         if files is None:
             files = {b'PROG.B8S': prog} if mode == 'runner' else {}
         self.files = files
@@ -234,6 +243,7 @@ class Run:
             return
         esp = u.reg_read(UC_X86_REG_ESP)
         a = [self.d(esp + 4 + 4 * i) for i in range(ARGS.get(name, 0))]
+        self.calls[name] = self.calls.get(name, 0) + 1
         r = getattr(self, 'k_' + name)(*a)
         u.reg_write(UC_X86_REG_EAX, (r or 0) & 0xFFFFFFFF)
 
@@ -317,7 +327,33 @@ class Run:
         if h != HIN:
             self.stop(f'fault WaitForSingleObject({h:#x})')
             return 0xFFFFFFFF
+        if t not in (0, INFINITE):
+            # Windows ends a plain wait on its tick, every 15.625 ms
+            t = round(-(-t * 1000 // 15625) * 15.625)
         return 0 if self.look(t) else 0x102
+
+    def k_CreateWaitableTimerExW(self, attrs, name, flags, access):
+        if attrs or name or flags != 2:
+            self.stop('fault CreateWaitableTimerExW')
+            return 0
+        return HTIMER if self.hires else 0
+
+    def k_SetWaitableTimer(self, h, pdue, period, fn, arg, resume):
+        due = struct.unpack('<q', bytes(self.rd(pdue, 8)))[0]
+        if h != HTIMER or due >= 0 or period or fn or arg or resume:
+            self.stop('fault SetWaitableTimer')
+            return 0
+        self.tdue = self.now() + (-due) // 10000
+        return 1
+
+    def k_WaitForMultipleObjects(self, n, ph, waitall, t):
+        hs = [self.d(ph + 4 * i) for i in range(n)]
+        if hs != [HIN, HTIMER] or waitall or t != INFINITE or self.tdue is None:
+            self.stop(f'fault WaitForMultipleObjects({hs}, {waitall}, {t:#x})')
+            return 0xFFFFFFFF
+        # the input first, as Windows gives the lowest signalled index; the
+        # timer ends the wait when its time is up
+        return 0 if self.look(max(0, self.tdue - self.now())) else 1
 
     def k_ReadConsoleInputA(self, h, buf, n, pcnt):
         if not self.events:                 # (never: only after a wait said so)

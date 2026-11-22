@@ -205,6 +205,16 @@ start:  mov     ebp,next
         push    7
         push    dword [V(v_outh)]
         call    [V(iat_SetConsoleMode)]
+        ; A high-resolution waitable timer for the timed waits of '?' (Windows
+        ; 10 1803 and later). A plain wait only ends on the system's tick,
+        ; every 15.6 ms, so 1? would take about 16 ms. Older Windows refuses
+        ; the flag; then v_htm is 0 and the waits are plain ones.
+        push    1F0003h                 ; TIMER_ALL_ACCESS
+        push    2                       ; CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+        push    0
+        push    0
+        call    [V(iat_CreateWaitableTimerExW)]
+        mov     [V(v_htm)],eax
         ; The command line: the program's own name, then the file's.
         call    [V(iat_GetCommandLineA)]
         xchg    eax,esi
@@ -1004,27 +1014,57 @@ putc:   pushad
         popad
         ret
 
-; waitk. At a console: WaitForSingleObject on the input handle for the
-; time (EAX: 0 just looks, -1 is INFINITE), then ReadConsoleInputA for one
-; event. Only key-down events
-; count: their character, or for the left and right arrow keys (virtual
-; keys 25h and 27h, which have none) ^B and ^F. Anything else is passed
-; over, and the wait starts again with its whole time: so a wait can last
-; longer than asked by the time of the events passed over (a key-up comes
-; soon after its key-down), which the spec allows ("about n ms"), and no
-; clock is needed.
+; waitk. At a console: a wait on the input handle for the time (EAX: 0
+; just looks, -1 is INFINITE), then ReadConsoleInputA for one event. A
+; timed wait (1 ms or more) sets the high-resolution timer once for the
+; whole time and waits for the input or the timer (WaitForMultipleObjects
+; on v_hin and v_htm, which follow each other); without the timer it is a
+; plain WaitForSingleObject, which starts again with its whole time after
+; each event passed over. Only key-down events count: their character,
+; or for the left and right arrow keys (virtual keys 25h and 27h, which
+; have none) ^B and ^F. Anything else is passed over.
 ; Input that is not a console (a pipe or a file) is read a byte at a time
 ; with ReadFile, and only by a wait that is not just a look (a look would
 ; eat the input); at its end the interpreter exits.
 waitk:  pushad
         xchg    eax,ebx                 ; EBX = the time
+        mov     edi,[V(v_htm)]          ; EDI: the timer, if this wait uses it
+        lea     eax,[ebx-1]
+        cmp     eax,7FFFFFFEh
+        jb      .wk0                    ; 1 ms or more, and not INFINITE
+        xor     edi,edi
+.wk0:   test    edi,edi
+        jz      .wk1
+        imul    eax,ebx,-10000          ; relative, in 100 ns units
+        cdq
+        push    edx
+        push    eax                     ; the due time, 64 bits
+        mov     ecx,esp
+        push    0                       ; fResume
+        push    0                       ; lpArgToCompletionRoutine
+        push    0                       ; pfnCompletionRoutine
+        push    0                       ; lPeriod
+        push    ecx                     ; lpDueTime
+        push    edi
+        call    [V(iat_SetWaitableTimer)]
+        pop     eax
+        pop     eax
 .wk1:   cmp     byte [V(v_iscon)],0
         je      .wk6
-        push    ebx
+        test    edi,edi
+        jz      .wk2
+        push    -1                      ; INFINITE: the timer ends it
+        push    0                       ; any one of the two
+        lea     eax,[V(v_hin)]
+        push    eax
+        push    2
+        call    [V(iat_WaitForMultipleObjects)]
+        jmp     short .wk4
+.wk2:   push    ebx
         push    dword [V(v_hin)]
         call    [V(iat_WaitForSingleObject)]
-        test    eax,eax
-        jnz     .wk8                    ; WAIT_TIMEOUT: no key
+.wk4:   test    eax,eax
+        jnz     .wk8                    ; the timer, or WAIT_TIMEOUT: no key
         lea     eax,[V(v_cnt)]
         push    eax
         push    1
@@ -1697,6 +1737,9 @@ ptab:   PT h_store      ; !
         IMP     CloseHandle             ; (a runner leaves its file open)
 %endif
         IMP     WaitForSingleObject
+        IMP     WaitForMultipleObjects
+        IMP     CreateWaitableTimerExW
+        IMP     SetWaitableTimer
         IMP     ReadConsoleInputA
         IMP     ExitProcess
 %endmacro
@@ -1828,6 +1871,7 @@ RAWSIZE equ     (rawend-tstart+1FFh) & ~1FFh
 v_rec:  resb    20              ; an INPUT_RECORD; ReadFile's byte
 v_cnt:  resd    1               ; a count for ReadFile and the like
 v_hin:  resd    1               ; the standard input handle
+v_htm:  resd    1               ; the timer, or 0 (must follow v_hin)
 v_outh: resd    1               ; the handle putc writes to
 v_dstop:resd    1               ; ESP for the empty data stack
 v_iscon:resb    1               ; non-zero if the input is a console

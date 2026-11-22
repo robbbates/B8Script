@@ -73,6 +73,21 @@ def windows_only(exe, checked, editor, verbose):
             ok(o == b'\x1b[2J\x1b[Hhi' and [x for x in r.modes if x[0] == HOUT] == [(HOUT, 7)]
                and r.modes[0] == (HIN, 0) and r.ended == 'exit',
                f'VT processing asked for on the output (output a console: {oc})', r)
+        # timed waits: the high-resolution timer, set once per wait, so 51
+        # waits of 20 ms take about 1 s. Without it (Windows before 10 1803)
+        # plain waits end on the 15.625 ms tick: about 31 ms each, 1.6 s.
+        # A key ends the wait at once either way
+        for hires in (True, False):
+            r = Run(exe, b'20?# 1 1( 20?; 1+:51<); 7#', b'', hires=hires)
+            o = r.run()
+            ms = r.waited
+            ok(o == b'07' and ((1000 <= ms <= 1060) if hires else (1550 <= ms <= 1650))
+               and (r.calls.get('WaitForMultipleObjects', 0) >= 51) == hires
+               and (r.calls.get('SetWaitableTimer', 0) >= 51) == hires,
+               f'51 waits of 20 ms (timer: {hires}, waited {ms} ms)', r)
+            r = Run(exe, b'1000?#', b'', timed=[(0, b'k')], hires=hires)
+            o = r.run()
+            ok(o == b'107' and r.waited < 5, f'a key ends a timed wait at once (timer: {hires})', r)
         # input that is not a console: bytes from ReadFile, and the end of
         # it ends the program; the break check does not read it
         r = Run(exe, b'0?# 0i! 1( i@1+:i! 3000<) 0?# -9?; 0?# 0?# "no"$', b'AB12\rC', console=False)

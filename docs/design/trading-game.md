@@ -165,13 +165,14 @@ A first sketch:
 
 ### Saving
 
-Decided (Nov 22): the method. What exactly is saved is settled last, once every other part is.
+Decided (Nov 22), apart from the exact list of what is saved.
 
-- **A save code typed or pasted back in.** The galaxy comes from the seed; stock levels are rebuilt on loading, not saved.
-- **A bit packer:** each value goes in at its own width, and the code prints 6 bits per character; unpacking reverses it. The game's numbers are not scaled to suit the code.
-- **Base 64:** A–Z, a–z, 0–9, `-` and `_`. Most players will copy and paste the code, and typing it by hand is still bearable. Upper and lower case differ.
-- **One checksum character** at the end, so a mistyped or mangled code is refused, not loaded wrong.
-- **Length:** about 35 characters for everything estimated so far (about 210 bits), plus the checksum.
+- **A save code** printed for the player to copy (most will copy and paste it; typing it is still bearable), and typed or pasted back to load. The galaxy comes from the seed, and stock levels are rebuilt on loading.
+- **Packing:** every value goes in at its own bit width, through a small bit packer, and comes out 6 bits per character. Game numbers are never scaled to suit the code. About 210 bits, so about 35 characters.
+- **Alphabet:** base 64 with `A`–`Z`, `a`–`z`, `0`–`9`, `-` and `_` (no `/`, which would need escaping in the program's strings).
+- **A check character** at the end, so a mistyped or altered code is refused.
+- **A light obfuscation,** so the code can't simply be decoded and edited: each 6-bit value is XORed with a stream from a small generator, started from a fixed key and a salt character at the front (so two nearly equal saves look different). It stops casual editing; anyone who reads the program can undo it, which is fine.
+- **To detail:** exactly what is saved (seed, day, money, debt, position, cargo, ship and upgrades, legal status, rare items, contract, perhaps the visited systems).
 
 ### Names
 

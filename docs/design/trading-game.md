@@ -1,8 +1,8 @@
 # Trading game: design
 
-Working title, to be named. Draft of Nov 22, 2026: the decisions so far, and what is still to detail.
+Working title, to be named. Nov 22, 2026: every part decided. Numbers marked "to tune" are starting points for play-testing.
 
-A single-player space trading game in B8Script, in the style of Elite and Trade Wars but not a copy of either. You start in debt with a small ship. You trade between generated star systems, smuggle when it pays, fight or flee, take contracts, upgrade your ship, and track down rare items that can only be bartered for. Turn-based throughout.
+A single-player space trading game in B8Script, in the style of Elite and Trade Wars but not a copy of either. You start in debt with a small ship. You trade between generated star systems, smuggle when it pays, fight or flee, take contracts, upgrade your ship, and track down the six parts of an ancient idol, which can only be bartered for. Turn-based throughout.
 
 ## Keeping it small
 
@@ -21,7 +21,7 @@ The game has to stay easy to write, read and test. These rules are part of the d
 |---|---|---|
 | 1 | Setting | Space, with its own names and lore |
 | 2 | Map | Star systems at positions on a star chart; you can jump to any system within your fuel range |
-| 3 | Pressure and goal | A loan with interest at the start, plus rare items to collect. A rare item is found by chance, stays in its system, and can only be had by trading certain goods for it, not money |
+| 3 | Pressure and goal | A loan with interest at the start, plus the six parts of an ancient idol to collect. A part is found by chance, stays in its system, and can only be had by trading certain goods for it, not money |
 | 4 | Economy | Prices set by each system's type, plus stock that drains as you trade and recovers each day. Events (shortages, booms) once the base plays well |
 | 5 | Combat | A short turn-based duel |
 | 6 | Law | Systems have a safety level; contraband pays well but brings police scans and fines |
@@ -34,7 +34,7 @@ The game has to stay easy to write, read and test. These rules are part of the d
 ## The loop
 
 1. **Dock** at a system: see its market, its contracts and any rumours.
-2. **Decide:** buy, sell, take a contract, barter for a rare item, refuel, upgrade, repay the loan.
+2. **Decide:** buy, sell, take a contract, barter for an idol part, refuel, upgrade, repay the loan.
 3. **Pick a destination** on the chart, within fuel range.
 4. **Jump:** a day passes. On the way there may be an **encounter** (pirates, police, a trader, nothing), settled by a duel, a bribe, a scan or flight.
 5. **Arrive** and go back to 1.
@@ -43,7 +43,7 @@ The day count drives everything that changes over time: interest, stock recovery
 
 ## The parts
 
-Each part says what is decided and what is left to detail.
+Each part says what was decided.
 
 ### Map and systems
 
@@ -90,15 +90,15 @@ Decided (Nov 22).
 
 **Money.** Two cells, high × 10,000 + low, printed as the high part then the low part padded to four digits: up to 327 million. Adding and subtracting carry at 10,000. One transaction never passes 32,767: prices stay at most 300 and holds at most 100 tonnes, so every multiply fits one cell.
 
-### Loan and rare items
+### Loan and the idol
 
 Decided (Nov 22).
 
 - **The start:** the loan paid for your Courier: you begin owing 5,000, the Courier's price, with 1,000 in cash, enough for a first cargo and fuel.
 - **The loan** is kept in one cell, never above 30,000. Each day adds 1% (debt ÷ 100). Pay it off in any amount when docked.
 - **Not paying:** once the debt reaches 30,000, debt collectors turn up as encounters (pay, fight or flee) until it is paid. No game over for debt; it reuses the encounter and duel code.
-- **Winning:** the loan repaid and all six rare items held. The score is the number of days taken: fewer is better.
-- **Six rare items,** one bit each, so the collection is one save-code character. Trophies only: they do nothing once held (perks are under Later).
+- **Winning:** the loan repaid and all six idol parts held. The score is the number of days taken: fewer is better.
+- **Six idol parts,** one bit each, so the collection is one save-code character. They do nothing once held, apart from counting toward the whole idol (perks are under Later).
 - **Where:** the seed places them in six systems, mostly frontier and lawless. You learn of one by docking there or from a rumour. An item stays in its system until you trade for it.
 - **The price:** goods, not money. The seed sets two different goods for each item, 10 to 30 tonnes of each and at most 40 tonnes in all, sometimes one of them contraband. Hand them over and the item is yours.
 
@@ -113,7 +113,7 @@ Decided (Nov 22).
 - **Damage:** a laser hit is level × a roll of 1 to 4, less the target's shield level, at least 1. A missile does 15 and ignores shields. Fleeing works on a 50% roll; on a failure the enemy gets a free shot.
 - **The enemy:** closes in, fires lasers when close and a missile when it has one, and flees below a quarter of its hull.
 - **Winning:** a bounty for a pirate or a collector, and a chance of salvage (a few tonnes of a random good).
-- **Losing:** with an escape pod (2,000, used up), you lose the ship and cargo and wake at home in a new Courier, whose 5,000 is added to the loan (up to the cap). Debt and rare items are kept. Without one, the game is over.
+- **Losing:** with an escape pod (2,000, used up), you lose the ship and cargo and wake at home in a new Courier, whose 5,000 is added to the loan (up to the cap). Debt and idol parts are kept. Without one, the game is over.
 
 ### Law and smuggling
 
@@ -157,7 +157,7 @@ Decided (Nov 22).
 - **Offers:** each system offers 0 to 2 when you dock, generated from the seed, the system and the day; nothing is stored until you accept one.
 - **Pay:** 100 per unit of fuel distance plus 20 a tonne (to tune). The deadline is the trip's length plus some slack. Late: half pay. Cargo lost in a fight: the contract ends unpaid. No deposit.
 - **Selling sealed cargo** is allowed: you become wanted, and the cargo's base value is added to your loan (the shipper's insurer bills you through your lender), so theft only pays where the price is well above base. Passengers can't be sold; leaving them anywhere else fails the contract.
-- **Rumours:** one free rumour each time you dock, always true, of three kinds: where a good is scarce (a real consumer), where pirates are thick, or where a rare item lies (only ones not yet found).
+- **Rumours:** one free rumour each time you dock, always true, of three kinds: where a good is scarce (a real consumer), where pirates are thick, or where an idol part lies (only ones not yet found).
 
 ### Screen
 
@@ -165,7 +165,7 @@ Decided (Nov 22).
 
 - **Layout,** 80 × 24, drawn with single-line borders (`+ - |`) once at the start: row 1 status; rows 3 to 18 the main area (56 wide) beside the side panel (21 wide: cargo, contract); rows 20 to 22 messages; row 23 the command line. Only what changes is redrawn.
 - **Main-area views:** Chart, Market, Shipyard (upgrades and ships), Duel, Help. Contract offers and the rumour appear in the messages on docking; an accepted contract shows in the side panel.
-- **Keys.** Docked: `c` chart, `m` market, `y` shipyard, `k` take a contract, `l` pay the loan, `f` refuel, `r` repair, `t` trade for a rare item, `v` show the save code, `?` help, `q` quit. Market and shipyard: `w` and `s` move the row (the terminal's cursor sits on it), `b` buy, `x` sell, then a quantity. Chart: two keys step through the systems in range, Return jumps. Duel: `l` lasers, `m` missile, `c` close, `p` pull back, `f` flee, `$` pay. Each view lists its keys on its last line.
+- **Keys.** Docked: `c` chart, `m` market, `y` shipyard, `k` take a contract, `l` pay the loan, `f` refuel, `r` repair, `t` trade for an idol part, `v` show the save code, `?` help, `q` quit. Market and shipyard: `w` and `s` move the row (the terminal's cursor sits on it), `b` buy, `x` sell, then a quantity. Chart: two keys step through the systems in range, Return jumps. Duel: `l` lasers, `m` missile, `c` close, `p` pull back, `f` flee, `$` pay. Each view lists its keys on its last line.
 - **Quantities** are typed (read with `-4?`); Return alone means as many as possible: all you can afford and fit, or all you hold.
 - **Messages:** the newest on row 22, older ones moving up, kept in a 3 × 78-byte buffer and redrawn on each new message.
 
@@ -197,20 +197,40 @@ Decided (Nov 22), apart from the exact list of what is saved.
 - **Alphabet:** base 64 with `A`–`Z`, `a`–`z`, `0`–`9`, `-` and `_` (no `/`, which would need escaping in the program's strings).
 - **A check character** at the end, so a mistyped or altered code is refused.
 - **A light obfuscation,** so the code can't simply be decoded and edited: each 6-bit value is XORed with a stream from a small generator, started from a fixed key and a salt character at the front (so two nearly equal saves look different). It stops casual editing; anyone who reads the program can undo it, which is fine.
-- **To detail:** exactly what is saved (seed, day, money, debt, position, cargo, ship and upgrades, legal status, rare items, contract, perhaps the visited systems).
+- **What is saved,** 220 bits, so 37 characters, plus the salt and check characters: 39 in all.
+
+| Value | Range | Bits |
+|---|---|---|
+| Format version (old codes are refused after a change) | 0–15 | 4 |
+| Seed | any | 16 |
+| Day | 0–1023 | 10 |
+| Money | up to 9,999,999 (high part 0–999, low part 0–9,999) | 24 |
+| Debt | 0–30,000 | 15 |
+| Position | system 0–63 | 6 |
+| Cargo | 8 goods × 0–100 | 56 |
+| Ship: class, laser, shield, missiles, pods, tank upgrades, hull, fuel, escape pod, hidden hold | | 28 |
+| Wanted days | 0–20 | 5 |
+| Idol parts held, and idol parts known | 6 + 6 | 12 |
+| Contract: kind, destination, good, tonnes, deadline, pay, passenger flag | | 44 |
+
+- **Not saved:** the chart's visited marks (after loading, every system looks unvisited again), the stock levels (rebuilt), and which contraband is in the hidden hold (contraband always fills the hidden hold first, so it follows from the cargo).
+- **The game ends at day 999,** which also bounds the score and fits the day in 10 bits.
 
 ### Names
 
-- **Decided:** generated from a syllable table.
-- **To detail:** the table; names for goods, ship classes and rare items (fixed lists).
+Decided (Nov 22).
+
+- **Systems:** generated from a table of 32 two-letter syllables (consonant–vowel pairs and a few endings); a name is 2 or 3 syllables chosen from the seed and the system's number, as Elite did. 64 names, different every seed, from a 64-byte table.
+- **Goods and ship classes:** as in their tables above.
+- **The idol** is named from the same syllables (*the Idol of Xeroon*, say), so every galaxy has its own. The parts: the Head, the Eye, the Heart, the Left Hand, the Right Hand and the Base (one word each in tables: Head, Eye, Heart, LHand, RHand, Base). Holding all six makes the idol whole; with the loan repaid, that wins.
 
 ## Version 1
 
-The map, the economy, the loan, rare items, the duel, law and contraband, ship upgrades and classes, contracts and rumours, the panels, the save code, generated names.
+The map, the economy, the loan, idol parts, the duel, law and contraband, ship upgrades and classes, contracts and rumours, the panels, the save code, generated names.
 
 ## Later
 
-Events (shortages, booms); colonies and outposts; perks for the rare items; ranks with titles; more opponent kinds; a second galaxy.
+Events (shortages, booms); colonies and outposts; perks for the idol parts; ranks with titles; more opponent kinds; a second galaxy.
 
 ## Data budget (estimate)
 

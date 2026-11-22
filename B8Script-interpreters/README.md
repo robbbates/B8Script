@@ -14,16 +14,17 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 | CPU | Generic | Generic, checked | CP/M | CP/M, checked |
 |---|---|---|---|---|
-| Z80 | 694 | 834 | 759 | 901 |
-| Z80 with the line editor | 877 | 1,020 | 972 | 1,114 |
-| 8080 | 775 | 925 | 824 | 976 |
-| 6502, stack in pages 2-3 | 1,114 | 1,275 | n/a | n/a |
-| 6502, stack in zero page | 1,015 | 1,164 | n/a | n/a |
-| 6809 | 765 | 938 | n/a | n/a |
+| Z80 | 773 | 1,177 | 838 | 1,257 |
+| Z80 with the line editor | 1,528 | 1,834 | 1,712 | 2,034 |
+| 8080 | 858 | 1,306 | 907 | 1,371 |
+| 6502, stack in pages 2-3 | 1,190 | 1,742 | n/a | n/a |
+| 6502, stack in zero page | 1,099 | 1,651 | n/a | n/a |
+| 6809 | 835 | 1,243 | n/a | n/a |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
+- Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 70 to 86 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 300 to 480 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
 
 ## Files
 
@@ -35,14 +36,15 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | `B8SZ80E.COM`, `B8SZ80EC.COM` | CP/M builds with the line editor; the C means checked. Run as `B8SZ80E PROG.B8S`, or with no file |
 | `*.lst` | The assembler's listings |
 
-## The language, where it differs from the 2026-10-09 spec
+## The language
 
-- `[x` stores the address in a variable; `[` followed by a space pushes an anonymous block. Any other character after `[` is an error: a checked build stops on it, and an unchecked build takes it as the space.
-- The heap pointer lives at `z10+`.
-- The string escape is `/` (it was `>`): `/M` is CR, `/"` a quote, `//` a slash. `>` is an ordinary character inside strings. A `/` directly before a closing quote escapes the quote, in comments too.
-- `/` is `( a b -- q r )`, as in the spec: the remainder is on top. Dividing by 2 or -2 is a single shift.
-- Dividing by zero is not checked. It returns two cells of no meaning (different on each CPU), and the stack stays balanced.
+The builds follow [`docs/b8script.md`](../docs/b8script.md) (2026-11-21). What the spec leaves to the implementation:
+
 - `-n?` (generic builds): Backspace takes a character back and is echoed as it is; every other key but CR is stored and echoed, control keys and DEL included. A count above 127 is taken as 127. The CP/M builds use BDOS 10, which does its own editing.
+- Dividing by zero in an unchecked build returns two cells of no meaning (different on each CPU), and the stack stays balanced.
+- `[` followed by anything but a letter is taken as `[ ` in an unchecked build.
+- The CP/M builds print through BDOS 6, which can't print the byte FFh (it means "read a key" there).
+- The memory maps, stack sizes, heap limits and system addresses are in the spec's appendices.
 
 ## Building
 
@@ -83,69 +85,123 @@ To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6
 | CONOUT | print A | same | same |
 | EXIT | jumped to when the program ends | same | same |
 | KEY and CONOUT must keep | BC, DE, HL (and HL' on the Z80) | X, Y | B, X, Y, U, DP |
-| Where to start | reset at 0000h | label `start`, E000h (point the reset vector at it) | label `start`: F003h unchecked, F037h checked (point the reset vector at it) |
+| Where to start | reset at 0000h | label `start`, E000h (point the reset vector at it) | label `start`: F040h unchecked, F045h checked (point the reset vector at it) |
 | RAM | RS 8000h, DS 8100h, letters 8200h, PROG 8300h | RS = page 1, DS 0200h/0300h (or zero page 10h-EFh), letters 0400h, PROG 0500h | RS 8000h (S), DS 8100h (U), letters 8200h (DP), PROG 8300h |
 | Heap limit | `HEAPLIM` (page), default F0h | default E0h | default F0h |
 | Timing | `MSLOOP` = loop passes per millisecond for `n?` (1-255); tune it to your clock and KEY | same | same |
 
 - There is one input routine, KEY. It replaces the earlier CONST and CONIN: `0?` waits by calling KEY until a key comes.
+- KEY is also called while a program runs, for the break key: once in every 256 word calls and loop-backs. A key it returns then is taken, so KEY must not wait, and should be quick.
+- The Z80 builds with the editor have one more address, `LEAVE`: where ^X goes. A program that ends goes back to the editor.
 - Your loader puts the program text, ending in a NUL, at `PROG`. The heap starts after the NUL.
 - The generic Z80 and 8080 images start at 0000h and use RST 08h, 18h, 20h, 28h and 30h as one-byte calls.
 - The CP/M builds copy those routines to 0008h-0033h when they start (they used 0008h-0014h before). A system whose interrupts use RST 1 to RST 6 can't run them.
 
+## The break key
+
+Every build stops a running program on Ctrl-C. An unchecked build prints nothing and goes to EXIT (or back to the editor); a checked build reports `B`.
+
+- **Where it is looked for.** At every word call and every true `)` loop-back (on the Z80 and 8080 also at block entry and `{`), but KEY is only called one time in 256: a counter gates it. A program stuck in `?` is stopped too, since `?` treats Ctrl-C the same way.
+- **Other keys.** A key the check reads is held for the next `?`. A newer key replaces it, and `?` takes the held key before it looks at KEY. So one key typed ahead is kept, not more.
+- **The break-off cell** is the byte at offset 7Bh of the letter page: 827Bh on the generic Z80, 8080 and 6809, $047B on the 6502. A program that stores a non-zero byte there gets Ctrl-C as key 03h. When it does, the interpreter waits about 250 ms (250 x `MSLOOP` calls of KEY) for one more key: a second Ctrl-C stops the program all the same, and any other key becomes the held key. Each build clears the cell when it starts; the editor clears it before every line.
+- **The held key** is the byte below it, at offset 7Ah.
+
 ## The Z80 line editor (EDITOR = 1)
 
-The interpreter starts in the editor, and a program that ends comes back to it. There is no prompt. Type a line and press Return:
+The interpreter starts in the editor, and a program that ends comes back to it. There is no prompt. It follows the suggested standard in the spec's Environments chapter. Type a line and press Return:
 
 | You type | What happens |
 |---|---|
-| `n text` | The text goes in as line n, and the lines from n on move down. A number past the end adds the line at the end |
-| `0 text` | The text is added at the end |
+| `n text` | The text goes in as line n, and the lines from n on move down. A number past the end, or 0, adds the line at the end |
 | `n` | Line n is taken out |
-| `0` | The program runs |
-| `-n` | The program is listed from line n on, each line with its number; `-1` lists all of it. Any key holds the list until the next key; Ctrl-C ends it |
-| anything else | It runs at once, as B8Script. Start such a line with a space if it would begin with a digit or a minus sign |
+| anything else | It runs at once, as B8Script. Start such a line with a space if it would begin with a digit |
+
+A command key ends the line too, and takes what was typed before it as its argument:
+
+| Key | What it does |
+|---|---|
+| ^G | Runs the program |
+| `n`^L | Lists from line n, or all of it with no number, each line with its number. Any key holds the list until the next key; Ctrl-C ends it |
+| `n`^E | Puts line n in the input line. Return puts the text back in its place, as changed; Esc leaves the line as it was |
+| ^R, `name`^R | Reads. CP/M: the file of that name, or the same file as last time. Generic: whatever is typed or pasted from then until ^Z replaces the program, with no echo |
+| ^W, `name`^W | Writes. CP/M: to that file, or the same file as last time. Generic: prints the text as it is, for the terminal to capture |
+| ^N ^N | New: no program (the key twice in a row; any other second key calls it off) |
+| ^V | View: the build's name and date, both stacks as an error report shows them, the program's size in bytes, its lines, and the bytes free |
+| ^X | Leaves: to `LEAVE` (generic) or to CP/M |
+| ^B ^F, or the left and right arrow keys | Move the cursor in the line. Text goes in at the cursor |
+| Backspace, DEL | Take out the character before the cursor |
+| Esc | Drops the line |
 
 - Lines are counted, not numbered: the text holds no line numbers, and the list shows each line's place. There can be 65,535 lines.
 - A typed line holds 125 characters, the line number included. The one character after the line number separates it from the text and is not stored, whatever it is: `3 5#` stores `5#`, and so does `3x5#`. Type a space there.
-- Putting a line in opens the gap with one block move, so it is quick in a long program too.
-- Reset empties the program. The generic builds have no save or load.
-- Nothing is checked, and nothing is printed between a program's output and what you type next.
-- Keys typed while the list is running hold it, so wait for it to end before typing the next line.
-- Words and variables last from one line to the next, so you can call a word from the keyboard after running the program. A word's address points into the program text, so run the program again after editing it.
+- The editor sends only printing characters, CR, LF and Backspace, so it works on any terminal. A character put in or taken out in the middle of the line prints the rest of the line again.
+- After Esc the editor waits about 5 ms for another key. If `[` follows, it reads on to the letter that ends the sequence and acts on C (right) and D (left); it ignores the rest. A lone Esc drops the line.
+- Tab is text. Other control keys do nothing.
+- **What lasts from line to line:** the program, the words, the variables and the data stack. The return stack starts empty for every line. After an error or a break both stacks are empty. A word's address points into the program text, so run the program again after editing it.
 - A line run at once sits in the line buffer, which `-n?` also reads into. The stored program never returns to the line, so it can use `-n?` freely; a typed line that calls `-n?` itself and carries on afterwards runs what was typed.
+- `-n?` in a program is the plain line read of the other builds, not the editor's.
+- Nothing is printed between a program's output and what you type next.
+- Reset empties the program (generic builds).
+
+**Reading and writing, generic builds:**
+- ^R stores each CR as CR LF. A LF straight after a line end is dropped; a LF anywhere else ends a line too. So text with CR LF, CR or LF line ends all comes in right, but empty lines can be lost. A last line with no line end is given one.
+- ^R ends at ^Z only. The spec also names ^@, but KEY returns 0 for "no key", so a NUL can't be seen.
+- Nothing checks that the text fits in memory.
 
 **With CP/M** (`B8SZ80E`, `B8SZ80EC`):
-- The file named on the command line is the program to start with. With no file, or no such file, there is no program. The text ends at the file's first ^Z, and a last line with no CR LF is given one.
-- **There is no command to save.** What you type is lost when you leave.
-- Lines are read by BDOS 10, so its editing keys work, and Ctrl-C as the first key of a line goes back to CP/M.
+- The file named on the command line is the program to start with, and the name that ^R and ^W use until another is typed. With no file, or no such file, there is no program.
+- A name is up to 8 characters, a dot and up to 3 more, on the current drive. It is put in capitals.
+- The text ends at the file's first ^Z, and a last line with no CR LF is given one. ^W pads the last record with ^Z.
+- ^W deletes the old file first. It does not report a full disk or directory.
+- The editor reads its keys with BDOS 6, so BDOS 10's editing keys don't apply to it, and Ctrl-C at the editor does nothing: ^X leaves.
 
 **Checked** (`-editor-checked-`, `B8SZ80EC`):
-- A program that is stopped, by an error or by Ctrl-C, prints its letter and place and comes back to the editor, with both stacks empty.
-- The place is a count of bytes from the start of the program, not a line number. In a line typed at the editor it is 65408 plus the character's place in the line, because the line buffer lies 128 bytes below the program.
-- In the CP/M build a key pressed while a program runs (other than Ctrl-C) is dropped when the program ends.
+- A program that is stopped, by an error or by Ctrl-C, prints its report and comes back to the editor, with both stacks empty.
+- A line typed at the editor is line 0 in the report; the column is the place in the line.
 
-The editor adds 183 bytes to the generic build and 213 to the CP/M one. The earlier, barer editor that brought the whole image to 768 bytes (with the leaner language of that day) is commit `4fbf418`.
+The editor adds 755 bytes to the unchecked generic build and 874 to the CP/M one (657 and 777 to the checked ones, which have the report's routines already). ^V alone is about 190 of those in an unchecked build, because it brings in the stack listing. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
 
 ## Checked builds
 
-A checked build stops with a letter, ` @ ` and the offset in the program of the character it was reading, like `S @ 245`:
+A checked build starts with every variable at 0 and every word undefined. It stops on the errors in the spec's table:
 
 | Letter | Meaning |
 |---|---|
-| `S` | data stack over or under |
-| `R` | return stack over or under |
+| `S` / `s` | data stack overflow / underflow |
+| `R` / `r` | return stack overflow / underflow |
+| `H` | the heap past its limit, released below the program's end, or moved so far that the address wrapped round |
+| `O` | a store with `!` or `.` outside the program's space |
+| `U` | a call of a word that was never defined |
+| `Q` | no closing quote: a string that runs into the end of the text, or `$` that does |
+| `W` | a character other than a letter or a space after `[` |
+| `X` | a reserved byte, 80h-FFh, outside a string |
+| `Z` | dividing by zero |
+| `N` | a false `(` or a `[` whose skip runs into the end of the text or into the wrong closer |
 | `B` | Ctrl-C |
-| `H` | heap past the limit |
-| `W` | a store outside the program's own space |
-| `D` | a character other than a letter or a space after `[` |
 
-- Nothing is printed before the letter: no CR LF.
-- **Store range.** "The program's own space" runs from the letter page up to the heap limit, not just up to the heap top. Tiny BASIC keeps its program lines above the heap top without allocating them, so the stricter rule would stop it.
-- **Stack checks.** These happen once per character, not in every handler. An overrun is caught at most a cell late, so the offset printed can be one character late. A guard band above the return stack absorbs calls made while the data stack is full. The stacks hold 127 data cells and 112 return entries (Z80/8080), 252 or 112 and about 100 (6502), or 127 and 127 (6809).
-- **Ctrl-C** is checked at every word call, block entry, loop-back and `{` (Z80, 8080), or at every `)` loop-back and every return (6502, 6809). Other keys pressed meanwhile are held for the next `?`.
+The report is the spec's:
+
+```
+Err Z @ 3,5
+/ "no"$
+Stk 6: 1 2 3 4 5 0
+Rtn 0
+```
+
+- It starts and ends with CR LF. Then the build goes to EXIT, or back to the editor.
+- **The place** is the character that failed. For `U` it is the call, for `N` the `(` or `[` where the skip started, for `Q` the opening quote or the `$`, and for `W` the character after the `[`. Lines and columns count from 1; text below the program (a line read by `-n?` and then run, or a line typed at the editor) is line 0.
+- **The text line** stops at CR, LF or NUL, and in the CP/M builds at ^Z too.
+- **The stack lines** show the stacks as they were before the failing character ran: `7 0/` shows `Stk 2: 7 0`. More than 8 cells are shown as ` ...` and the top 8. Values are signed, as `#` prints them. There are three exceptions:
+  - A stack overrun (`S` `s` `R` `r`) is found after the character has run, once per character. After `s` the data stack counts as empty, after `r` the return stack. The place can be one character late, and after `r` it is wherever the bad return went.
+  - `N`, and `Q` for an unclosed string, show the stack after the opener took its flag or pushed its address.
+  - `B` shows whatever is there when the key is noticed.
+- **A string with no closing quote inside skipped text** is an `N` at the skip's opener (or the quiet end of the program, for `\`), not a `Q`: the skip ran into the end.
+- **Store range.** "The program's space" runs from the letter page up to the heap limit, not just up to the heap top. Tiny BASIC keeps its program lines above the heap top without allocating them, so the stricter rule would stop it. On the Z80 and 8080 one test serves both bytes of a cell, so `.` can't store to the very last byte below the limit.
+- **The hex loader and machine code are never checked.**
+- **Stacks.** The stacks hold 127 data cells and 112 return entries (Z80/8080), 252 or 112 and about 110 (6502), or 126 and 112 (6809). A few spare bytes above each stack and a guard band below take what a character does before the check sees it, so an overrun can't reach the letter cells.
+- **Undefined words.** The word cells start at 0000h. On the Z80 and 8080 the byte there is a reserved one, and the reserved-byte path sees that the text pointer is in page zero; the 6502 reads a NUL there (the text pointer's own low byte) and its end-of-text path sees that the pointer is in page zero; the 6809 tests the cell at the call.
 - **Unchecked builds and `[`.** A letter defines; anything else is taken as the space.
-- **CP/M and typing ahead.** A key typed while a checked CP/M program is running is held for the next single-key `?`; a `-n?` line read (BDOS 10) does not see it.
+- **Don't treat a checked run as proof.** What an unchecked build does with the same mistake is not defined. One example: an unclosed string in an unchecked build is skipped on through memory until some quote turns up.
 
 ## Machine-code contracts (the grave)
 
@@ -164,22 +220,23 @@ A checked build stops with a letter, ` @ ` and the offset in the program of the 
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
 | Data stack | pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS in zero page | zero page $10-$EF, 112 cells, each cell two bytes side by side |
-| Zero page used | $00-$09 | $00, $01, $04-$06, $08, $09, and the stack ($0E-$0F are scratch when it is full) |
+| Zero page used | $00-$09 | $00, $01, $04-$06, $08, $09, and the stack ($0E-$0F are scratch when it is full). A checked build's report also uses $02, $03, $0A and $0B, after the program has stopped |
 | Dispatch table | whole addresses (64 bytes) | one byte each (32 bytes), with the layout rules above |
-| Size | 1,114 / 1,275 checked | 1,015 / 1,164 checked |
+| Size | 1,190 / 1,742 checked | 1,099 / 1,651 checked |
 
 The zero-page one is smaller because a cell that holds an address is used as the pointer where it lies (`(0,X)`), a drop is two `INX`, and the 16-bit operators work a byte at a time through one short routine called twice. Machine code written for one needs changing for the other: see the contracts below.
 
 ## How they were tested
 
-Every build runs, in an emulator, against a reference interpreter written from the spec:
+Every build runs, in an emulator, against a reference interpreter written from the spec (`testing/ref.py`):
 - every example program in the spec;
-- edge cases for `/`, compares, number wrap, string escapes, skips over strings, `\`, `[x`, `[ `, `{]` jumps, heap mark and release, the hex loader, `0?`, `n?`, `-n?` with editing, and deep stacks;
+- edge cases for `/`, compares, number wrap, string escapes, skips over strings, `\`, `[x`, `[ `, `{]` jumps, heap mark and release with a signed `_`, the hex loader, `0?`, `n?`, `-n?` with editing, and deep stacks;
 - your Tiny BASIC, driven with a typed program (entering, LIST, RUN, GOSUB, FOR, expressions);
 - a machine-code test per CPU (and per interpreter on the 6502);
-- for checked builds, every error plus Ctrl-C.
+- the break key, on unchecked and checked builds alike: Ctrl-C in a loop, in a chain of word calls and in `?`; the held key, the newest key winning, `?` taking the held key first; the break-off cell, with one Ctrl-C, two quick ones and two slow ones; and a count of how often KEY is called;
+- for checked builds, every error in the table, several ways each, with the whole report compared byte for byte against the reference (run with that build's own addresses); the stack overruns are compared against patterns, since stack sizes differ.
 
-The four editor builds are tested by typing at them (`testing/test_editor.py`), a line at a time as a person would: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, Backspace, and programs that read lines and keys. The CP/M ones also load files (empty, a whole record, a last line with no CR LF) and leave on Ctrl-C; the checked ones also hit every error and Ctrl-C and carry on in the editor.
+The four editor builds are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the cursor keys and arrows, Esc, editing a line in place, new, view, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
 
 The other eight games are also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`). The test setup is in `testing/` (see its README).
 

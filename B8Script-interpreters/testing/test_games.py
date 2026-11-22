@@ -169,11 +169,11 @@ KLONDIKE_WIN = (
 
 TESTS += [
     ('KLONDIKE', 'all 52 home', b'1' + KLONDIKE_WIN.encode() + b'n',
-     [b'KS KH KD KC', b'All 52 are home. You win!', b'Bye.']),
+     [b'KS Kh Kd KC', b'All 52 are home. You win!', b'Bye.']),
     ('KLONDIKE', 'bad moves', b'x173w3wf1f1xqn',
      [b'KLONDIKE   draw 1', b"That doesn't go there.", b'The waste is empty.', b'Bye.']),
     ('KLONDIKE', 'draw three, turn the waste over', b'3' + b'd' * 9 + b'qn',
-     [b'3S 2C AH', b'\x1b[3;3H  \x1b[3;6H0 ', b'Bye.']),
+     [b'3S 2C Ah', b'\x1b[3;3H  \x1b[3;6H0 ', b'Bye.']),
 ]
 
 

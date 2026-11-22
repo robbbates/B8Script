@@ -180,6 +180,75 @@ TESTS += [
 ]
 
 
+# Lights Out, seed 1: three levels solved (by chasing the lights down from the
+# top row, with the best of the 32 first rows), then q. And a new puzzle, then q
+LIGHTS_WIN = b'xaaww sss dddd yaaww d dd aas ass ydww d aaaas dddd aas ds ds '
+
+TESTS += [
+    ('LIGHTS', 'three levels', LIGHTS_WIN + b'n',
+     [b'Made with 3 presses.', b'Level 2', b'Made with 7 presses.', b'All out in 7 moves! Next level?', b'Bye.']),
+    ('LIGHTS', 'a new puzzle, then quit', b'x  n q',
+     [b'Level 1    Moves 2', b'Level 1    Moves 0', b'Bye.']),
+]
+
+
+# Fifteen, seed 1: the 8-puzzle solved by a breadth-first search, and the
+# 15-puzzle by a weighted A* search (not the fewest moves), on a model of the
+# board read from the game. Then giving up
+TESTS += [
+    ('FIFTEEN', 'the 8-puzzle', b'x3ddwaawddsasawdsdwawan',
+     [b'Moves 20', b'Solved in 20 moves! Play again?', b'Bye.']),
+    ('FIFTEEN', 'the 15-puzzle', b'xywawwassawdsdsdwaasdwaasdwddwawdssawwdsssawwawasddwaassdddwwassawdwaasdsawwn',
+     [b'Moves 74', b'Solved in 74 moves! Play again?', b'Bye.']),
+    ('FIFTEEN', 'three slides down, the rest blocked, give up', b'xywwwwwwddddddqn',
+     [b'Moves 3', b'Play again?', b'Bye.']),
+]
+
+
+# Greed, seed 1: a whole game, as played by a bot on a model of the field read
+# from the game, taking the move that leaves it most moves next. You start in
+# the left column, where only d x c are open
+TESTS += [
+    ('GREED', 'no moves left', b'xdzxedzxeeddcxecdqqdzcwcwqwaaaazcaqdcczaeexqqxn',
+     [b'Score 256  18.2%', b'No moves left. Play again?', b'Bye.']),
+    ('GREED', 'the moves shown, a blocked one, quit', b'xhwQn',
+     [b'You can go: d x c ', b"You can't go that way.", b'Score 0  0.0%', b'Play again?', b'Bye.']),
+]
+
+
+# Reversi, seed 1: games against a small minimax player in Python, reading the
+# board from the game (three moves deep wins as X and as O; two deep loses)
+TESTS += [
+    ('REVERSI', 'you win as X', b'xyd3b6c2d1f5f3a5b1h3c7a3e1g6f1e2a4h5h7f6f8a7c4d7h1d8b8b2h2b7g7n',
+     [b'You are X, I am O.', b'I play ', b'You win 37 to 27.', b'Bye.']),
+    ('REVERSI', 'you win as O', b'xnd6d3b3d8a5a3e1c1f4f8e2c2a1b5a7c5c8e3a8g4f1h3h5h1e6g5f6h7h8g2n',
+     [b'You are O, I am X.', b'You win 48 to 16.', b'Bye.']),
+    ('REVERSI', 'it wins', b'xyd3b6c2d1d6g3b1g6h6h4a5e1c4c3a3a4g1d8h3h1a7c6e6f8f7f6b8b7g7h7n',
+     [b'I win 42 to 22.', b'Bye.']),
+    ('REVERSI', 'marks, a bad cell, the cursor, resign', b'xymd4a1 d3qn',
+     [b'\x1b[6;11H+', b"You can't play there.", b'I play ', b'X 4   O 1', b'You resign.', b'Bye.']),
+]
+
+
+# Battleship, seed 1: firing only at my ships (read from the game), and only
+# at water, which lets it find and sink the whole fleet. And placing, firing
+# twice at a cell, and giving up
+BATTLE_MISS = (b'a0b0c0d0e0f0g0h0i0j0a1b1c1d1e1f1g1h1i1j1a2b2c2f2g2h2i2j2a3b3c3d3e3f3g3h3i3j3'
+               b'a4g4h4i4j4a5b5c5d5e5g5h5i5a6b6c6e6g6h6i6a7b7c7e7g7h7i7a8b8c8e8g8h8i8j8a9b9c9d9e9f9g9h9i9j9')
+
+TESTS += [
+    ('BATTLE', 'you win', b'x     d2e2b4c4d4e4f4f5j5d6f6j6d7f7j7d8f8n',
+     [b'You fire at D2: a hit.', b'You sank my destroyer!', b'I sank your battleship!',
+      b'You sank my whole fleet. You win!', b'Bye.']),
+    ('BATTLE', 'it wins', b'xr' + BATTLE_MISS + b'n',
+     [b'You fire at A0: a miss.', b'I sank your carrier!', b'I sank your destroyer!',
+      b'I sank your whole fleet. I win!', b'Bye.']),
+    ('BATTLE', 'placing, a cell twice, give up', b'x ww ss ra0a0qn',
+     [b'Place your battleship (4 cells).', b"Ships can't overlap.", b'You fire at A0: a miss.',
+      b'You already fired at A0.', b'You give up.', b'Bye.']),
+]
+
+
 def play(path, keys, steps=20_000_000):
     r = Play(open(path, 'rb').read(), keys, checked=True)
     out = r.run(steps)

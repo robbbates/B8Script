@@ -94,7 +94,8 @@ Decided (Nov 22).
 
 Decided (Nov 22).
 
-- **The loan:** 10,000 at the start, kept in one cell, never above 30,000. Each day adds 1% (debt ÷ 100). Pay it off in any amount when docked.
+- **The start:** the loan paid for your Courier: you begin owing 5,000, the Courier's price, with 1,000 in cash, enough for a first cargo and fuel.
+- **The loan** is kept in one cell, never above 30,000. Each day adds 1% (debt ÷ 100). Pay it off in any amount when docked.
 - **Not paying:** once the debt reaches 30,000, debt collectors turn up as encounters (pay, fight or flee) until it is paid. No game over for debt; it reuses the encounter and duel code.
 - **Winning:** the loan repaid and all six rare items held. The score is the number of days taken: fewer is better.
 - **Six rare items,** one bit each, so the collection is one save-code character. Trophies only: they do nothing once held (perks are under Later).
@@ -112,24 +113,29 @@ Decided (Nov 22).
 - **Damage:** a laser hit is level × a roll of 1 to 4, less the target's shield level, at least 1. A missile does 15 and ignores shields. Fleeing works on a 50% roll; on a failure the enemy gets a free shot.
 - **The enemy:** closes in, fires lasers when close and a missile when it has one, and flees below a quarter of its hull.
 - **Winning:** a bounty for a pirate or a collector, and a chance of salvage (a few tonnes of a random good).
-- **Losing:** with an escape pod (2,000, used up), you lose the ship and cargo and wake at home in a new Courier, whose price is added to the loan (up to the cap). Debt and rare items are kept. Without one, the game is over.
+- **Losing:** with an escape pod (2,000, used up), you lose the ship and cargo and wake at home in a new Courier, whose 5,000 is added to the loan (up to the cap). Debt and rare items are kept. Without one, the game is over.
 
 ### Law and smuggling
 
-- **Decided:** safety levels and contraband.
-- **To detail:** the levels (say lawless, frontier, policed); how a scan works, and fines or seizure; whether a record or legal status lasts, and what it changes (police attack, ports refuse you).
+Decided (Nov 22).
+
+- **Safety levels:** policed, frontier, lawless, by distance from home (see the map).
+- **Contraband prices** use the economy's formula, with the normal stock set by safety instead of type: 50 in lawless systems (cheap), 30 in frontier ones, 10 in policed ones (dear). Buy at about half the base price at the edges and sell for about one and a half times it near the centre. No black market of its own.
+- **A police encounter is a scan.** Contraband in the ordinary hold is always found. You then choose: **submit** (it is confiscated, and you are fined its base price per tonne) or **resist** (a duel with the police; win it and you are wanted).
+- **Wanted:** a counter of days. While it runs, police attack on sight in policed systems, and the police encounter chance there rises from 10% to 15% (to tune). It clears after 20 days without trouble.
+- **A hidden hold** (3,000, any class) carries up to 10 tonnes that a scan misses 3 times in 4.
 
 ### Ship and upgrades
 
 Decided (Nov 22).
 
-**Stats:** cargo, fuel tank, hull, laser level, shield level, missiles, an escape pod (see Combat). (A hidden hold is weighed under Law.)
+**Stats:** cargo, fuel tank, hull, laser level, shield level, missiles, an escape pod (see Combat), a hidden hold (see Law).
 
 **Classes.** Every class can add up to 3 cargo pods (+10 tonnes each) and 2 tank upgrades (+2 each), so cargo never passes 100 and the tank never passes 14 (the economy and the map rely on both).
 
 | Class | Cargo | Tank | Hull | Laser max | Shield max | Price |
 |---|---|---|---|---|---|---|
-| Courier (start) | 20 | 7 | 30 | 2 | 2 | — |
+| Courier (start) | 20 | 7 | 30 | 2 | 2 | 5,000 |
 | Freighter | 50 | 8 | 50 | 2 | 3 | 9,000 |
 | Raider | 30 | 10 | 60 | 4 | 4 | 12,000 |
 | Clipper | 70 | 10 | 80 | 4 | 4 | 30,000 |

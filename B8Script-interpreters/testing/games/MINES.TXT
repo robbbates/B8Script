@@ -1,0 +1,200 @@
+"MINESWEEPER for B8Script. 16 x 16 cells, 40 mines. Open every cell without a mine.";
+"Keys: w a s d move the cursor, space opens a cell, f flags or unflags it, q quits.";
+"An open cell shows how many of its eight neighbours hold mines. The mines are laid";
+"after the first cell is opened, never on it. Opening a cell with no mines around it";
+"opens its neighbours too: a flood fill with its own stack of cells in a heap block,";
+"so the return stack never grows with the board.";
+
+"How to read the notes. ( a b -- c ) is a stack effect: what a word takes and leaves,";
+"the top of the stack on the right. [X ... ] defines word X; calling X runs its body.";
+"Every comment is a string that is dropped at once (the semicolon), so it does nothing.";
+
+"The plan in short:";
+"  1. Two tables of bytes describe the board: m (what is under each cell) and s (what";
+"     the player sees: hidden, flagged or open). Both have a one-cell border, so every";
+"     real cell has eight neighbours at fixed offsets and no edge tests are needed.";
+"  2. B lays the mines and, in the same step, adds 1 to the count of each neighbour.";
+"  3. O opens a cell. A zero count means no mine nearby, so its neighbours are opened";
+"     too, and so on: the flood fill. It uses an explicit stack (z) instead of recursion.";
+"  4. The main loop reads a key, moves the cursor, opens or flags, and ends on a mine,";
+"     on 216 open cells (256 cells less 40 mines), or on q.";
+
+"Variables";
+"  m  18 x 18 bytes, the board with a border, cell = (y+1)*18 + x+1:";
+"     16 if a mine, plus the number of mines around it";
+"  s  18 x 18 bytes: 0 hidden, 1 flagged, 2 open; the border counts as open";
+"  z  the fill's stack, 256 cells   p  its size in bytes";
+"  x y  the cursor (0-15)   o  cells open   h  flags   e  mines laid   g  hit a mine";
+"  n  key   a c d f k v i  scratch   r  random state";
+
+"Data layout. The board is 16 columns by 16 rows, plus a border row above and below and";
+"a border column at each side, so 18 x 18 = 324 bytes. A cell (x,y), each 0 to 15, is";
+"byte number (y+1)*18 + x+1. Border bytes are the ones with column 0 or 17 or row 0 or 17.";
+"A byte of m holds 16 for a mine, plus the neighbour count (0 to 8) in its low four bits.";
+"So m[c] above 15 means a mine, and m[c] and 15 is the count of mines around.";
+"The eight neighbours of cell c are at c plus -19 -18 -17 -1 1 17 18 19.";
+"A byte of s is 0 hidden, 1 flagged, 2 open. The border is set to 2 (open) from the start,";
+"so the fill, which only opens hidden cells, never walks off the edge.";
+
+"Routines";
+
+"M: ( n d -- r )  the remainder of n by d. Divide leaves quotient and remainder;";
+"   the swap and drop keep the remainder.";
+[M/%;]
+
+"R: ( n -- 0..n-1 )  a random number below n, from the state in r.";
+"   r@75*74+:r! is a linear congruential step: r becomes r*75+74 (a cell wraps at 65536)";
+"   and a copy is left. The low bits of such a generator are poor, so dividing by 256";
+"   and masking with 255 takes the upper byte (0 to 255) of the new state. Then the swap";
+"   puts n on top for M, which reduces that byte to 0..n-1.";
+[R r@75*74+:r! 256/;255& %M]
+"   Exactly: for a state of 0 to 32767 this is its high byte. Above that the state reads as";
+"   negative and the division rounds toward zero, so the byte comes out one more than the";
+"   high byte (255 turning into 0) unless the low byte is 0. It is still a number 0 to 255.";
+
+"K: ( -- key )  wait for a key, and stir the random state while waiting.";
+"   A dummy 0 starts the loop. Each pass drops the previous test value, adds 1 to r,";
+"   takes a quick look for a key (1?, gives 0 if none), and keeps a copy for the test.";
+"   The loop ends when the value is not 0, leaving the key. How long the player took";
+"   decides r, so the mines are laid differently each game.";
+[K0 1(;r@1+r!1?:0=)]
+
+"L: new line (CR then LF).";
+[L13'10']
+
+"Screen. C: clear   Y: row column -- move the cursor   E: clear to the end of the line";
+"C clears the screen and homes the cursor (ESC [2J then ESC [H; in a string, ESC is";
+"written as a slash followed by a left bracket).";
+[C"/[[2J/[[H"$]
+"Y sends ESC [ row ; column H. 27' and 91' print ESC and [. The swap brings the row";
+"to the top to print first, then 59' is the semicolon, # prints the column, 72' is H.";
+"Rows and columns count from 1.";
+[Y27'91'%#59'#72']
+[E"/[[K"$]
+
+"U: ( k c -- n )  the neighbour k (0-7) of cell c: the offsets -19 -18 -17 -1 1 17 18 19,";
+"   plus 70. The offsets are kept as the characters 3 4 5 E G W X Y (codes 51 52 53 69";
+"   71 87 88 89), each 70 more than its offset, so that they print as plain text.";
+"   The swap puts c below k; the string address plus k fetches the character; 70- turns";
+"   it back into the offset; + adds it to c.";
+"   So k is 0 up-left, 1 up, 2 up-right, 3 left, 4 right, 5 down-left, 6 down, 7 down-right.";
+[U %"345EGWXY"+,70-+]
+
+"P: ( c -- )  move the cursor to cell c. dividing c by 18 gives y+1 and x+1.";
+"   On screen, cell (x,y) is at line y+4 and column 2x+5: the board frame has its top";
+"   border on line 3, '| ' at columns 3 and 4, and each cell takes two columns.";
+"   The column is doubled and 3 added (2(x+1)+3); the swap lets the row get 3 added;";
+"   a last swap puts row first for Y.";
+[P 18/ :+3+ % 3+ % Y]
+
+"Q: ( -- c )  the cell number under the cursor: (y+1)*18 + x+1.";
+[Q y@1+18* x@1++]
+
+"V: ( c -- )  draw cell c: # hidden, apostrophe flagged, a digit or a space when open.";
+"   :P moves the cursor to c and keeps c, which becomes a. v is the cell's state in s.";
+"   A hidden cell prints 35 ('#'), a flagged one prints 39 (apostrophe). An open one";
+"   (state 2) shows the count m[a] and 15. A count of 0 gives a space: :0=( ; -16 0)";
+"   drops the 0 and uses -16 instead, so that adding 48 gives 32 for a space, or the";
+"   count plus 48 for a digit character.";
+[V :P a! a@s@+,v! v@0=( 35' 0) v@1=( 39' 0) v@2=( a@m@+,15& :0=( ; -16 0) 48+' 0)]
+
+"B: ( c -- )  lay 40 mines at random, none on cell c, and count them into their neighbours.";
+"   f is the first cell the player opened. The counter 40 is kept on the stack.";
+"   Inner loop: pick a random cell a = (16R+1)*18 + 16R+1 (a random row and column inside";
+"   the border) and repeat while a is f or already has a mine (m[a] above 15).";
+"   Then add 16 to m[a] to make it a mine: a@m@+: is the address twice over, , fetches the";
+"   byte, 16+ adds, the swap puts the address back on top and . stores it.";
+"   Then the eight neighbours, k from 0 to 7: k@a@U is a neighbour cell; its byte gets 1";
+"   added the same way. Each mine so adds 1 to the counts around it. Mines also add to";
+"   the counts of neighbouring mines, which is harmless, since a mine is never drawn as a";
+"   number. Neighbours in the border get counted too, but are never shown.";
+"   1-: ) counts the 40 down; the ; drops it at the end.";
+[B f! 40 1( 1( 16R1+18* 16R1++ a! a@f@= a@m@+,15>| )
+   a@m@+:,16+%. 0k! 1( k@a@U m@+:,1+%. k@1+:k! 8<) 1-: );]
+
+"O: ( c -- )  open cell c. A mine sets g. Otherwise a fill: each cell taken off the stack";
+"   is drawn, and if no mines are round it, its hidden neighbours are opened and stacked";
+"   Part 1, guards. Store c in a. If its state in s is not 0 (already open or flagged)";
+"   leave the word at once (the break \ is true when the byte is not 0). If the cell is a";
+"   mine (m[a] above 15), set g and leave: the flag is copied so one copy runs the block";
+"   (which sets g) and the other makes the break.";
+"   Part 2, start the fill. Mark c open (2 in s), count it (o), and put c on the fill";
+"   stack: z holds the stack's address, p its size in bytes. A cell takes 2 bytes.";
+"   Part 3, the loop. If the stack is empty (p is 0) leave the loop. Otherwise take a cell";
+"   off the top: p drops by 2, and z@+@ fetches the cell at z+p into c. Draw it (V).";
+"   If its byte in m is 0 (no mine in it or next to it) look at its eight neighbours d;";
+"   each one that is hidden (state 0, so not flagged) is marked open, counted, drawn later";
+"   when it is popped, and pushed on the stack (d is stored at z+p and p grows by 2).";
+"   Marking a cell open when it is pushed means it can be pushed once only, so the stack";
+"   never needs more than the 256 cells it has room for. A cell with a count (not 0) is";
+"   only drawn: it stops the fill there.";
+[O a! a@s@+,\ a@m@+,15>:( 1g! 0)\
+   2a@s@+. o@1+o! a@z@! 2p!
+   1( p@0=\ p@2-:p! z@+@c! c@V
+      c@m@+,0=( 0k! 1( k@c@U d! d@s@+,0=(
+            2d@s@+. o@1+o! d@z@p@+! p@2+p! 0)
+         k@1+:k! 8<) 0)
+   1)]
+
+"F: flag or unflag the cell under the cursor";
+"   Only a hidden or flagged cell (state below 2) can change. The new state is 1 minus the";
+"   old one (0 becomes 1, 1 becomes 0), stored in s. The flag count h changes by +1 when";
+"   a flag was put on and -1 when removed: with ns the new state, 2*ns-1 is +1 or -1.";
+"   Then the cell is redrawn (V).";
+[F Q a! a@s@+,v! v@2<( 1v@- a@s@+. h@1v@-:+1-+h! a@V 0)]
+
+"A: the mines left to flag: 40 minus the flags put. Printed on line 21; E clears the rest.";
+[A 21 3Y "Mines "$ 40h@-# "  "$ E]
+
+"W: show where the mines were: * a mine, X a flag on a cell with none";
+"   Every real cell, row j and column i from 1 to 16 (the border is skipped), c = j*18+i.";
+"   A mine (m[c] above 15) that is not flagged gets a * . A cell that is not a mine";
+"   (m[c] below 16) but is flagged gets an X. A flag on a mine stays an apostrophe.";
+[W 1j! 1( 1i! 1( j@18*i@+c!
+      c@m@+,15> c@s@+,1=0=&( c@P 42' 0) c@m@+,16< c@s@+,1=&( c@P 88' 0)
+   i@1+:i! 17<) j@1+:j! 17<)]
+
+"D: draw the empty board: the title on line 2, a border on line 3, sixteen lines of";
+"   sixteen hidden cells (lines 4 to 19, j+3), a border on line 20, then the mine count.";
+"   Each row text has a space between the cells; the cell at x is the # at column 2x+5.";
+[D C 2 3Y "MINESWEEPER    w a s d move   space opens   f flags   q quits"$
+   3 3Y "+---------------------------------+"$
+   1j! 1( j@3+ 3Y "| # # # # # # # # # # # # # # # # |"$ j@1+:j! 17<)
+   20 3Y "+---------------------------------+"$ A]
+
+"Main program";
+
+"Make m and s (324 bytes each), the fill stack z (512 bytes: 256 cells of 2 bytes) and";
+"start the random state at 0";
+324_m! 324_s! 512_z! 0r!
+"Title screen and instructions. K waits for a key (stirring r); the ; drops the key.";
+C "MINESWEEPER"$ L L "Open every cell that has no mine. A number tells how many of the eight cells"$ L
+"around it have mines. w a s d move, space opens, f flags a mine, q quits."$ L L "Press a key."$ K;
+
+"Outer loop: one game per pass. Set up the two tables. For each byte i of the 324:";
+"m[i] is cleared. In the same loop s[i] is 2 for a border byte and 0 for a cell.";
+"i@18M:0= is column 0; %17= is column 17 (the stack keeps both flags, joined with |);";
+"i@18< is the top row and i@305> the bottom row (bytes from 306). The three flags are";
+"joined with || and 2& makes 2 or 0 (a flag is all ones, so 2& gives the bit).";
+1( 0i! 1( 0i@m@+. i@18M:0= %17=| i@18< i@305>||  2&i@s@+. i@1+:i! 324<)
+   "No cells open, no hit, no mines laid, no flags. The cursor starts at (7,7). D draws.";
+   0o! 0g! 0e! 0h! 7x! 7y! D
+   "Turn loop: one key per pass. Q P puts the cursor on the current cell, 0? waits for a";
+   "key and 32| folds it to lower case. Then w a s d move the cursor if it will stay in";
+   "0 to 15 (the flag and the test are joined with &, so the move is made only if both).";
+   1( Q P 0? 32| n!
+      n@119= y@0>&( y@1-y! 0) n@115= y@15<&( y@1+y! 0)
+      n@97= x@0>&( x@1-x! 0) n@100= x@15<&( x@1+x! 0)
+      "Space (32) on a hidden cell: Q s@+, is its state. On the first opening lay the mines";
+      "(B, which spares this cell) and set e. Then open it with O.";
+      n@32= Q s@+,0= &( e@0=( Q B 1e! 0) Q O 0)
+      "f flags or unflags the cell, and the count of mines left is redrawn.";
+      n@102=( F A 0)
+   "Go on while no mine was hit (g is 0), fewer than 216 cells are open, and the key was";
+   "not q (113).";
+   g@0= o@216<& n@113=0=&)
+   "After the loop: a mine hit shows all mines (W) and BOOM; 216 open cells is a win.";
+   g@( W 22 3Y "BOOM! You hit a mine."$ 0) o@216=( 22 3Y "You cleared the field!"$ 0)
+   "Ask whether to play again. 121 is y; any other key ends the game.";
+   23 3Y "Play again? (y//n) "$ E K 121=)
+L "Bye."$ L

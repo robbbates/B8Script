@@ -1,5 +1,6 @@
-"""Run every game in games/ on every build under DIR for a short while and
-compare what it prints with the reference interpreter.
+"""Run every game in games/, both the stripped NAME.B8S and the commented
+NAME.TXT, on every build under DIR for a short while and compare what it
+prints with the reference interpreter.
 
 usage: gamecheck.py OUTDIR      (OUTDIR holds z80/, 8080/, 6502/, 6809/ from build.sh,
                                  and win32/ from build_win32.sh)
@@ -24,7 +25,7 @@ for cpu in ('z80', '8080', '6502', '6809', 'win32'):
             continue
         cpm = '-cpm' in name
         short = []
-        for g in sorted(glob.glob(f'{here}/games/*.B8S')):
+        for g in sorted(glob.glob(f'{here}/games/*.B8S') + glob.glob(f'{here}/games/*.TXT')):
             prog = open(g, 'rb').read()
             exp = Ref(prog, INP, cpm=cpm, retbyte={'6502': 0x60, '6809': 0x39, 'win32': 0xC3}.get(cpu, 0xC9)).run(300_000)
             if cpu in ('z80', '8080'):
@@ -43,6 +44,6 @@ for cpu in ('z80', '8080', '6502', '6809', 'win32'):
                 d = next((i for i in range(k) if got[i] != exp[i]), k)
                 print(f'  {name}: {os.path.basename(g)} differs at byte {d} of {k}: got {got[max(0,d-20):d+20]!r} exp {exp[max(0,d-20):d+20]!r}')
             short.append(k)
-        print(f'{name:24} {len(short)} games, {min(short)}-{max(short)} bytes of output compared')
+        print(f'{name:24} {len(short)} programs, {min(short)}-{max(short)} bytes of output compared')
 print('games:', 'all match' if not bad else f'{bad} DIFFER')
 sys.exit(1 if bad else 0)

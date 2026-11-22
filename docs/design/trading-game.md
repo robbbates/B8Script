@@ -28,7 +28,7 @@ The game has to stay easy to write, read and test. These rules are part of the d
 | 7 | Growth | Ship upgrades, plus 3 or 4 ship classes to buy. Colonies later |
 | 8 | Besides trading | Contracts (deliveries, passengers, bounties) and rumours |
 | 9 | Screen | Fixed panels: status, the chart or the market, a message log. Only what changes is redrawn |
-| 10 | Saving | A save code: the seed and the player's state, printed as letters to type back in |
+| 10 | Saving | A save code: the seed and the player's state, bit-packed into base-64 characters with a checksum |
 | 11 | Names | System names generated from a syllable table |
 
 ## The loop
@@ -165,8 +165,13 @@ A first sketch:
 
 ### Saving
 
-- **Decided:** a save code typed back in; the galaxy comes from the seed, and stock levels are rebuilt on loading.
-- **To detail:** exactly what is saved (seed, day, money, debt, position, cargo, ship and upgrades, legal status, rank, rare items, contract); the alphabet and packing; a check so a mistyped code is caught; about how long it is (aim for 40 characters or fewer).
+Decided (Nov 22): the method. What exactly is saved is settled last, once every other part is.
+
+- **A save code typed or pasted back in.** The galaxy comes from the seed; stock levels are rebuilt on loading, not saved.
+- **A bit packer:** each value goes in at its own width, and the code prints 6 bits per character; unpacking reverses it. The game's numbers are not scaled to suit the code.
+- **Base 64:** A–Z, a–z, 0–9, `-` and `_`. Most players will copy and paste the code, and typing it by hand is still bearable. Upper and lower case differ.
+- **One checksum character** at the end, so a mistyped or mangled code is refused, not loaded wrong.
+- **Length:** about 35 characters for everything estimated so far (about 210 bits), plus the checksum.
 
 ### Names
 

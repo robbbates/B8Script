@@ -266,11 +266,24 @@ TESTS += [
      [b'Buy Machinery: how many (Return for 18)? ', b'Bought 18 t of Machinery for 954.',
       b'Docked at Talo.', b'Sold 18 t of Machinery for 1188.', b'Cr 1234']),
     ('IDOL', 'an upgrade, then too little money', b'xysbsbr',
-     [b'Shield      \x1b[5;17H0 of 2\x1b[5;46H  1000', b'Bought: shield level.',
+     [b'Shield\x1b[5;17H0 of 2\x1b[5;46H  1000', b'Bought: Shield.',
       b'Courier L1 S1 M0', b'Cr 0\x1b', b"You can't pay for that.", b'The hull needs no repair.']),
     ('IDOL', 'ships at a high-tech system, at the trade-in price', b'xsss\rysssssssb',
      [b'Docked at Orelma.', b'Freighter\x1b[12;17H50 t, tank 8, hull 50\x1b[12;46H  6500',
       b'Clipper\x1b[14;17H70 t, tank 10, hull 80\x1b[14;46H 27500', b'You fly one already.']),
+    # two missiles bought at home win against the level 0 pirate at Bequon
+    ('IDOL', 'a duel won with missiles', b'xyssbbc' + b's' * 11 + b'\rmm',
+     [b'Bought: Missile.', b'Duel: pirate ship, level 0', b'Your missile hits for 15.',
+      b'You win. A bounty of 250.', b'You salvage 3 t of Ore.', b'Docked at Bequon.']),
+    ('IDOL', 'a duel lost: game over', b'x' + b's' * 16 + b'\rc' + b'l' * 30 + b'x',
+     [b'Duel: pirate ship, level 1', b'You close in.', b'The pirate hits you for ',
+      b'Your ship is destroyed, and you with it. Game over.', b'Press a key.', b'Bye.']),
+    # the police scan you on the way back home on day 3
+    ('IDOL', 'a police scan: submit', b'xmssssssb5\rc\r\rs',
+     [b'Bought 5 t of Narcotics for 740.', b'The police find 5 t of contraband. s submits, r resists.',
+      b'They take it and fine you 600.', b'Docked at Xeva.', b'Cr 260']),
+    ('IDOL', 'a police scan: resist', b'xmssssssb5\rc\r\rrf',
+     [b'You resist the police!', b'Duel: police ship, level 3', b'Wanted 20']),
 ]
 
 

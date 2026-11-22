@@ -111,7 +111,7 @@ Decided (Nov 22).
 - **The duel** tracks hull, shields and a range, far or close.
 - **Your actions:** fire lasers (close only), launch a missile, close in, pull back, flee (far only), pay (credits or cargo). One key each.
 - **Damage:** a laser hit is level × a roll of 1 to 4, less the target's shield level, at least 1. A missile does 15 and ignores shields. Fleeing works on a 50% roll; on a failure the enemy gets a free shot.
-- **The enemy:** closes in, fires lasers when close and a missile when it has one, and flees below a quarter of its hull.
+- **The enemy:** when far, fires a missile when it has one and otherwise closes in on a roll of 1 in 2; fires lasers when close; and flees below a quarter of its hull. (changed: it always closed in, so fleeing, which needs the far range, worked only on the first turn, and pulling back was no use.)
 - **Winning:** a bounty for a pirate or a collector, and a chance of salvage (a few tonnes of a random good).
 - **Losing:** with an escape pod (2,000, used up), you lose the ship and cargo and wake at home in a new Courier, whose 5,000 is added to the loan (up to the cap). Debt and idol parts are kept. Without one, the game is over.
 

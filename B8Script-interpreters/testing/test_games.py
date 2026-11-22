@@ -205,6 +205,17 @@ TESTS += [
 ]
 
 
+# Greed, seed 1: a whole game, as played by a bot on a model of the field read
+# from the game, taking the move that leaves it most moves next. You start in
+# the left column, where only d x c are open
+TESTS += [
+    ('GREED', 'no moves left', b'xdzxedzxeeddcxecdqqdzcwcwqwaaaazcaqdcczaeexqqxn',
+     [b'Score 256  18.2%', b'No moves left. Play again?', b'Bye.']),
+    ('GREED', 'the moves shown, a blocked one, quit', b'xhwQn',
+     [b'You can go: d x c ', b"You can't go that way.", b'Score 0  0.0%', b'Play again?', b'Bye.']),
+]
+
+
 def play(path, keys, steps=20_000_000):
     r = Play(open(path, 'rb').read(), keys, checked=True)
     out = r.run(steps)

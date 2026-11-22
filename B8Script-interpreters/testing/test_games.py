@@ -4,6 +4,9 @@ usage: test_games.py [NAME...]      (run by hand, like the other test scripts)
 
 Every test runs on both versions of the game, the stripped NAME.B8S and the
 commented NAME.TXT (where there is one), and the two must print exactly the same.
+A NAME.TXT in DOCS_ONLY is documentation only and need not run (it may not fit in
+memory), so only its NAME.B8S is run. For every game the NAME.B8S must be the
+NAME.TXT stripped (b8strip.py --same), which is checked first.
 
 Each test types a fixed key sequence at a game and checks that what it prints
 holds the messages expected: a win, a loss or some other known message. The
@@ -19,6 +22,9 @@ import sys, os, re
 here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, here)
 from ref import Ref, NeedKey
+from b8strip import strip
+
+DOCS_ONLY = {'IDOL.TXT'}
 
 
 class Play(Ref):
@@ -249,6 +255,15 @@ TESTS += [
 ]
 
 
+# Idol, seed 1: home is Vatibe (Industry, policed). The chart chooses the nearest
+# system in range; s steps to the next farther, Return jumps
+TESTS += [
+    ('IDOL', 'fly: step, jump, refuel', b'xss\rf',
+     [b'Docked at Vatibe.', b'Docked at Xela.', b'Day 2', b'Fuel 4/7', b'Debt 5050',
+      b'Refuelled 3 units for 60.', b'Cr 940']),
+]
+
+
 def play(path, keys, steps=20_000_000):
     r = Play(open(path, 'rb').read(), keys, checked=True)
     out = r.run(steps)
@@ -258,12 +273,22 @@ def play(path, keys, steps=20_000_000):
 if __name__ == '__main__':
     want = [a.upper() for a in sys.argv[1:]]
     bad = 0
+    # the stripped NAME.B8S of every game must hold the same code as its NAME.TXT
+    for txt in sorted(os.listdir(os.path.join(here, 'games'))):
+        name, ext = os.path.splitext(txt)
+        if ext != '.TXT' or (want and name not in want):
+            continue
+        a, b = (strip(open(os.path.join(here, 'games', name + e), 'rb').read()) for e in ('.TXT', '.B8S'))
+        ok = a == b
+        bad += not ok
+        print(f'{"PASS" if ok else "FAIL"}  {name:9} {name}.B8S is {name}.TXT stripped')
     for game, what, keys, texts in TESTS:
         if want and game not in want:
             continue
         # both versions: the stripped NAME.B8S and the commented NAME.TXT. They
         # hold the same code, so they must print exactly the same
-        paths = [os.path.join(here, 'games', game + ext) for ext in ('.B8S', '.TXT')]
+        paths = [os.path.join(here, 'games', game + ext) for ext in ('.B8S', '.TXT')
+                 if game + ext not in DOCS_ONLY]
         runs = [play(p, keys) for p in paths if os.path.exists(p)]
         (r, out), (r2, out2) = runs[0], runs[-1]
         miss = [t for t in texts if t not in out]

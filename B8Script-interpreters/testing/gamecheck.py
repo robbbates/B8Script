@@ -7,6 +7,10 @@ usage: gamecheck.py OUTDIR      (OUTDIR holds z80/, 8080/, 6502/, 6809/ from bui
 
 The same keys are typed at each game. A run is cut off after a set amount of
 work, so only the output up to the shorter of the two runs is compared.
+
+A NAME.TXT listed in DOCS_ONLY is documentation only: it need not run (it may not
+fit in memory), so only its NAME.B8S is run. test_games.py checks that the .B8S
+is the .TXT stripped.
 """
 import sys, os, glob
 here = os.path.dirname(os.path.abspath(__file__))
@@ -15,6 +19,7 @@ from ref import Ref
 import harness_z80, harness_6502, harness_6809, harness_win32
 
 INP = b'y12345 nswe\rabc\r3\r7\r' * 20
+DOCS_ONLY = {'IDOL.TXT'}
 out = sys.argv[1]
 bad = 0
 for cpu in ('z80', '8080', '6502', '6809', 'win32'):
@@ -26,6 +31,8 @@ for cpu in ('z80', '8080', '6502', '6809', 'win32'):
         cpm = '-cpm' in name
         short = []
         for g in sorted(glob.glob(f'{here}/games/*.B8S') + glob.glob(f'{here}/games/*.TXT')):
+            if os.path.basename(g) in DOCS_ONLY:
+                continue
             prog = open(g, 'rb').read()
             exp = Ref(prog, INP, cpm=cpm, retbyte={'6502': 0x60, '6809': 0x39, 'win32': 0xC3}.get(cpu, 0xC9)).run(300_000)
             if cpu in ('z80', '8080'):

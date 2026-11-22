@@ -78,7 +78,7 @@ Decided (Nov 22).
 | Industrial | C | – | C | P | – | – |
 | High-tech | C | C | – | – | P | P |
 
-**Price.** Each good in each system has a normal stock N: 50 where it is produced, 10 where it is consumed, 30 otherwise. The buy price is base × (3N − stock) ÷ 2N: 1.5 × base when the stock is empty, base at N, 0.5 × base at 2N. The type needs no price factor of its own: the stock does the work. Base at most 200 and N at most 50 keep base × 3N under 32,767.
+**Price.** Each good in each system has a normal stock N: 50 where it is produced, 10 where it is consumed, 30 otherwise. The buy price is base × (90 − stock) ÷ 60, the old formula with N fixed at 30: 1.5 × base when the stock is empty, base at 30, 0.5 × base at 60, the most a system holds. At rest (stock at N) that is ⅔ base where produced, base where neither, 1⅓ base where consumed. The type needs no price factor of its own: the stock does the work. Every base is a multiple of 10, so the program works out base ÷ 10 × (90 − stock) ÷ 6. (changed: base × (3N − stock) ÷ 2N, with the stock recovering to that same N, gives exactly the base price at rest in every system, so producers were never cheap nor consumers dear, and no trade paid.)
 
 **Wobble.** Up to ±10% a day, worked out from the seed, the system, the good and the day, so nothing is stored.
 
@@ -120,7 +120,7 @@ Decided (Nov 22).
 Decided (Nov 22).
 
 - **Safety levels:** policed, frontier, lawless, by distance from home (see the map).
-- **Contraband prices** use the economy's formula, with the normal stock set by safety instead of type: 50 in lawless systems (cheap), 30 in frontier ones, 10 in policed ones (dear). Buy at about half the base price at the edges and sell for about one and a half times it near the centre. No black market of its own.
+- **Contraband prices** use the economy's formula, with the normal stock set by safety instead of type: 50 in lawless systems (cheap), 30 in frontier ones, 10 in policed ones (dear). Buy at about two thirds of the base price at the edges and sell for about four thirds of it near the centre. No black market of its own. (changed: about half and one and a half, with the price formula.)
 - **A police encounter is a scan.** Contraband in the ordinary hold is always found. You then choose: **submit** (it is confiscated, and you are fined its base price per tonne) or **resist** (a duel with the police; win it and you are wanted).
 - **Wanted:** a counter of days. While it runs, police attack on sight in policed systems, and the police encounter chance there rises from 10% to 15% (to tune). It clears after 20 days without trouble.
 - **A hidden hold** (3,000, any class) carries up to 10 tonnes that a scan misses 3 times in 4.

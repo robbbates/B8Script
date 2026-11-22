@@ -255,12 +255,16 @@ TESTS += [
 ]
 
 
-# Idol, seed 1: home is Vatibe (Industry, policed). The chart chooses the nearest
-# system in range; s steps to the next farther, Return jumps
+# Idol, seed 1: home is Xeva (Industry, policed). The chart chooses the nearest
+# system in range; s steps to the next farther, Return jumps. Xeva makes
+# machinery (cheap) and Talo, the eighth system out, is agricultural and wants it
 TESTS += [
     ('IDOL', 'fly: step, jump, refuel', b'xss\rf',
-     [b'Docked at Vatibe.', b'Docked at Xela.', b'Day 2', b'Fuel 4/7', b'Debt 5050',
+     [b'Docked at Xeva.', b'Docked at Kaxe.', b'Day 2', b'Fuel 4/7', b'Debt 5050',
       b'Refuelled 3 units for 60.', b'Cr 940']),
+    ('IDOL', 'a profitable trade', b'xmsssb\rcsssssss\rmsssx\r',
+     [b'Buy Machinery: how many (Return for 18)? ', b'Bought 18 t of Machinery for 954.',
+      b'Docked at Talo.', b'Sold 18 t of Machinery for 1188.', b'Cr 1234']),
 ]
 
 

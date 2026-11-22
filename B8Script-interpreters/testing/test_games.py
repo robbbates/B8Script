@@ -292,6 +292,17 @@ TESTS += [
      [b'Docked at Usis.', b"The Idol's Heart is here: 18 t of Medicine and 19 t of Textiles (t trades).",
       b"The Idol's Heart wants 18 t of Medicine and 19 t of Textiles.",
       b"The Idol's Heart lies at Usis: 18 t of Medicine and 19 t of Textiles."]),
+    # offers and rumours on docking; the second offer at Kaxe goes to Qucelo, by way of Rasoar
+    ('IDOL', 'offers and a rumour', b'x\rk\r',
+     [b'Docked at Xeva.', b"Rumour: the Idol's RHand lies at Damige.", b'Docked at Orbuso.',
+      b"Rumour: the Idol's LHand lies at Suelne.", b'Offer 1: 9 t of Food to Tixeta, by day 7, pay 880.',
+      b'Take which? ']),
+    ('IDOL', 'a contract delivered', b'xss\rk2fcsssssssssssss\rfcssssssssssssssssssssssssssss\r',
+     [b'Offer 2: 5 t of Ore to Qucelo, by day 9, pay 900.', b'Contract taken.', b'5 t Ore',
+      b'to Qucelo by day 9', b'Docked at Qucelo.', b'You deliver: 900.', b'Cr 840']),
+    ('IDOL', 'sealed cargo sold', b'xss\rk2mssssssssx',
+     [b'Sealed Ore', b'You sell the sealed cargo for 180. You are wanted, and owe more.',
+      b'Debt 5200', b'Wanted 20']),
 ]
 
 

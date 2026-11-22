@@ -12,7 +12,7 @@ The game has to stay easy to write, read and test. These rules are part of the d
 - **One screen layout.** Every view fits the same panels; no special screens beyond the market, the chart and combat.
 - **Easy numbers.** Pick quantities and methods that keep the maths simple in 16-bit cells (no multiply past 32,767, halving rather than odd divisions where it can be) and that pack neatly into the save code's printable characters (a value that fits 6 bits fits one character).
 - **Generate, don't store.** The galaxy, its names and its prices come from the seed and the day. Only the player's own state is kept and saved.
-- **Budgets.** The stripped `.B8S` at most 12 KB, and heap data at most 4 KB. If a feature doesn't fit, something else goes, or it waits.
+- **Budgets.** The stripped `.B8S` at most 14 KB, and heap data at most 4 KB. If a feature doesn't fit, something else goes, or it waits. (changed: 12 KB; version 1 came to about 14 KB with every feature in it, and the smallest build has about 28 KB for program and heap.)
 - **Version 1 is the list under [Version 1](#version-1).** Everything under [Later](#later) stays out until version 1 plays well.
 
 ## Decisions

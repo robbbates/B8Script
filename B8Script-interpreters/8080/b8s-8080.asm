@@ -1044,20 +1044,7 @@ rawk    EQU     KEY
 pollk:  CALL    rawk
         RZ                      ; no key
         STA     KEYBUF          ; held for the next '?'
-        CPI     3
-        RNZ
-        JMP     ctlc
-; getk: a key for '?', or A = 0 and the zero flag if there is none.
-getk:   PUSH    H               ; a held key goes first, and is taken out of
-        LXI     H,KEYBUF        ;   the buffer
-        MOV     A,M
-        MVI     M,0
-        POP     H
-        ORA     A
-        RNZ
-        CALL    rawk
-        RZ
-        CPI     3
+pk1:    CPI     3               ; (getk joins here)
         RNZ
 ; ctlc: Ctrl-C has been read. If the break key is on, that is the end. If
 ; the program has turned it off, wait about 250 ms for one more key: a
@@ -1083,6 +1070,17 @@ ct2:    POP     D               ; A = the second key, or 0 if none came
 ct3:    MVI     A,3
         ORA     A
         RET
+; getk: a key for '?', or A = 0 and the zero flag if there is none.
+getk:   PUSH    H               ; a held key goes first, and is taken out of
+        LXI     H,KEYBUF        ;   the buffer
+        MOV     A,M
+        MVI     M,0
+        POP     H
+        ORA     A
+        RNZ
+        CALL    rawk
+        RZ
+        JMP     pk1             ; Ctrl-C? If not, that is the key
         IF      1-CHECKED
 brk     EQU     endprog         ; the unchecked build stops without a word;
         ENDIF
@@ -1475,9 +1473,15 @@ fnul:   MOV     A,M
         ENDIF
         LXI     H,RSTOP         ; the return stack is empty
         SHLD    RSP
+        IF      (1-CHECKED)*(1-CPM)
+        MOV     H,A             ; (A = 0, from the search for the NUL) no key
+        MOV     L,A             ;   is held, and the break key is on (the
+        ENDIF                   ;   checked build has cleared these)
+        IF      (1-CHECKED)*CPM
+        LXI     H,0
+        ENDIF
         IF      1-CHECKED
-        LXI     H,0             ; no key is held, and the break key is on
-        SHLD    KEYBUF          ;   (the checked build has cleared these)
+        SHLD    KEYBUF
         ENDIF
         LXI     B,PROG          ; the IP
         RST     6               ; (its return address is thrown away)

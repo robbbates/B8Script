@@ -360,9 +360,15 @@ st2:    LD      (HEAP),HL
         RST     20h             ; minus the heap's first address: '_' may not
         LD      (NPEND),HL      ;   release below it
         ENDIF
+        IF      (1-CHECKED)*(1-EDITOR)*(1-CPM)
+        LD      H,A             ; (A = 0) no key is held, and the break key
+        LD      L,A             ;   is on (the checked build has cleared
+        ENDIF                   ;   these)
+        IF      (1-CHECKED)*(1-EDITOR)*CPM
+        LD      HL,0
+        ENDIF
         IF      (1-CHECKED)*(1-EDITOR)
-        LD      HL,0            ; no key is held, and the break key is on
-        LD      (KEYBUF),HL     ;   (the checked build has cleared these)
+        LD      (KEYBUF),HL
         ENDIF
         IF      1-EDITOR
         EXX
@@ -465,18 +471,18 @@ upper:  PUSH    BC              ; the return address, for rpushn
 ; The break key is looked at here, so at every word call and loop-back (and
 ; block entry and '{'), but only one time in 256: B', which nothing else
 ; uses, counts them. Reading the keyboard can be slow (it is a BDOS call
-; under CP/M), and this way it costs a loop two bytes and 13 T-states.
+; under CP/M), and this way it costs a loop four bytes and 14 T-states.
+; (DEC B, not DJNZ: its zero flag lasts through the EXX, so one EXX serves
+; both ways out.)
 rpushn: EXX
         POP     DE
         DEC     HL
         LD      (HL),D
         DEC     HL
         LD      (HL),E
-        DJNZ    rp1
+        DEC     B
         EXX
-        CALL    pollk
-        RST     30h
-rp1:    EXX
+        CALL    Z,pollk
         RST     30h
 
 ; ---- machine code: the grave -----------------------------------------------
@@ -1086,20 +1092,7 @@ rawk    EQU     KEY
 pollk:  CALL    rawk
         RET     Z               ; no key
         LD      (KEYBUF),A      ; held for the next '?'
-        CP      3
-        RET     NZ
-        JR      ctlc
-; getk: a key for '?', or A = 0 and the zero flag if there is none.
-getk:   PUSH    HL              ; a held key goes first, and is taken out of
-        LD      HL,KEYBUF       ;   the buffer
-        LD      A,(HL)
-        LD      (HL),0
-        POP     HL
-        OR      A
-        RET     NZ
-        CALL    rawk
-        RET     Z
-        CP      3
+pk1:    CP      3               ; (getk joins here)
         RET     NZ
 ; ctlc: Ctrl-C has been read. If the break key is on, that is the end. If
 ; the program has turned it off, wait about 250 ms for one more key: a
@@ -1107,7 +1100,7 @@ getk:   PUSH    HL              ; a held key goes first, and is taken out of
 ; and the Ctrl-C goes to the program: returns A = 3, zero flag clear.
 ctlc:   LD      A,(BRKOFF)
         OR      A
-        JP      Z,brk
+ct0:    JP      Z,brk
         PUSH    DE
         LD      DE,250*MSLOOP
 ct1:    CALL    rawk
@@ -1118,13 +1111,24 @@ ct1:    CALL    rawk
         JR      NZ,ct1
 ct2:    POP     DE              ; A = the second key, or 0 if none came
         CP      3
-        JP      Z,brk
+        JR      Z,ct0           ; (the zero flag takes the JP there)
         OR      A
         JR      Z,ct3
         LD      (KEYBUF),A
 ct3:    LD      A,3
         OR      A
         RET
+; getk: a key for '?', or A = 0 and the zero flag if there is none.
+getk:   PUSH    HL              ; a held key goes first, and is taken out of
+        LD      HL,KEYBUF       ;   the buffer
+        LD      A,(HL)
+        LD      (HL),0
+        POP     HL
+        OR      A
+        RET     NZ
+        CALL    rawk
+        RET     Z
+        JR      pk1             ; Ctrl-C? If not, that is the key
         IF      (1-CHECKED)*(1-EDITOR)
 brk     EQU     endprog         ; the unchecked build stops without a word
         ENDIF                   ;   (with the editor, both stacks are cleared);

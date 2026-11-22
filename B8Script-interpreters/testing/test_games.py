@@ -47,6 +47,14 @@ TESTS += [
 ]
 
 
+# Robots, seed 1. Waiting and teleporting clears the first wave; standing still
+# is fatal
+TESTS += [
+    ('ROBOTS', 'wave 2', b'x' + b' t' * 40 + b'Qn', [b'Wave   2', b'Robots 20', b'Bye.']),
+    ('ROBOTS', 'caught', b'x' + b's' * 13 + b'n', [b'Score  20', b'AARRrrgghhhh....  Score 20, wave 1.', b'Bye.']),
+]
+
+
 def play(game, keys, steps=20_000_000):
     prog = open(os.path.join(here, 'games', game + '.B8S'), 'rb').read()
     r = Play(prog, keys, checked=True)

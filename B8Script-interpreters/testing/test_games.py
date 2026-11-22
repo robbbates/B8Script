@@ -138,6 +138,24 @@ TESTS += [
 ]
 
 
+# Qubic, seed 1: two games against a simple player that takes a win, blocks a
+# line of three, and otherwise plays where it has most of its own lines
+QUBIC_LOST = '411 322 222 332 133 333 113 142'
+QUBIC_WON = '322 333 231 232 211 121 341 221 222 332 223 342 142 122 124 123'
+
+
+def typed(moves):
+    return b''.join(m.encode() + b'\r' for m in moves.split())
+
+
+TESTS += [
+    ('QUBIC', 'it wins', b'y' + typed(QUBIC_LOST) + b'n', [b'I play ', b'I win!', b'Bye.']),
+    ('QUBIC', 'you win', b'n' + typed(QUBIC_WON) + b'n', [b'I play ', b'You win!', b'Bye.']),
+    ('QUBIC', 'bad moves', b'y1 2 3\r12\r9 9 9\r123\r1x1x1\rqn',
+     [b'Type three digits, each 1 to 4', b'That cell is taken.', b'I play ']),
+]
+
+
 def play(game, keys, steps=20_000_000):
     prog = open(os.path.join(here, 'games', game + '.B8S'), 'rb').read()
     r = Play(prog, keys, checked=True)

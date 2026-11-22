@@ -1,0 +1,2034 @@
+     1                                  %define CHECKED 0
+     2                                  %define EDITOR 0
+     3                                  [map all B8SWIN.map]
+     4                                  %include "/home/user/B8Script/B8Script-interpreters/win32/b8s-win32.asm"
+     1                              <1> ; =============================================================================
+     2                              <1> ;  B8Script interpreter for 32-bit Windows (x86, console subsystem)
+     3                              <1> ;  Spec: docs/b8script.md (2026-11-21).
+     4                              <1> ;
+     5                              <1> ;  Assembler: NASM 2.16, flat binary output: the PE header is laid out by
+     6                              <1> ;  hand at the top of this file, so the output IS the .EXE:
+     7                              <1> ;
+     8                              <1> ;      nasm -f bin -o B8SWIN.EXE b8s-win32.asm
+     9                              <1> ;      nasm -f bin -DCHECKED=1 -o B8SWINC.EXE b8s-win32.asm
+    10                              <1> ;      nasm -f bin -DEDITOR=1 -o B8SWINE.EXE b8s-win32.asm
+    11                              <1> ;      nasm -f bin -DEDITOR=1 -DCHECKED=1 -o B8SWINEC.EXE b8s-win32.asm
+    12                              <1> ;
+    13                              <1> ;  Two switches (the defaults below, or -D on the command line):
+    14                              <1> ;    CHECKED  0 = no checks (spec: the programmer is responsible)
+    15                              <1> ;             1 = starts with every variable at 0 and every word undefined,
+    16                              <1> ;                 and stops on every error in the spec's table (and Ctrl-C)
+    17                              <1> ;                 with the four-line report, on the standard error handle.
+    18                              <1> ;    EDITOR   0 = a runner: B8SWIN PROG.B8S loads the file, runs it, exits
+    19                              <1> ;             1 = the line editor of the spec's suggested standard (the same
+    20                              <1> ;                 editor as the Z80's, key for key); the file named on the
+    21                              <1> ;                 command line is the program to start with.
+    22                              <1> ;
+    23                              <1> ;  In every build Ctrl-C stops a running program (an unchecked runner stops
+    24                              <1> ;  without a word): see the console layer for the rules, the held key and
+    25                              <1> ;  the break-off cell.
+    26                              <1> ; =============================================================================
+    27                              <1> 
+    28                              <1> %ifndef CHECKED
+    29                              <1> %define CHECKED 0
+    30                              <1> %endif
+    31                              <1> %ifndef EDITOR
+    32                              <1> %define EDITOR  0
+    33                              <1> %endif
+    34                              <1> 
+    35                              <1> ; -----------------------------------------------------------------------------
+    36                              <1> ;  The machine model
+    37                              <1> ;
+    38                              <1> ;  B8Script is defined for a 64 KB machine with 16-bit cells, and that is what
+    39                              <1> ;  runs here. The 64 KB arena sits at ARENA (00410000h), a multiple of 64 KB,
+    40                              <1> ;  inside the image (its last 64 KB of uninitialised space): the B8Script
+    41                              <1> ;  address a is the byte at ARENA + a. Because the arena is 64 KB aligned,
+    42                              <1> ;  "ARENA + a" is simply a 32-bit register whose high word is 0041h and whose
+    43                              <1> ;  low word is a. Every cell the interpreter keeps in a 32-bit register or
+    44                              <1> ;  stack slot is kept in that form, so it is at once the 16-bit cell (its low
+    45                              <1> ;  word) and a pointer to that cell's address:
+    46                              <1> ;
+    47                              <1> ;    EBX  TOS. 16-bit operations work on BX; EBX's high word is always 0041h,
+    48                              <1> ;         so [EBX] is the byte TOS points at.
+    49                              <1> ;    ESI  IP: a pointer to the next program character (LODSB reads it).
+    50                              <1> ;    ESP  the data stack: one dword per cell, low word the cell, high word
+    51                              <1> ;         0041h. [ESP] is NOS. It is the thread's own stack (the API calls
+    52                              <1> ;         push their arguments below it). V_DSTOP holds ESP for the empty
+    53                              <1> ;         stack.
+    54                              <1> ;    EDI  the return stack pointer: dword entries (IP values and cells parked
+    55                              <1> ;         with '{', all in the same form), growing down from RSTOP. A pop is
+    56                              <1> ;         MOV r,[EDI] / SCASD (SCASD only steps EDI on by 4).
+    57                              <1> ;    EBP  the address of `next`: every handler ends with JMP EBP (2 bytes),
+    58                              <1> ;         and the interpreter's own variables and the import address table
+    59                              <1> ;         lie within 127 bytes of `next`, so [EBP+d8] reaches them in 3-byte
+    60                              <1> ;         instructions. (V() below names them.)
+    61                              <1> ;    EAX ECX EDX  scratch. (The Windows API keeps EBX, ESI, EDI and EBP.)
+    62                              <1> ;
+    63                              <1> ;  Memory map of the arena (B8Script addresses):
+    64                              <1> ;    0000h-00FFh  page zero: unused, and left zero. An undefined word's cell
+    65                              <1> ;                 holds 0000h, so calling it runs into the NUL at 0000h; the
+    66                              <1> ;                 checked build sees that the IP is 0001h there and reports U.
+    67                              <1> ;    0100h        the letter page: A-Z at +00h..+33h, a-z at +40h..+73h (a
+    68                              <1> ;                 word's cell is 64 bytes below its variable's), the held key
+    69                              <1> ;                 at +7Ah, the break-off cell at +7Bh, the heap pointer at +7Ch,
+    70                              <1> ;                 and the -n? line buffer at +80h..+FFh (127 characters and CR;
+    71                              <1> ;                 the editor's input line uses it too)
+    72                              <1> ;    0200h        PROG: the program text, ending in NUL; the heap starts after
+    73                              <1> ;                 the NUL and may grow up to the heap limit, FF00h
+    74                              <1> ;    FF00h-FFFFh  above the limit: not the program's (unused)
+    75                              <1> ;  The stacks are outside the arena: the return stack is 112 entries below
+    76                              <1> ;  RSTOP (in the image's uninitialised space below the arena) and the data
+    77                              <1> ;  stack is the thread's stack (127 cells in the checked builds, as deep as
+    78                              <1> ;  the 1 MB stack reserve allows in the others).
+    79                              <1> ;
+    80                              <1> ;  The whole image (code, arena) is one section, readable, writable and
+    81                              <1> ;  executable, so machine code can run in the arena (see h_grave).
+    82                              <1> ; -----------------------------------------------------------------------------
+    83                              <1> 
+    84                              <1> IB      equ     400000h         ; ImageBase
+    85                              <1> SECTVA  equ     1000h           ; the section's RVA
+    86                              <1> ARENA   equ     410000h         ; the 64 KB B8Script memory (RVA 10000h)
+    87                              <1> IMGSIZE equ     20000h          ; SizeOfImage: the arena is its last 64 KB
+    88                              <1> 
+    89                              <1> LET     equ     0100h           ; the letter page (a B8Script address)
+    90                              <1> HELD    equ     LET+7Ah         ; a key read by the break check, held for the
+    91                              <1>                                 ;   next '?' (0: none)
+    92                              <1> BRKOFF  equ     LET+7Bh         ; the break-off cell: a non-zero byte here
+    93                              <1>                                 ;   makes Ctrl-C a key like any other
+    94                              <1> HEAP    equ     LET+7Ch         ; the heap pointer (a cell)
+    95                              <1> LINEBUF equ     LET+80h         ; the -n? line buffer
+    96                              <1> PROG    equ     0200h           ; the program text
+    97                              <1> HEAPLIM equ     0FFh            ; the heap limit, as a page: FF00h
+    98                              <1> LIMIT   equ     HEAPLIM*256
+    99                              <1> MAXFILE equ     LIMIT-PROG-3    ; the most a file may bring (room for CR LF NUL)
+   100                              <1> 
+   101                              <1> RSTOP   equ     IB+0FF00h       ; the empty return stack (it grows down)
+   102                              <1> RSMAX   equ     112             ; return stack entries (checked builds)
+   103                              <1> DSMAX   equ     127             ; data stack cells (checked builds)
+   104                              <1> NAMEBUF equ     IB+0F000h       ; the file's name, as typed (up to 3.5 KB)
+   105                              <1> 
+   106                              <1> ; -----------------------------------------------------------------------------
+   107                              <1> ;  The PE header, by the documented rules: a 64-byte DOS header whose
+   108                              <1> ;  e_lfanew points at the PE signature, the COFF header, the PE32 optional
+   109                              <1> ;  header with its 16 data directories, and one section header. Then zeros
+   110                              <1> ;  up to SizeOfHeaders (200h, one FileAlignment).
+   111                              <1> ; -----------------------------------------------------------------------------
+   112                              <1>         bits    32
+   113                              <1>         section hdr start=0 vstart=IB
+   114 00000000 4D5A                <1>         dw      'MZ'                    ; e_magic
+   115 00000002 00<rep 3Ah>         <1>         times   3Ch-($-$$) db 0
+   116 0000003C [4000C0FF]          <1>         dd      pe-IB                   ; e_lfanew
+   117 00000040 50450000            <1> pe:     db      'PE',0,0
+   118 00000044 4C01                <1>         dw      14Ch                    ; Machine: i386
+   119 00000046 0100                <1>         dw      1                       ; NumberOfSections
+   120 00000048 00000000            <1>         dd      0                       ; TimeDateStamp
+   121 0000004C 0000000000000000    <1>         dd      0, 0                    ; no COFF symbols
+   122 00000054 E000                <1>         dw      opthdr_end-opthdr       ; SizeOfOptionalHeader (224)
+   123 00000056 0F01                <1>         dw      010Fh                   ; RELOCS_STRIPPED, EXECUTABLE_IMAGE,
+   124                              <1>                                         ;   LINE_NUMS_STRIPPED,
+   125                              <1>                                         ;   LOCAL_SYMS_STRIPPED, 32BIT_MACHINE
+   126 00000058 0B01                <1> opthdr: dw      10Bh                    ; PE32
+   127 0000005A 0100                <1>         db      1, 0                    ; linker version
+   128 0000005C 00060000            <1>         dd      RAWSIZE                 ; SizeOfCode
+   129 00000060 00060000            <1>         dd      RAWSIZE                 ; SizeOfInitializedData
+   130 00000064 00000000            <1>         dd      0                       ; SizeOfUninitializedData
+   131 00000068 [0000C0FF]          <1>         dd      start-IB                ; AddressOfEntryPoint
+   132 0000006C 00100000            <1>         dd      SECTVA                  ; BaseOfCode
+   133 00000070 00100000            <1>         dd      SECTVA                  ; BaseOfData
+   134 00000074 00004000            <1>         dd      IB                      ; ImageBase
+   135 00000078 00100000            <1>         dd      1000h                   ; SectionAlignment
+   136 0000007C 00020000            <1>         dd      200h                    ; FileAlignment
+   137 00000080 04000000            <1>         dw      4, 0                    ; OS version 4.0
+   138 00000084 00000000            <1>         dw      0, 0                    ; image version
+   139 00000088 04000000            <1>         dw      4, 0                    ; subsystem version 4.0
+   140 0000008C 00000000            <1>         dd      0                       ; Win32VersionValue
+   141 00000090 00000200            <1>         dd      IMGSIZE                 ; SizeOfImage
+   142 00000094 00020000            <1>         dd      200h                    ; SizeOfHeaders
+   143 00000098 00000000            <1>         dd      0                       ; CheckSum
+   144 0000009C 0300                <1>         dw      3                       ; Subsystem: Windows console
+   145 0000009E 0000                <1>         dw      0                       ; DllCharacteristics: none
+   146 000000A0 0000100000100000    <1>         dd      100000h, 1000h          ; stack reserve, commit
+   147 000000A8 0000100000100000    <1>         dd      100000h, 1000h          ; heap reserve, commit
+   148 000000B0 00000000            <1>         dd      0                       ; LoaderFlags
+   149 000000B4 10000000            <1>         dd      16                      ; NumberOfRvaAndSizes
+   150 000000B8 0000000000000000    <1>         dd      0, 0                    ; 0 export
+   151 000000C0 [3C04C0FF]28000000  <1>         dd      idesc-IB, idesc_end-idesc ; 1 import
+   152 000000C8 00000000<rep 14h>   <1>         times   10*2 dd 0               ; 2-11
+   153 00000118 [4405C0FF]2C000000  <1>         dd      iat-IB, iat_end-iat     ; 12 IAT
+   154 00000120 00000000<rep 6h>    <1>         times   3*2 dd 0                ; 13-15
+   155                              <1> opthdr_end:
+   156 00000138 2E74657874000000    <1>         db      '.text',0,0,0           ; the one section
+   157 00000140 00F00100            <1>         dd      IMGSIZE-SECTVA          ; VirtualSize: code, then zeros up to
+   158                              <1>                                         ;   the arena's end
+   159 00000144 00100000            <1>         dd      SECTVA                  ; VirtualAddress
+   160 00000148 00060000            <1>         dd      RAWSIZE                 ; SizeOfRawData
+   161 0000014C 00020000            <1>         dd      200h                    ; PointerToRawData
+   162 00000150 0000000000000000    <1>         dd      0, 0                    ; no relocations, no line numbers
+   163 00000158 00000000            <1>         dw      0, 0
+   164 0000015C 600000E0            <1>         dd      0E0000060h              ; code, initialised data, execute,
+   165                              <1>                                         ;   read, write
+   166 00000160 00<rep A0h>         <1>         times   200h-($-$$) db 0
+   167                              <1> 
+   168                              <1> ; =============================================================================
+   169                              <1> ;  The code
+   170                              <1> ; =============================================================================
+   171                              <1>         section text start=200h vstart=IB+SECTVA
+   172                              <1> tstart:
+   173                              <1> %define V(x) ebp+(x)-next               ; a variable or IAT slot near `next`
+   174                              <1> 
+   175                              <1> ; ---- startup ----------------------------------------------------------------
+   176                              <1> ; The data stack starts empty; the cell pushed here stands for TOS, as when
+   177                              <1> ; the editor has the stack in memory: the run starts by popping it.
+   178 00000000 BD[A7050000]        <1> start:  mov     ebp,next
+   179 00000005 BE00024100          <1>         mov     esi,ARENA+PROG
+   180 0000000A 89655B              <1>         mov     [V(v_dstop)],esp
+   181 0000000D 56                  <1>         push    esi                     ; (the cell that stands for TOS)
+   182 0000000E 6AF6                <1>         push    -10                     ; STD_INPUT_HANDLE
+   183 00000010 FF559D              <1>         call    [V(iat_GetStdHandle)]
+   184 00000013 894553              <1>         mov     [V(v_hin)],eax
+   185 00000016 6AF5                <1>         push    -11                     ; STD_OUTPUT_HANDLE
+   186 00000018 FF559D              <1>         call    [V(iat_GetStdHandle)]
+   187 0000001B 894557              <1>         mov     [V(v_outh)],eax
+   188                              <1>         ; Raw keys: no echo, no line editing, Ctrl-C as a key (mode 0). If
+   189                              <1>         ; the input is not a console, GetConsoleMode fails, and the keys are
+   190                              <1>         ; read as bytes with ReadFile (see waitk).
+   191 0000001E 8D4D61              <1>         lea     ecx,[V(v_mode)]
+   192 00000021 51                  <1>         push    ecx
+   193 00000022 FF7553              <1>         push    dword [V(v_hin)]
+   194 00000025 FF55A1              <1>         call    [V(iat_GetConsoleMode)]
+   195 00000028 88455F              <1>         mov     [V(v_iscon)],al
+   196 0000002B 6A00                <1>         push    0
+   197 0000002D FF7553              <1>         push    dword [V(v_hin)]
+   198 00000030 FF55A5              <1>         call    [V(iat_SetConsoleMode)]
+   199                              <1>         ; The command line: the program's own name, then the file's.
+   200 00000033 FF55A9              <1>         call    [V(iat_GetCommandLineA)]
+   201 00000036 96                  <1>         xchg    eax,esi
+   202 00000037 E819000000          <1>         call    token
+   203 0000003C E814000000          <1>         call    token
+   204 00000041 E833000000          <1>         call    load                    ; (no file, or no such file: no text)
+   205 00000046 BF00FF4000          <1>         mov     edi,RSTOP               ; the return stack is empty
+   206                              <1> %if EDITOR
+   207                              <1>         jmp     edit
+   208                              <1> %else
+   209 0000004B BE00024100          <1>         mov     esi,ARENA+PROG          ; the IP
+   210 00000050 E9AF030000          <1>         jmp     run0
+   211                              <1> %endif
+   212                              <1> 
+   213                              <1> ; token: copy the next word of the command line at ESI to NAMEBUF, ending
+   214                              <1> ; in NUL. A word is ended by a space, or is in double quotes. ESI is left
+   215                              <1> ; after it (on the NUL at the end of the line, so another token is empty).
+   216 00000055 BF00F04000          <1> token:  mov     edi,NAMEBUF
+   217 0000005A AC                  <1> .sp:    lodsb
+   218 0000005B 3C20                <1>         cmp     al,' '
+   219 0000005D 74FB                <1>         je      .sp
+   220 0000005F B420                <1>         mov     ah,' '
+   221 00000061 3C22                <1>         cmp     al,22h
+   222 00000063 7503                <1>         jne     .ch
+   223 00000065 88C4                <1>         mov     ah,al                   ; a quoted word ends at the quote
+   224 00000067 AC                  <1>         lodsb
+   225 00000068 84C0                <1> .ch:    test    al,al
+   226 0000006A 7408                <1>         jz      .nul
+   227 0000006C 38E0                <1>         cmp     al,ah
+   228 0000006E 7405                <1>         je      .end
+   229 00000070 AA                  <1>         stosb
+   230 00000071 AC                  <1>         lodsb
+   231 00000072 EBF4                <1>         jmp     .ch
+   232 00000074 4E                  <1> .nul:   dec     esi
+   233 00000075 C60700              <1> .end:   mov     byte [edi],0
+   234 00000078 C3                  <1>         ret
+   235                              <1> 
+   236                              <1> ; load: read the file named in NAMEBUF into PROG, and end the text with a
+   237                              <1> ; NUL. No such file (or no name): no text, since ReadFile on the failed
+   238                              <1> ; handle reads nothing (it sets the count to 0 first).
+   239 00000079 31C0                <1> load:   xor     eax,eax
+   240 0000007B 50                  <1>         push    eax                     ; hTemplateFile
+   241 0000007C 50                  <1>         push    eax                     ; dwFlagsAndAttributes
+   242 0000007D 6A03                <1>         push    3                       ; OPEN_EXISTING
+   243 0000007F 50                  <1>         push    eax                     ; lpSecurityAttributes
+   244 00000080 6A01                <1>         push    1                       ; FILE_SHARE_READ
+   245 00000082 6800000080          <1>         push    80000000h               ; GENERIC_READ
+   246 00000087 6800F04000          <1>         push    NAMEBUF
+   247 0000008C FF55AD              <1>         call    [V(iat_CreateFileA)]
+   248 0000008F 50                  <1>         push    eax                     ; (for CloseHandle)
+   249 00000090 6A00                <1>         push    0
+   250 00000092 8D4D4F              <1>         lea     ecx,[V(v_cnt)]
+   251 00000095 51                  <1>         push    ecx
+   252 00000096 68FDFC0000          <1>         push    MAXFILE
+   253 0000009B 6800024100          <1>         push    ARENA+PROG
+   254 000000A0 50                  <1>         push    eax
+   255 000000A1 FF55B1              <1>         call    [V(iat_ReadFile)]
+   256                              <1> %if EDITOR
+   257                              <1>         call    [V(iat_CloseHandle)]
+   258                              <1> %else
+   259 000000A4 58                  <1>         pop     eax                     ; (the handle stays open)
+   260                              <1> %endif
+   261 000000A5 8B754F              <1>         mov     esi,[V(v_cnt)]
+   262 000000A8 81C600024100        <1>         add     esi,ARENA+PROG
+   263 000000AE C60600              <1>         mov     byte [esi],0            ; the end of the file counts as NUL
+   264                              <1> %if EDITOR
+   265                              <1>         ; The editor's text ends at the file's first ^Z (as in the CP/M
+   266                              <1>         ; builds) or NUL, and every line must end in LF: a last line
+   267                              <1>         ; without one is given a CR LF.
+   268                              <1>         mov     esi,ARENA+PROG
+   269                              <1>         mov     al,10                   ; (a file with no text needs nothing)
+   270                              <1> .ld1:   mov     ah,al                   ; AH = the character before
+   271                              <1>         lodsb
+   272                              <1>         cmp     al,1Ah
+   273                              <1>         je      .ld2
+   274                              <1>         test    al,al
+   275                              <1>         jnz     .ld1
+   276                              <1> .ld2:   dec     esi
+   277                              <1>         cmp     ah,10
+   278                              <1>         je      .ld3
+   279                              <1>         mov     word [esi],0A0Dh
+   280                              <1>         inc     esi
+   281                              <1>         inc     esi
+   282                              <1> .ld3:   mov     byte [esi],0
+   283                              <1> %endif
+   284 000000B1 C3                  <1>         ret
+   285                              <1> 
+   286                              <1> ; exit: put the console's input mode back as it was, and leave.
+   287 000000B2 FF7561              <1> exit:   push    dword [V(v_mode)]
+   288 000000B5 FF7553              <1>         push    dword [V(v_hin)]
+   289 000000B8 FF55A5              <1>         call    [V(iat_SetConsoleMode)]
+   290 000000BB 6A00                <1>         push    0
+   291 000000BD FF55C1              <1>         call    [V(iat_ExitProcess)]
+   292                              <1> 
+   293                              <1> ; LINECODE is the -n? routine, `line`. It goes after the bodies of the
+   294                              <1> ; handlers in an unchecked build, after the checks in a checked one: where
+   295                              <1> ; the short jumps reach the furthest.
+   296                              <1> %macro  LINECODE 0
+   297                              <1> ; -n?: Backspace takes the last character back (and is echoed as it is),
+   298                              <1> ; CR ends (stored, not echoed), every other key is stored and echoed until
+   299                              <1> ; the line is full. The buffer is at offset 80h of the letter page, so DL
+   300                              <1> ; alone is the place in the line; BL is the DL of a full line.
+   301                              <1> line:   mov     ax,bx
+   302                              <1>         neg     ax                      ; the count (8000h for -32768)
+   303                              <1>         cmp     ax,127
+   304                              <1>         jbe     .ln1
+   305                              <1>         mov     al,127
+   306                              <1> .ln1:   add     al,80h
+   307                              <1>         mov     bl,al
+   308                              <1>         mov     edx,ARENA+LINEBUF
+   309                              <1>         xor     ecx,ecx                 ; getk waits for ever
+   310                              <1> .ln2:   call    getk
+   311                              <1>         cmp     al,13
+   312                              <1>         je      .ln5
+   313                              <1>         cmp     al,8
+   314                              <1>         je      .ln4
+   315                              <1>         cmp     dl,bl
+   316                              <1>         je      .ln2                    ; full
+   317                              <1>         mov     [edx],al
+   318                              <1>         inc     edx
+   319                              <1> .ln3:   call    putc
+   320                              <1>         jmp     .ln2
+   321                              <1> .ln4:   dec     dl                      ; Backspace: one back, and echo it,
+   322                              <1>         js      .ln3                    ;   unless the line was empty (DL left
+   323                              <1>         inc     dl                      ;   the upper half of the page)
+   324                              <1>         jmp     .ln2
+   325                              <1> .ln5:   mov     [edx],al                ; the CR
+   326                              <1>         mov     bx,LINEBUF
+   327                              <1>         jmp     ebp
+   328                              <1> %endmacro
+   329                              <1> 
+   330                              <1> ; =============================================================================
+   331                              <1> ;  Punctuation handlers. PTAB holds one byte per character: its handler's
+   332                              <1> ;  distance from hbase, so every handler starts in the 256 bytes from hbase
+   333                              <1> ;  (PT checks it). Only the starts must be there: the last handler, '?',
+   334                              <1> ;  runs on past the window, and '[', '_', '`' (and '/' in a checked build)
+   335                              <1> ;  are stubs that jump to their bodies after it. Each handler starts with EBX = TOS and EAX, ECX, EDX
+   336                              <1> ;  free, and ends with JMP EBP.
+   337                              <1> ;  (Two other layouts were tried: handlers 2-aligned with the table holding
+   338                              <1> ;  half the distance, which costs a NOP after every handler of odd length,
+   339                              <1> ;  about 22 bytes; and the Z80's two 256-byte windows, whose dispatcher is 7
+   340                              <1> ;  bytes longer and whose handlers must be in table order, which costs near
+   341                              <1> ;  jumps.)
+   342                              <1> ; =============================================================================
+   343                              <1> hbase:
+   344                              <1> ; ']' returns: pop an address and jump to it.
+   345 000000C0 8B37                <1> h_ret:  mov     esi,[edi]
+   346 000000C2 AF                  <1> rdrop:  scasd                           ; drop the return stack's top
+   347 000000C3 FFE5                <1> nx:     jmp     ebp
+   348                              <1> 
+   349                              <1> ; '\' ( flag -- ): true skips to the next ')' or ']' at this level; ')'
+   350                              <1> ; drops the block start, ']' returns. No closer at all ends the program.
+   351 000000C5 6685DB              <1> h_break:test    bx,bx
+   352 000000C8 5B                  <1>         pop     ebx
+   353 000000C9 74F8                <1>         jz      nx
+   354 000000CB E8DD010000          <1>         call    skip
+   355 000000D0 84C0                <1>         test    al,al                   ; skip returns 0 for ')'
+   356 000000D2 75EC                <1>         jnz     h_ret
+   357 000000D4 EBEC                <1>         jmp     rdrop
+   358                              <1> 
+   359                              <1> ; ')' ( flag -- ): true jumps back to the block start (and keeps it); false
+   360                              <1> ; drops it and carries on. The loop-back looks at the break key.
+   361 000000D6 6685DB              <1> h_close:test    bx,bx
+   362 000000D9 5B                  <1>         pop     ebx
+   363 000000DA 74E6                <1>         jz      rdrop
+   364 000000DC 8B37                <1>         mov     esi,[edi]
+   365 000000DE E99C040000          <1>         jmp     rpoll
+   366                              <1> 
+   367                              <1> ; '(' ( flag -- ): true pushes the block start and enters; false skips to
+   368                              <1> ; the matching ')'.
+   369 000000E3 6685DB              <1> h_open: test    bx,bx
+   370 000000E6 5B                  <1>         pop     ebx
+   371 000000E7 0F8434010000        <1>         jz      skipo
+   372 000000ED 89F2                <1>         mov     edx,esi
+   373 000000EF E986040000          <1>         jmp     rpush
+   374                              <1> 
+   375                              <1> ; '{' TOS to the return stack, '}' back.
+   376 000000F4 89DA                <1> h_tor:  mov     edx,ebx
+   377 000000F6 5B                  <1>         pop     ebx
+   378 000000F7 E97E040000          <1>         jmp     rpush
+   379 000000FC 53                  <1> h_fromr:push    ebx
+   380 000000FD 8B1F                <1>         mov     ebx,[edi]
+   381 000000FF EBC1                <1>         jmp     rdrop
+   382                              <1> 
+   383                              <1> ; '@' fetches a cell.
+   384 00000101 668B1B              <1> h_fetch:mov     bx,[ebx]
+   385 00000104 FFE5                <1>         jmp     ebp
+   386                              <1> 
+   387                              <1> ; ---- arithmetic and logic: ( NOS TOS -- result ) ---------------------------
+   388                              <1> ; '-' has two jobs: directly before a digit it starts a negative number.
+   389 00000106 8A06                <1> h_sub:  mov     al,[esi]
+   390 00000108 2C30                <1>         sub     al,'0'
+   391 0000010A 3C0A                <1>         cmp     al,10
+   392 0000010C 0F825A010000        <1>         jb      negnum
+   393 00000112 66F7DB              <1>         neg     bx                      ; a - b = a + (-b): on into '+'
+   394 00000115 5A                  <1> h_add:  pop     edx
+   395 00000116 6601D3              <1>         add     bx,dx
+   396 00000119 FFE5                <1>         jmp     ebp
+   397                              <1> 
+   398 0000011B 5A                  <1> h_and:  pop     edx
+   399 0000011C 6621D3              <1>         and     bx,dx
+   400 0000011F FFE5                <1>         jmp     ebp
+   401 00000121 5A                  <1> h_or:   pop     edx
+   402 00000122 6609D3              <1>         or      bx,dx
+   403 00000125 FFE5                <1>         jmp     ebp
+   404 00000127 5A                  <1> h_xor:  pop     edx
+   405 00000128 6631D3              <1>         xor     bx,dx
+   406 0000012B FFE5                <1>         jmp     ebp
+   407 0000012D 66F7D3              <1> h_not:  not     bx
+   408 00000130 FFE5                <1>         jmp     ebp
+   409 00000132 5A                  <1> h_mul:  pop     edx
+   410 00000133 660FAFDA            <1>         imul    bx,dx                   ; the low 16 bits, signed or not
+   411 00000137 FFE5                <1>         jmp     ebp
+   412                              <1> 
+   413                              <1> ; Signed compares. '<' swaps the two cells and is then '>': a > b is b < a.
+   414                              <1> ; Flipping both sign bits turns the signed compare into an unsigned one, and
+   415                              <1> ; SBB turns the carry into -1 or 0 with no branch.
+   416 00000139 871C24              <1> h_lt:   xchg    ebx,[esp]
+   417 0000013C 5A                  <1> h_gt:   pop     edx                     ; DX = a, BX = b
+   418 0000013D 80F780              <1>         xor     bh,80h
+   419 00000140 80F680              <1>         xor     dh,80h
+   420 00000143 6639D3              <1>         cmp     bx,dx                   ; carry if b < a
+   421 00000146 6619DB              <1> tf:     sbb     bx,bx
+   422 00000149 FFE5                <1>         jmp     ebp
+   423 0000014B 5A                  <1> h_eq:   pop     edx
+   424 0000014C 6629D3              <1>         sub     bx,dx
+   425 0000014F 6683FB01            <1>         cmp     bx,1                    ; carry only if a - b = 0
+   426 00000153 EBF1                <1>         jmp     tf
+   427                              <1> 
+   428                              <1> 
+   429                              <1> %if CHECKED
+   430                              <1> h_div:  jmp     div1                    ; ('/': its body is after the window)
+   431                              <1> %else
+   432                              <1> ; '/' ( a b -- q r ): truncates toward zero, and r takes a's sign: x86's
+   433                              <1> ; IDIV does exactly that. It is done in 32 bits, so that -32768 / -1 (whose
+   434                              <1> ; quotient, 32768, does not fit in 16) wraps as the spec says instead of
+   435                              <1> ; faulting. Dividing by 0 skips the IDIV in an unchecked build (two cells of
+   436                              <1> ; no meaning: a and its sign); the checked build stops with Z.
+   437                              <1> h_div:
+   438                              <1> %if CHECKED
+   439                              <1>         test    bx,bx
+   440                              <1>         jz      e_zero
+   441                              <1> %endif
+   442 00000155 58                  <1>         pop     eax
+   443 00000156 0FBFCB              <1>         movsx   ecx,bx
+   444 00000159 98                  <1>         cwde
+   445 0000015A 99                  <1>         cdq
+   446                              <1> %if CHECKED=0
+   447 0000015B E302                <1>         jecxz   .z
+   448                              <1> %endif
+   449 0000015D F7F9                <1>         idiv    ecx
+   450 0000015F 6689C3              <1> .z:     mov     bx,ax
+   451 00000162 53                  <1>         push    ebx                     ; q
+   452 00000163 6689D3              <1>         mov     bx,dx                   ; r on top
+   453 00000166 FFE5                <1>         jmp     ebp
+   454                              <1> %endif
+   455                              <1> 
+   456                              <1> ; ---- stack and storage -----------------------------------------------------
+   457 00000168 53                  <1> h_dup:  push    ebx
+   458 00000169 FFE5                <1>         jmp     ebp
+   459 0000016B 871C24              <1> h_swap: xchg    ebx,[esp]
+   460 0000016E FFE5                <1>         jmp     ebp
+   461                              <1> 
+   462                              <1> ; (The checked build tests the address before it takes the value off the
+   463                              <1> ; stack, so that the report shows both.)
+   464                              <1> h_cstore:
+   465                              <1> %if CHECKED
+   466                              <1>         call    chkst1
+   467                              <1> %endif
+   468 00000170 5A                  <1>         pop     edx
+   469 00000171 8813                <1>         mov     [ebx],dl
+   470 00000173 EB04                <1>         jmp     short h_drop
+   471                              <1> h_store:
+   472                              <1> %if CHECKED
+   473                              <1>         call    chkst2
+   474                              <1> %endif
+   475 00000175 5A                  <1>         pop     edx
+   476 00000176 668913              <1>         mov     [ebx],dx
+   477 00000179 5B                  <1> h_drop: pop     ebx
+   478 0000017A FFE5                <1>         jmp     ebp
+   479                              <1> 
+   480                              <1> ; ---- console ---------------------------------------------------------------
+   481                              <1> ; '"' pushes the address of the text after it and skips the string.
+   482 0000017C 53                  <1> h_str:  push    ebx
+   483 0000017D 89F3                <1>         mov     ebx,esi
+   484 0000017F E81F010000          <1>         call    skipstr
+   485                              <1> %if CHECKED
+   486                              <1>         test    al,al                   ; 0: the text ran out first
+   487                              <1>         jz      e_quote
+   488                              <1> %endif
+   489 00000184 FFE5                <1>         jmp     ebp
+   490                              <1> 
+   491                              <1> ; '$' prints the string at TOS, decoding escapes (see prstr). The address
+   492                              <1> ; stays in TOS meanwhile: a checked report shows the stack as before '$'.
+   493 00000186 89DA                <1> h_print:mov     edx,ebx
+   494 00000188 E86F010000          <1>         call    prstr
+   495 0000018D EBEA                <1>         jmp     h_drop
+   496                              <1> 
+   497                              <1> ; "'" emits the low byte; '#' prints TOS as a signed number.
+   498 0000018F 88D8                <1> h_emit: mov     al,bl
+   499 00000191 E886010000          <1>         call    putc
+   500 00000196 EBE1                <1>         jmp     h_drop
+   501 00000198 89D8                <1> h_num:  mov     eax,ebx
+   502 0000019A E837010000          <1>         call    psgn
+   503 0000019F EBD8                <1>         jmp     h_drop
+   504                              <1> 
+   505                              <1> ; ',' fetches a byte. It shares the end of '?'.
+   506 000001A1 8A03                <1> h_cfetch:mov    al,[ebx]
+   507 000001A3 88C3                <1> kt3:    mov     bl,al
+   508 000001A5 B700                <1>         mov     bh,0
+   509 000001A7 FFE5                <1>         jmp     ebp
+   510                              <1> 
+   511                              <1> 
+   512                              <1> ; '[', '_' and '`': their bodies are after '?', the last handler, outside
+   513                              <1> ; the window.
+   514 000001A9 EB5C                <1> h_def:  jmp     short def1
+   515 000001AB EB47                <1> h_alloc:jmp     short alloc1
+   516 000001AD EB0E                <1> h_grave:jmp     short grave1
+   517                              <1> 
+   518                              <1> ; '?' ( n -- c ) or ( -n -- addr )
+   519                              <1> ;   n > 0: wait about n ms for a key; 0 if none came
+   520                              <1> ;   n = 0: wait for a key
+   521                              <1> ;   n < 0: read a line of at most -n characters (127 at most), with echo
+   522 000001AF 84FF                <1> h_key:  test    bh,bh
+   523 000001B1 7875                <1>         js      line
+   524 000001B3 0FB7CB              <1>         movzx   ecx,bx                  ; the wait in ms (0: for ever)
+   525 000001B6 E8EE010000          <1>         call    getk
+   526 000001BB EBE6                <1>         jmp     kt3
+   527                              <1> 
+   528                              <1> ; ---- machine code: the grave -----------------------------------------------
+   529                              <1> ; '`' plus a hex digit loads bytes: ( addr -- addr' ). Pairs of hex digits
+   530                              <1> ; are stored from addr until a non-hex character; then a RET (C3h) is
+   531                              <1> ; written and its address is left. An odd last digit is consumed and its
+   532                              <1> ; byte is overwritten by the RET. (Never range-checked: the spec says so.)
+   533                              <1> ; '`' plus anything else calls the machine code at TOS: ( addr -- ).
+   534                              <1> ;
+   535                              <1> ; The machine-code contract: the code is entered by CALL, with the return
+   536                              <1> ; address at [ESP] and the data stack above it: [ESP+4] is the top cell
+   537                              <1> ; (the one under the address, which was consumed), [ESP+8] the next, one
+   538                              <1> ; dword per cell, the cell in the low word. EBX holds the code's own
+   539                              <1> ; address (ARENA + addr), and its high word is the arena's (0041h): a
+   540                              <1> ; B8Script address a is the byte at ARENA + a. The code may push and pop
+   541                              <1> ; dwords, and may change EAX, EBX, ECX, EDX and the flags; it must keep
+   542                              <1> ; ESI, EDI and EBP, leave the direction flag clear, and return with RET
+   543                              <1> ; (C3h, which the loader writes). On return the dword on top of the stack
+   544                              <1> ; becomes TOS. Only the low word of each cell counts: the interpreter puts
+   545                              <1> ; the arena's high word back into every cell on the stack.
+   546 000001BD E8B5000000          <1> grave1: call    hexc
+   547 000001C2 731B                <1>         jnc     .ex
+   548 000001C4 8803                <1> .hx1:   mov     [ebx],al                ; the high digit goes in first ...
+   549 000001C6 E8AC000000          <1>         call    hexc
+   550 000001CB 730D                <1>         jnc     .hx2                    ; odd digit: consumed, and the RET
+   551 000001CD C02304              <1>         shl     byte [ebx],4            ;   overwrites it
+   552 000001D0 0803                <1>         or      [ebx],al                ; ... and the low one joins it
+   553 000001D2 43                  <1>         inc     ebx
+   554 000001D3 E89F000000          <1>         call    hexc
+   555 000001D8 72EA                <1>         jc      .hx1
+   556 000001DA C603C3              <1> .hx2:   mov     byte [ebx],0C3h
+   557 000001DD FFE5                <1>         jmp     ebp
+   558 000001DF FFD3                <1> .ex:    call    ebx
+   559 000001E1 89E0                <1>         mov     eax,esp                 ; (the stack holds one cell at least,
+   560 000001E3 66C740024100        <1> .ex1:   mov     word [eax+2],ARENA>>16  ;   the one that stands for TOS)
+   561 000001E9 83C004              <1>         add     eax,4
+   562 000001EC 3B455B              <1>         cmp     eax,[V(v_dstop)]
+   563 000001EF 72F2                <1>         jb      .ex1
+   564 000001F1 5B                  <1>         pop     ebx
+   565 000001F2 FFE5                <1>         jmp     ebp
+   566                              <1> 
+   567                              <1> 
+   568                              <1> ; '_' ( n -- addr ): the heap pointer moves by n, a signed count; TOS is
+   569                              <1> ; the old pointer. The checked build stops with H if the new top is not
+   570                              <1> ; below the limit or is below the program's end (done in 32 bits, so a top
+   571                              <1> ; that wraps round is caught too).
+   572 000001F4 0FB7157C014100      <1> alloc1: movzx   edx,word [ARENA+HEAP]
+   573                              <1> %if CHECKED
+   574                              <1>         movsx   eax,bx
+   575                              <1>         add     eax,edx
+   576                              <1>         cmp     eax,LIMIT
+   577                              <1>         jae     e_heap
+   578                              <1>         cmp     eax,[V(v_npend)]
+   579                              <1>         jb      e_heap
+   580                              <1> %endif
+   581 000001FB 66011D7C014100      <1>         add     [ARENA+HEAP],bx
+   582 00000202 6689D3              <1>         mov     bx,dx
+   583 00000205 FFE5                <1>         jmp     ebp
+   584                              <1> 
+   585                              <1> ; '[' followed by a letter stores the body's address in that letter's cell:
+   586                              <1> ; uppercase is a word, lowercase a variable. Followed by a space it pushes
+   587                              <1> ; the body's address instead. Either way it then skips to the matching ']'.
+   588                              <1> ; (The unchecked build takes anything that is not a letter as the space; the
+   589                              <1> ; checked build stops on it with W.)
+   590 00000207 31C0                <1> def1:   xor     eax,eax
+   591 00000209 AC                  <1>         lodsb
+   592 0000020A 2C41                <1>         sub     al,'A'                  ; a letter gives 0-25 or 32-57:
+   593 0000020C 89C2                <1>         mov     edx,eax                 ;   lowercase lands 64 bytes up
+   594 0000020E 24DF                <1>         and     al,0DFh                 ; (fold case)
+   595 00000210 3C1A                <1>         cmp     al,26
+   596 00000212 730A                <1>         jae     .nl
+   597 00000214 6689B41200014100    <1>         mov     [ARENA+LET+edx*2],si
+   598 0000021C EB03                <1>         jmp     short .sk
+   599                              <1> .nl:
+   600                              <1> %if CHECKED
+   601                              <1>         cmp     dl,' '-'A'
+   602                              <1>         jne     e_brack                 ; anything but a letter or a space
+   603                              <1> %endif
+   604 0000021E 53                  <1>         push    ebx                     ; an anonymous block: its address
+   605 0000021F 89F3                <1>         mov     ebx,esi
+   606                              <1> .sk:
+   607                              <1> %if CHECKED
+   608                              <1>         dec     esi                     ; back onto the letter: skip finds its
+   609                              <1> %endif                                  ;   opener, '[', just before it
+   610 00000221 E887000000          <1> skipo:  call    skip
+   611 00000226 FFE5                <1>         jmp     ebp
+   612                              <1> 
+   613                              <1> 
+   614                              <1> 
+   615                              <1> %if CHECKED
+   616                              <1> ; '/' ( a b -- q r ): truncates toward zero, and r takes a's sign: x86's
+   617                              <1> ; IDIV does exactly that. It is done in 32 bits, so that -32768 / -1 (whose
+   618                              <1> ; quotient, 32768, does not fit in 16) wraps as the spec says instead of
+   619                              <1> ; faulting. Dividing by 0 skips the IDIV in an unchecked build (two cells of
+   620                              <1> ; no meaning: a and its sign); the checked build stops with Z.
+   621                              <1> div1:
+   622                              <1> %if CHECKED
+   623                              <1>         test    bx,bx
+   624                              <1>         jz      e_zero
+   625                              <1> %endif
+   626                              <1>         pop     eax
+   627                              <1>         movsx   ecx,bx
+   628                              <1>         cwde
+   629                              <1>         cdq
+   630                              <1> %if CHECKED=0
+   631                              <1>         jecxz   .z
+   632                              <1> %endif
+   633                              <1>         idiv    ecx
+   634                              <1> .z:     mov     bx,ax
+   635                              <1>         push    ebx                     ; q
+   636                              <1>         mov     bx,dx                   ; r on top
+   637                              <1>         jmp     ebp
+   638                              <1> %endif
+   639                              <1> %if CHECKED=0
+   640                              <1>         LINECODE
+   297                              <2> 
+   298                              <2> 
+   299                              <2> 
+   300                              <2> 
+   301 00000228 6689D8              <2> line: mov ax,bx
+   302 0000022B 66F7D8              <2>  neg ax
+   303 0000022E 6683F87F            <2>  cmp ax,127
+   304 00000232 7602                <2>  jbe .ln1
+   305 00000234 B07F                <2>  mov al,127
+   306 00000236 0480                <2> .ln1: add al,80h
+   307 00000238 88C3                <2>  mov bl,al
+   308 0000023A BA80014100          <2>  mov edx,ARENA+LINEBUF
+   309 0000023F 31C9                <2>  xor ecx,ecx
+   310 00000241 E863010000          <2> .ln2: call getk
+   311 00000246 3C0D                <2>  cmp al,13
+   312 00000248 741A                <2>  je .ln5
+   313 0000024A 3C08                <2>  cmp al,8
+   314 0000024C 740E                <2>  je .ln4
+   315 0000024E 38DA                <2>  cmp dl,bl
+   316 00000250 74EF                <2>  je .ln2
+   317 00000252 8802                <2>  mov [edx],al
+   318 00000254 42                  <2>  inc edx
+   319 00000255 E8C2000000          <2> .ln3: call putc
+   320 0000025A EBE5                <2>  jmp .ln2
+   321 0000025C FECA                <2> .ln4: dec dl
+   322 0000025E 78F5                <2>  js .ln3
+   323 00000260 FEC2                <2>  inc dl
+   324 00000262 EBDD                <2>  jmp .ln2
+   325 00000264 8802                <2> .ln5: mov [edx],al
+   326 00000266 66BB8001            <2>  mov bx,LINEBUF
+   327 0000026A FFE5                <2>  jmp ebp
+   641                              <1> %endif
+   642                              <1> 
+   643                              <1> ; =============================================================================
+   644                              <1> ;  Checked build: the checks and the error report (here, so that the
+   645                              <1> ;  handlers' bodies above reach the error entries with short jumps)
+   646                              <1> ; =============================================================================
+   647                              <1> %if CHECKED
+   648                              <1> e_zero: mov     al,'Z'                  ; dividing by zero
+   649                              <1>         jmp     error
+   650                              <1> e_heap: mov     al,'H'                  ; the heap
+   651                              <1>         jmp     error
+   652                              <1> 
+   653                              <1> ; chkst1, chkst2: stop with O unless the 1 or 2 bytes at TOS are in the
+   654                              <1> ; program's space: from the letter page up to the heap limit. Memory above
+   655                              <1> ; the heap top but below the limit is the program's own: Tiny BASIC keeps
+   656                              <1> ; its lines there.
+   657                              <1> chkst2: mov     eax,ebx
+   658                              <1>         sub     ax,LET
+   659                              <1>         cmp     ax,LIMIT-LET-1
+   660                              <1>         jmp     short chs1
+   661                              <1> chkst1: mov     eax,ebx
+   662                              <1>         sub     ax,LET
+   663                              <1>         cmp     ax,LIMIT-LET
+   664                              <1> chs1:   jae     e_store
+   665                              <1>         ret
+   666                              <1> 
+   667                              <1> ; chkstk: both stacks are checked once per character, not in every handler.
+   668                              <1> ; A character can pop a cell or two too many, or push one too many, before
+   669                              <1> ; it is seen here: the data stack has the caller's frame above it and the
+   670                              <1> ; thread's stack below, and the return stack has the image's spare space on
+   671                              <1> ; both sides.
+   672                              <1> chkstk: lea     eax,[esp+4]
+   673                              <1>         sub     eax,[V(v_dstop)]        ; minus 4 x the depth
+   674                              <1>         jg      e_under
+   675                              <1>         cmp     eax,-4*DSMAX
+   676                              <1>         jl      e_over
+   677                              <1>         cmp     di,RSTOP & 0FFFFh       ; (the return stack is in one 64K: only
+   678                              <1>         ja      e_rund                  ;   the low word changes)
+   679                              <1>         cmp     di,(RSTOP-4*RSMAX) & 0FFFFh
+   680                              <1>         jb      e_rover
+   681                              <1>         ret
+   682                              <1> e_under:mov     esp,[V(v_dstop)]        ; data stack underflow: it counts as
+   683                              <1>         mov     al,'s'                  ;   empty
+   684                              <1>         jmp     short error
+   685                              <1> e_rund: mov     edi,RSTOP               ; return stack underflow: the same.
+   686                              <1>         or      esi,ARENA               ;   (A ']' or ')' may have taken an IP
+   687                              <1>         mov     al,'r'                  ;   of 0 from below the stack: keep the
+   688                              <1>                                         ;   place readable)
+   689                              <1>         jmp     short errp
+   690                              <1> e_rover:mov     al,'R'
+   691                              <1>         jmp     short errp
+   692                              <1> e_over: mov     al,'S'
+   693                              <1>         jmp     short errp
+   694                              <1> e_break:mov     al,'B'                  ; Ctrl-C (inside pollk or getk)
+   695                              <1>         jmp     short errp
+   696                              <1> e_store:mov     al,'O'                  ; a store outside the program's space
+   697                              <1>         jmp     short errp
+   698                              <1> e_dollar:mov    al,'Q'                  ; '$' ran into a NUL
+   699                              <1> ; errp: an error found inside a routine: drop its return address first.
+   700                              <1> errp:   pop     edx
+   701                              <1>         jmp     short error
+   702                              <1> e_quote:mov     esi,ebx                 ; an unclosed string: its address, one
+   703                              <1>         mov     al,'Q'                  ;   past the quote, is the place
+   704                              <1>         jmp     short error
+   705                              <1> e_brack:mov     al,'W'                  ; bad character after [
+   706                              <1> 
+   707                              <1> ; error: the report, then the end. AL = the letter, ESI = one past the
+   708                              <1> ; place, EBX = TOS, and both stacks as the report is to show them:
+   709                              <1> ;
+   710                              <1> ;   Err X @ line,col
+   711                              <1> ;   up to 16 characters of the text from the place
+   712                              <1> ;   Stk n: the top 8 cells at most, bottom to top
+   713                              <1> ;   Rtn n
+   714                              <1> ;
+   715                              <1> ; It goes to the standard error handle.
+   716                              <1> error:  push    ebx                     ; now the whole data stack is in memory
+   717                              <1>         mov     bl,al
+   718                              <1>         push    -12                     ; STD_ERROR_HANDLE
+   719                              <1>         call    [V(iat_GetStdHandle)]
+   720                              <1>         mov     [V(v_outh)],eax
+   721                              <1>         call    pmsg
+   722                              <1>         db      '/M/JErr ',22h
+   723                              <1>         mov     al,bl
+   724                              <1>         call    putc
+   725                              <1>         call    pmsg
+   726                              <1>         db      ' @ ',22h
+   727                              <1>         dec     esi                     ; ESI = the place
+   728                              <1>         ; The line and column. A place below the program is in the line
+   729                              <1>         ; buffer: line 0. Otherwise count the LFs from the program's start;
+   730                              <1>         ; ECX = the line's number, EDX = where it starts.
+   731                              <1>         xor     ecx,ecx
+   732                              <1>         mov     edx,ARENA+LINEBUF
+   733                              <1>         cmp     si,PROG
+   734                              <1>         jb      .er3
+   735                              <1>         mov     dx,PROG
+   736                              <1>         mov     eax,edx
+   737                              <1> .er1:   inc     ecx                     ; a new line starts at EAX
+   738                              <1>         mov     edx,eax
+   739                              <1> .er2:   cmp     eax,esi
+   740                              <1>         jae     .er3                    ; reached the place
+   741                              <1>         inc     eax
+   742                              <1>         cmp     byte [eax-1],10
+   743                              <1>         jne     .er2
+   744                              <1>         jmp     .er1
+   745                              <1> .er3:   push    edx
+   746                              <1>         xchg    eax,ecx
+   747                              <1>         call    pdec                    ; the line
+   748                              <1>         mov     al,','
+   749                              <1>         call    putc
+   750                              <1>         pop     edx
+   751                              <1>         mov     eax,esi
+   752                              <1>         sub     eax,edx
+   753                              <1>         movzx   eax,ax
+   754                              <1>         inc     eax
+   755                              <1>         call    pdec                    ; the column
+   756                              <1>         call    pmsg
+   757                              <1>         db      '/M/J',22h
+   758                              <1>         push    16                      ; the text, as it is: 16 characters,
+   759                              <1>         pop     ecx                     ;   or fewer if the line or the
+   760                              <1> .er4:   lodsb                           ;   program ends first
+   761                              <1>         test    al,al
+   762                              <1>         jz      .er5
+   763                              <1>         cmp     al,13
+   764                              <1>         je      .er5
+   765                              <1>         cmp     al,10
+   766                              <1>         je      .er5
+   767                              <1>         call    putc
+   768                              <1>         loop    .er4
+   769                              <1> .er5:   call    pstk
+   770                              <1>         call    pmsg
+   771                              <1>         db      '/M/J',22h
+   772                              <1>  %if EDITOR
+   773                              <1>         jmp     edit0                   ; back to the editor, stacks cleared
+   774                              <1>  %else
+   775                              <1>         jmp     exit
+   776                              <1>  %endif
+   777                              <1> %endif
+   778                              <1> %if CHECKED
+   779                              <1>         LINECODE
+   780                              <1> %endif
+   781                              <1> 
+   782                              <1> 
+   783                              <1> ; (negnum, for '-', is out of the window too)
+   784 0000026C 53                  <1> negnum: push    ebx
+   785 0000026D E819000000          <1>         call    rdnum
+   786 00000272 66F7DB              <1>         neg     bx
+   787 00000275 FFE5                <1>         jmp     ebp
+   788                              <1> 
+   789                              <1> 
+   790                              <1> ; =============================================================================
+   791                              <1> ;  Routines
+   792                              <1> ; =============================================================================
+   793                              <1> 
+   794                              <1> ; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
+   795                              <1> ; and return its value in AL with the carry set; otherwise leave the IP and
+   796                              <1> ; return with the carry clear.
+   797 00000277 8A06                <1> hexc:   mov     al,[esi]
+   798 00000279 2C30                <1>         sub     al,'0'
+   799 0000027B 3C0A                <1>         cmp     al,10
+   800 0000027D 720A                <1>         jb      .hc1
+   801 0000027F 24DF                <1>         and     al,0DFh
+   802 00000281 2C11                <1>         sub     al,11h
+   803 00000283 3C06                <1>         cmp     al,6
+   804 00000285 7303                <1>         jae     .hc2
+   805 00000287 2CF6                <1>         sub     al,0F6h                 ; + 10, and sets the carry
+   806 00000289 46                  <1> .hc1:   inc     esi
+   807 0000028A C3                  <1> .hc2:   ret
+   808                              <1> 
+   809                              <1> ; rdnum: read decimal digits at IP into BX (and DX); IP is left on the
+   810                              <1> ; first non-digit. Values wrap at 16 bits, as the spec says.
+   811 0000028B 31D2                <1> rdnum:  xor     edx,edx
+   812 0000028D 0FB606              <1> .rn1:   movzx   eax,byte [esi]
+   813 00000290 2C30                <1>         sub     al,'0'
+   814 00000292 3C0A                <1>         cmp     al,10
+   815 00000294 7308                <1>         jae     .rn2
+   816 00000296 46                  <1>         inc     esi
+   817 00000297 6BD20A              <1>         imul    edx,edx,10
+   818 0000029A 01C2                <1>         add     edx,eax
+   819 0000029C EBEF                <1>         jmp     .rn1
+   820 0000029E 6689D3              <1> .rn2:   mov     bx,dx
+   821 000002A1 C3                  <1>         ret
+   822                              <1> 
+   823                              <1> ; skipstr: IP is inside a string; step past its closing quote. '/' escapes
+   824                              <1> ; the next character, so '/"' does not end it. Leaves AL = 22h.
+   825                              <1> %if CHECKED=0
+   826 000002A2 46                  <1> ss0:    inc     esi
+   827 000002A3 AC                  <1> skipstr:lodsb
+   828 000002A4 3C2F                <1>         cmp     al,'/'
+   829 000002A6 74FA                <1>         je      ss0
+   830 000002A8 3C22                <1>         cmp     al,22h
+   831 000002AA 75F7                <1>         jne     skipstr
+   832 000002AC C3                  <1>         ret
+   833                              <1> %else
+   834                              <1> ; The checked build never steps over a NUL: if the text runs out first it
+   835                              <1> ; returns AL = 0 with the IP on the NUL.
+   836                              <1> skipstr:mov     al,[esi]
+   837                              <1>         test    al,al
+   838                              <1>         jz      .ss9
+   839                              <1>         inc     esi
+   840                              <1>         cmp     al,22h
+   841                              <1>         je      .ss9
+   842                              <1>         cmp     al,'/'
+   843                              <1>         jne     skipstr
+   844                              <1>         mov     al,[esi]                ; the escaped character
+   845                              <1>         test    al,al
+   846                              <1>         jz      .ss9
+   847                              <1>         inc     esi
+   848                              <1>         jmp     skipstr
+   849                              <1> .ss9:   ret
+   850                              <1> %endif
+   851                              <1> 
+   852                              <1> ; skip: read past text to the closer at this level, and return AL = 0 if it
+   853                              <1> ; was ')' and 2 if it was ']'. Brackets of both kinds count together;
+   854                              <1> ; strings are stepped over whole. A NUL first ends the program (for '\' with
+   855                              <1> ; no closer; anything else that runs into the NUL had unbalanced brackets
+   856                              <1> ; anyway). ECX counts the open levels, from 1 for the one we are in.
+   857                              <1> ;
+   858                              <1> ; The checked build also looks at the character the skip was started by,
+   859                              <1> ; which is always the one just before where it starts: '(' must end at ')',
+   860                              <1> ; '[' at ']', and neither may run into the NUL (N); a string with no closing
+   861                              <1> ; quote counts as running into it. '\' takes either closer. V_SKAT keeps the
+   862                              <1> ; place where the skip started, for the report.
+   863                              <1> skip:
+   864                              <1> %if CHECKED
+   865                              <1>         mov     [V(v_skat)],esi
+   866                              <1>         mov     ah,[esi-1]              ; AH = the opener: ( [ or backslash
+   867                              <1> %endif
+   868 000002AD 31C9                <1>         xor     ecx,ecx
+   869 000002AF 41                  <1> .sk3:   inc     ecx                     ; an opener: one deeper
+   870                              <1> .sk1:
+   871                              <1> %if CHECKED
+   872                              <1>         mov     al,[esi]
+   873                              <1>         test    al,al
+   874                              <1>         jz      .sk6                    ; (the IP stays on the NUL)
+   875                              <1>         inc     esi
+   876                              <1> %else
+   877 000002B0 AC                  <1>         lodsb
+   878 000002B1 84C0                <1>         test    al,al
+   879 000002B3 0F84F9FDFFFF        <1>         jz      SKEND                   ; (the end of the program)
+   880                              <1> %endif
+   881 000002B9 3C22                <1>         cmp     al,22h
+   882 000002BB 7505                <1>         jne     .sk2
+   883 000002BD E8E1FFFFFF          <1>         call    skipstr                 ; leaves AL = 22h, which matches
+   884 000002C2 2C28                <1> .sk2:   sub     al,'('                  ;   nothing below (or 0: then the
+   885 000002C4 74E9                <1>         jz      .sk3                    ;   NUL is read next)
+   886 000002C6 FEC8                <1>         dec     al                      ; ')'
+   887 000002C8 7408                <1>         jz      .sk4
+   888 000002CA 2C32                <1>         sub     al,'['-')'
+   889 000002CC 74E1                <1>         jz      .sk3
+   890 000002CE 3C02                <1>         cmp     al,']'-'['
+   891 000002D0 75DE                <1>         jne     .sk1
+   892 000002D2 49                  <1> .sk4:   dec     ecx
+   893 000002D3 75DB                <1>         jnz     .sk1
+   894                              <1> %if CHECKED
+   895                              <1>         xor     ah,al                   ; the closer at this level: 0 or 2. Bit
+   896                              <1>         and     ah,6                    ;   1 of the opener is 0 for '(' and 1
+   897                              <1>         cmp     ah,2                    ;   for '[', and only the backslash has
+   898                              <1>         je      .sk7                    ;   bit 2: so this is 2 for the wrong
+   899                              <1>                                         ;   closer, and only then
+   900                              <1>         ret
+   901                              <1> .sk6:   test    ah,4                    ; the text ran out:
+   902                              <1>         jnz     SKEND                   ;   '\' with no closer ends the program
+   903                              <1> .sk7:   mov     esi,[V(v_skat)]         ; N. The place is the opener
+   904                              <1>         mov     al,'N'
+   905                              <1>         jmp     errp                    ; (errp drops skip's return address)
+   906                              <1> %else
+   907 000002D5 C3                  <1>         ret
+   908                              <1> %endif
+   909                              <1> 
+   910                              <1> ; psgn: print the low word of EAX as a signed number. pdec: print EAX
+   911                              <1> ; unsigned, by recursion on EAX / 10 (the stack holds the digits). Both use
+   912                              <1> ; EAX, ECX and EDX.
+   913 000002D6 98                  <1> psgn:   cwde
+   914 000002D7 85C0                <1>         test    eax,eax
+   915 000002D9 790B                <1>         jns     pdec
+   916 000002DB 50                  <1>         push    eax
+   917 000002DC B02D                <1>         mov     al,'-'
+   918 000002DE E839000000          <1>         call    putc
+   919 000002E3 58                  <1>         pop     eax
+   920 000002E4 F7D8                <1>         neg     eax
+   921 000002E6 31D2                <1> pdec:   xor     edx,edx
+   922 000002E8 6A0A                <1>         push    10
+   923 000002EA 59                  <1>         pop     ecx
+   924 000002EB F7F1                <1>         div     ecx
+   925 000002ED 52                  <1>         push    edx
+   926 000002EE 85C0                <1>         test    eax,eax
+   927 000002F0 7405                <1>         jz      .pd1
+   928 000002F2 E8EFFFFFFF          <1>         call    pdec
+   929 000002F7 58                  <1> .pd1:   pop     eax
+   930 000002F8 0430                <1>         add     al,'0'
+   931 000002FA EB20                <1>         jmp     putc
+   932                              <1> 
+   933                              <1> ; prstr: print the string at EDX, to its closing quote, decoding '/': it
+   934                              <1> ; clears the bit 6 of the character after it (/M is CR, /` is space; '/'
+   935                              <1> ; and '"' have no bit 6, so // and /" give themselves). EDX is left after
+   936                              <1> ; the quote. This is '$', and the texts of the report and the editor. In
+   937                              <1> ; the checked build a NUL first is an error: Q.
+   938 000002FC 8A02                <1> prstr:  mov     al,[edx]
+   939 000002FE 42                  <1>         inc     edx
+   940 000002FF 3C22                <1>         cmp     al,22h
+   941 00000301 7410                <1>         je      .pr9
+   942                              <1> %if CHECKED
+   943                              <1>         test    al,al
+   944                              <1>         jz      e_dollar
+   945                              <1> %endif
+   946 00000303 3C2F                <1>         cmp     al,'/'
+   947 00000305 7505                <1>         jne     .pr1
+   948 00000307 8A02                <1>         mov     al,[edx]
+   949 00000309 42                  <1>         inc     edx
+   950 0000030A 24BF                <1>         and     al,0BFh
+   951 0000030C E80B000000          <1> .pr1:   call    putc
+   952 00000311 EBE9                <1>         jmp     prstr
+   953 00000313 C3                  <1> .pr9:   ret
+   954                              <1> 
+   955                              <1> ; pmsg: print the text that follows the CALL, to its closing quote, and
+   956                              <1> ; carry on after it. Uses EDX.
+   957 00000314 5A                  <1> pmsg:   pop     edx
+   958 00000315 E8E2FFFFFF          <1>         call    prstr
+   959 0000031A FFE2                <1>         jmp     edx
+   960                              <1> 
+   961                              <1> ; =============================================================================
+   962                              <1> ;  Console layer
+   963                              <1> ;
+   964                              <1> ;  putc prints AL. waitk is the host's key routine: it waits up to EAX ms
+   965                              <1> ;  (0: just a look; -1: for ever) for a key, and returns it in AL with the
+   966                              <1> ;  zero flag clear, or AL = 0 with the zero flag set if none came. Both keep
+   967                              <1> ;  every register but EAX (putc keeps EAX too).
+   968                              <1> ;
+   969                              <1> ;  A running program reads the keyboard only through getk and pollk, which
+   970                              <1> ;  between them give the break key its rules:
+   971                              <1> ;    - Ctrl-C stops the program;
+   972                              <1> ;    - any other key that the break check reads is held at HELD for the
+   973                              <1> ;      next '?', and a newer one takes its place;
+   974                              <1> ;    - '?' (getk) takes the held key first;
+   975                              <1> ;    - a program that has stored a non-zero byte at BRKOFF gets Ctrl-C as a
+   976                              <1> ;      key like any other, but two of them within about 250 ms still stop it.
+   977                              <1> ;  Both are called straight from a handler (or from rpoll), never from a
+   978                              <1> ;  routine under one: the checked build's report counts on finding one
+   979                              <1> ;  return address above the data stack.
+   980                              <1> ; =============================================================================
+   981                              <1> 
+   982                              <1> ; putc: WriteFile to the output handle (standard output; the checked
+   983                              <1> ; report switches it to standard error), one byte. PUSHAD saves everything;
+   984                              <1> ; the byte is AL in the saved EAX, and the count goes in the slot of the
+   985                              <1> ; saved ESP, which POPAD ignores.
+   986 0000031C 60                  <1> putc:   pushad
+   987 0000031D 8D4C240C            <1>         lea     ecx,[esp+12]
+   988 00000321 8D54241C            <1>         lea     edx,[esp+28]
+   989 00000325 6A00                <1>         push    0                       ; lpOverlapped
+   990 00000327 51                  <1>         push    ecx                     ; lpNumberOfBytesWritten
+   991 00000328 6A01                <1>         push    1
+   992 0000032A 52                  <1>         push    edx
+   993 0000032B FF7557              <1>         push    dword [V(v_outh)]
+   994 0000032E FF55B5              <1>         call    [V(iat_WriteFile)]
+   995 00000331 61                  <1>         popad
+   996 00000332 C3                  <1>         ret
+   997                              <1> 
+   998                              <1> ; waitk. At a console: WaitForSingleObject on the input handle for the
+   999                              <1> ; time (EAX: 0 just looks, -1 is INFINITE), then ReadConsoleInputA for one
+  1000                              <1> ; event. Only key-down events
+  1001                              <1> ; count: their character, or for the left and right arrow keys (virtual
+  1002                              <1> ; keys 25h and 27h, which have none) ^B and ^F. Anything else is passed
+  1003                              <1> ; over, and the wait starts again with its whole time: so a wait can last
+  1004                              <1> ; longer than asked by the time of the events passed over (a key-up comes
+  1005                              <1> ; soon after its key-down), which the spec allows ("about n ms"), and no
+  1006                              <1> ; clock is needed.
+  1007                              <1> ; Input that is not a console (a pipe or a file) is read a byte at a time
+  1008                              <1> ; with ReadFile, and only by a wait that is not just a look (a look would
+  1009                              <1> ; eat the input); at its end the interpreter exits.
+  1010 00000333 60                  <1> waitk:  pushad
+  1011 00000334 93                  <1>         xchg    eax,ebx                 ; EBX = the time
+  1012 00000335 807D5F00            <1> .wk1:   cmp     byte [V(v_iscon)],0
+  1013 00000339 743F                <1>         je      .wk6
+  1014 0000033B 53                  <1>         push    ebx
+  1015 0000033C FF7553              <1>         push    dword [V(v_hin)]
+  1016 0000033F FF55B9              <1>         call    [V(iat_WaitForSingleObject)]
+  1017 00000342 85C0                <1>         test    eax,eax
+  1018 00000344 7559                <1>         jnz     .wk8                    ; WAIT_TIMEOUT: no key
+  1019 00000346 8D454F              <1>         lea     eax,[V(v_cnt)]
+  1020 00000349 50                  <1>         push    eax
+  1021 0000034A 6A01                <1>         push    1
+  1022 0000034C 8D453B              <1>         lea     eax,[V(v_rec)]
+  1023 0000034F 50                  <1>         push    eax
+  1024 00000350 FF7553              <1>         push    dword [V(v_hin)]
+  1025 00000353 FF55BD              <1>         call    [V(iat_ReadConsoleInputA)]
+  1026 00000356 807D3B01            <1>         cmp     byte [V(v_rec)],1       ; KEY_EVENT
+  1027 0000035A 75D9                <1>         jne     .wk1
+  1028 0000035C 807D3F00            <1>         cmp     byte [V(v_rec)+4],0     ; bKeyDown
+  1029 00000360 74D3                <1>         je      .wk1
+  1030 00000362 8A4549              <1>         mov     al,[V(v_rec)+14]        ; uChar.AsciiChar
+  1031 00000365 84C0                <1>         test    al,al
+  1032 00000367 7538                <1>         jnz     .wk9
+  1033 00000369 8A4545              <1>         mov     al,[V(v_rec)+10]        ; wVirtualKeyCode
+  1034 0000036C 2C25                <1>         sub     al,25h
+  1035 0000036E 7406                <1>         je      .wk3                    ; VK_LEFT: ^B
+  1036 00000370 2C02                <1>         sub     al,2
+  1037 00000372 75C1                <1>         jne     .wk1                    ; anything but VK_RIGHT: passed over
+  1038 00000374 B004                <1>         mov     al,4
+  1039 00000376 0402                <1> .wk3:   add     al,2                    ; VK_RIGHT: ^F
+  1040 00000378 EB27                <1>         jmp     .wk9
+  1041 0000037A 85DB                <1> .wk6:   test    ebx,ebx                 ; not a console: a look finds nothing
+  1042 0000037C 7421                <1>         jz      .wk8
+  1043 0000037E 6A00                <1>         push    0
+  1044 00000380 8D454F              <1>         lea     eax,[V(v_cnt)]
+  1045 00000383 50                  <1>         push    eax
+  1046 00000384 6A01                <1>         push    1
+  1047 00000386 8D453B              <1>         lea     eax,[V(v_rec)]
+  1048 00000389 50                  <1>         push    eax
+  1049 0000038A FF7553              <1>         push    dword [V(v_hin)]
+  1050 0000038D FF55B1              <1>         call    [V(iat_ReadFile)]
+  1051 00000390 837D4F00            <1>         cmp     dword [V(v_cnt)],0
+  1052 00000394 0F8418FDFFFF        <1>         je      exit                    ; the end of the input
+  1053 0000039A 8A453B              <1>         mov     al,[V(v_rec)]
+  1054 0000039D EB02                <1>         jmp     .wk9
+  1055 0000039F 31C0                <1> .wk8:   xor     eax,eax
+  1056 000003A1 8944241C            <1> .wk9:   mov     [esp+28],eax            ; (POPAD gives it back in EAX)
+  1057 000003A5 61                  <1>         popad
+  1058 000003A6 84C0                <1>         test    al,al
+  1059 000003A8 C3                  <1>         ret
+  1060                              <1> 
+  1061                              <1> ; getk: a key for '?', waiting up to ECX ms (0: for ever); or AL = 0 and
+  1062                              <1> ; the zero flag if none came. A held key goes first, and is taken out.
+  1063                              <1> ; Keeps ECX and EDX.
+  1064 000003A9 31C0                <1> getk:   xor     eax,eax
+  1065 000003AB 86057A014100        <1>         xchg    al,[ARENA+HELD]
+  1066 000003B1 84C0                <1>         test    al,al
+  1067 000003B3 750E                <1>         jnz     gk9
+  1068 000003B5 89C8                <1>         mov     eax,ecx
+  1069 000003B7 85C0                <1>         test    eax,eax
+  1070 000003B9 7501                <1>         jnz     .gk1
+  1071 000003BB 48                  <1>         dec     eax                     ; (-1: INFINITE)
+  1072 000003BC E872FFFFFF          <1> .gk1:   call    waitk
+  1073 000003C1 750F                <1>         jnz     pk1                     ; Ctrl-C? If not, that is the key
+  1074 000003C3 C3                  <1> gk9:    ret
+  1075                              <1> ; pollk: the break check (see rpoll).
+  1076 000003C4 31C0                <1> pollk:  xor     eax,eax
+  1077 000003C6 E868FFFFFF          <1>         call    waitk
+  1078 000003CB 74F6                <1>         jz      gk9                     ; no key
+  1079 000003CD A27A014100          <1>         mov     [ARENA+HELD],al         ; held for the next '?'
+  1080 000003D2 3C03                <1> pk1:    cmp     al,3
+  1081 000003D4 75ED                <1>         jne     gk9
+  1082                              <1> ; ctlc: Ctrl-C has been read. If the break key is on, that is the end. If
+  1083                              <1> ; the program has turned it off, wait about 250 ms for one more key: a
+  1084                              <1> ; second Ctrl-C is the end too; any other key is held (the newest wins),
+  1085                              <1> ; and the Ctrl-C goes to the program: returns AL = 3, zero flag clear.
+  1086 000003D6 803D7B01410000      <1> ctlc:   cmp     byte [ARENA+BRKOFF],0
+  1087 000003DD 0F84CFFCFFFF        <1> .ct0:   jz      brk
+  1088 000003E3 B8FA000000          <1>         mov     eax,250
+  1089 000003E8 E846FFFFFF          <1>         call    waitk
+  1090 000003ED 3C03                <1>         cmp     al,3
+  1091 000003EF 74EC                <1>         je      .ct0                    ; (the zero flag takes the JZ there)
+  1092 000003F1 84C0                <1>         test    al,al
+  1093 000003F3 7405                <1>         jz      .ct3
+  1094 000003F5 A27A014100          <1>         mov     [ARENA+HELD],al
+  1095 000003FA B003                <1> .ct3:   mov     al,3
+  1096 000003FC 84C0                <1>         test    al,al
+  1097 000003FE C3                  <1>         ret
+  1098                              <1> 
+  1099                              <1> %if CHECKED=0
+  1100                              <1>  %if EDITOR
+  1101                              <1> brk     equ     edit0                   ; the editor: back, both stacks cleared
+  1102                              <1>  %else
+  1103                              <1> brk     equ     exit                    ; the runner stops without a word
+  1104                              <1>  %endif
+  1105                              <1> %else
+  1106                              <1> brk     equ     e_break                 ; the checked build reports B
+  1107                              <1> %endif
+  1108                              <1> %if EDITOR
+  1109                              <1> SKEND   equ     skend                   ; a program that ends goes back to the
+  1110                              <1> %else                                   ;   editor, also when it ends inside skip
+  1111                              <1> SKEND   equ     exit
+  1112                              <1> %endif
+  1113                              <1> 
+  1114                              <1> ; endprog: the inner loop read the NUL that ends the program. In the checked
+  1115                              <1> ; build an IP of 0001h means the NUL at 0000h, where every undefined word's
+  1116                              <1> ; cell points: U, with the call undone, so the place is the call itself.
+  1117                              <1> endprog:
+  1118                              <1> %if CHECKED
+  1119                              <1>         cmp     si,1                    ; (ESI is in the arena)
+  1120                              <1>         jne     .ep1
+  1121                              <1>         mov     esi,[edi]
+  1122                              <1>         scasd
+  1123                              <1>         mov     al,'U'
+  1124                              <1>         jmp     error
+  1125                              <1> .ep1:
+  1126                              <1> %endif
+  1127                              <1> %if EDITOR
+  1128                              <1>         jmp     edend
+  1129                              <1> %else
+  1130 000003FF E9AEFCFFFF          <1>         jmp     exit
+  1131                              <1> %endif
+  1132                              <1> 
+  1133                              <1> 
+  1134                              <1> %if CHECKED+EDITOR
+  1135                              <1> ; pstk: the two stack lines:  Stk n: the top 8 cells at most, bottom to top
+  1136                              <1> ;                             Rtn n
+  1137                              <1> ; TOS must be in memory with the rest (pushed), and pstk is called: so the
+  1138                              <1> ; top cell is at [ESP+4] here, and the depth is 2 less than the dwords
+  1139                              <1> ; down to V_DSTOP (the call, and the cell that stands for TOS when the stack
+  1140                              <1> ; is empty).
+  1141                              <1> pstk:   call    pmsg
+  1142                              <1>         db      '/M/JStk ',22h
+  1143                              <1>         mov     eax,[V(v_dstop)]
+  1144                              <1>         sub     eax,esp
+  1145                              <1>         shr     eax,2
+  1146                              <1>         dec     eax
+  1147                              <1>         dec     eax
+  1148                              <1>         push    eax
+  1149                              <1>         call    pdec                    ; the depth
+  1150                              <1>         mov     al,':'
+  1151                              <1>         call    putc
+  1152                              <1>         pop     ecx
+  1153                              <1>         cmp     ecx,9
+  1154                              <1>         jb      .ps1
+  1155                              <1>         call    pmsg
+  1156                              <1>         db      ' ...',22h
+  1157                              <1>         push    8
+  1158                              <1>         pop     ecx
+  1159                              <1> .ps1:   jecxz   .ps3                    ; ECX = the number of cells to show
+  1160                              <1> .ps2:   mov     al,' '
+  1161                              <1>         call    putc
+  1162                              <1>         mov     eax,[esp+ecx*4]
+  1163                              <1>         push    ecx
+  1164                              <1>         call    psgn
+  1165                              <1>         pop     ecx
+  1166                              <1>         loop    .ps2
+  1167                              <1> .ps3:   call    pmsg
+  1168                              <1>         db      '/M/JRtn ',22h
+  1169                              <1>         mov     eax,RSTOP
+  1170                              <1>         sub     eax,edi
+  1171                              <1>         shr     eax,2
+  1172                              <1>         jmp     pdec
+  1173                              <1> %endif
+  1174                              <1> 
+  1175                              <1> ; =============================================================================
+  1176                              <1> ;  The line editor (EDITOR = 1)
+  1177                              <1> ;
+  1178                              <1> ;  The interpreter starts here, and a program that ends comes back here.
+  1179                              <1> ;  There is no prompt. It follows the spec's suggested standard for a line
+  1180                              <1> ;  editor (docs/b8script.md, Environments), and is the Z80's editor, key for
+  1181                              <1> ;  key. Type a line and press Return:
+  1182                              <1> ;
+  1183                              <1> ;    n text    put the text in as line n; the lines from n on move down. A
+  1184                              <1> ;              number past the end (or 0) adds the line at the end.
+  1185                              <1> ;    n         take line n out
+  1186                              <1> ;    anything else is run at once, as B8Script. (Start such a line with a
+  1187                              <1> ;    space if it would begin with a digit.)
+  1188                              <1> ;
+  1189                              <1> ;  A command key ends the line too, and takes what was typed as its argument:
+  1190                              <1> ;
+  1191                              <1> ;    ^G        run the program
+  1192                              <1> ;    n ^L      list from line n (no number: all of it). Any key holds the
+  1193                              <1> ;              list until another key is pressed; Ctrl-C ends it.
+  1194                              <1> ;    n ^E      put line n in the input line; Return puts it back, changed
+  1195                              <1> ;    name ^R   read the file of that name (no name: the current one: the
+  1196                              <1> ;              one from the command line, or the last one typed)
+  1197                              <1> ;    name ^W   write the program to that file (no name: the current one)
+  1198                              <1> ;    ^N ^N     new: no program (the key twice in a row)
+  1199                              <1> ;    ^V        view: the build, both stacks, and the program's size, lines
+  1200                              <1> ;              and free memory
+  1201                              <1> ;    ^X        leave
+  1202                              <1> ;
+  1203                              <1> ;  In the line: ^B and ^F, or the left and right arrow keys, move the cursor;
+  1204                              <1> ;  a character goes in at the cursor; Backspace and DEL take out the one
+  1205                              <1> ;  before it; Esc drops the line (after Esc it waits 5 ms for a '[': Esc [ C
+  1206                              <1> ;  and Esc [ D are right and left too). Only CR, LF, BS and printing
+  1207                              <1> ;  characters are sent to the terminal.
+  1208                              <1> ;
+  1209                              <1> ;  Lines are counted, not numbered. A typed line holds 125 characters; the
+  1210                              <1> ;  one character after a line number separates it from the text and is not
+  1211                              <1> ;  stored. The text is kept as typed, each line ending in CR LF, at PROG. A
+  1212                              <1> ;  file is read up to its first ^Z, and a last line with no line end is
+  1213                              <1> ;  given one; it is written as it is, with no padding.
+  1214                              <1> ;
+  1215                              <1> ;  What lasts from one line to the next: the program, the words, the
+  1216                              <1> ;  variables and the data stack (TOS is kept pushed while the editor runs).
+  1217                              <1> ;  An error or a break clears both stacks. The return stack starts empty for
+  1218                              <1> ;  every line.
+  1219                              <1> ;
+  1220                              <1> ;  Registers in the editor: EBX = the cursor, EDX = the end of the line
+  1221                              <1> ;  (pointers into the line buffer); EDI is free (edit resets it).
+  1222                              <1> ; =============================================================================
+  1223                              <1> %if EDITOR
+  1224                              <1> ; ^F, right arrow: one to the right, by printing the character there
+  1225                              <1> right:  cmp     ebx,edx
+  1226                              <1>         je      ed1                     ; at the end
+  1227                              <1>         mov     al,[ebx]
+  1228                              <1>         inc     ebx
+  1229                              <1>         jmp     short lf1
+  1230                              <1> 
+  1231                              <1> ; Esc: alone it drops the line. An arrow key sends Esc [ and a letter, so
+  1232                              <1> ; wait about 5 ms for a second key: after a '[' read on to the letter that
+  1233                              <1> ; ends the sequence, and act on C (right) and D (left).
+  1234                              <1> esc:    push    5
+  1235                              <1>         pop     eax
+  1236                              <1>         call    waitk
+  1237                              <1>         jnz     .es2
+  1238                              <1>         call    fin                     ; no second key: the line is dropped
+  1239                              <1>         jmp     edit
+  1240                              <1> .es2:   cmp     al,'['
+  1241                              <1>         jne     ed1                     ; not a sequence known here
+  1242                              <1> .es3:   call    ekey
+  1243                              <1>         cmp     al,40h
+  1244                              <1>         jb      .es3                    ; (its parameters)
+  1245                              <1>         sub     al,'C'
+  1246                              <1>         je      right
+  1247                              <1>         dec     al                      ; 'D'?
+  1248                              <1>         jne     ed1                     ; no: on into left
+  1249                              <1> ; ^B, left arrow: the cursor goes one to the left
+  1250                              <1> left:   cmp     bl,80h
+  1251                              <1>         je      ed1                     ; at the start
+  1252                              <1>         dec     ebx
+  1253                              <1>         mov     al,8
+  1254                              <1> lf1:    call    putc
+  1255                              <1>         jmp     ed1
+  1256                              <1> 
+  1257                              <1> ; edit0: an error or a break: both stacks are cleared.
+  1258                              <1> ; skend: a program that ended inside skip: its return address goes.
+  1259                              <1> ; edend: a program that ended: TOS joins the rest of the data stack.
+  1260                              <1> edit0:  mov     esp,[V(v_dstop)]
+  1261                              <1>  %if CHECKED
+  1262                              <1>         push    -11                     ; the report went to stderr: back to
+  1263                              <1>         call    [V(iat_GetStdHandle)]   ;   stdout
+  1264                              <1>         mov     [V(v_outh)],eax
+  1265                              <1>  %endif
+  1266                              <1>         db      3Ch                     ; (CMP AL,n: steps over the POP)
+  1267                              <1> skend:  pop     eax
+  1268                              <1> edend:  push    ebx
+  1269                              <1> ; edit: start a new input line.
+  1270                              <1> edit:   mov     edi,RSTOP               ; the return stack is empty
+  1271                              <1>         xor     eax,eax
+  1272                              <1>         mov     [ARENA+HELD],ax         ; no key is held, and the break key is on
+  1273                              <1>         mov     [V(v_edln)],eax         ; no line is being edited
+  1274                              <1>         mov     ebx,ARENA+LINEBUF       ; EBX = the cursor,
+  1275                              <1>         mov     edx,ebx                 ;   EDX = the end of the line
+  1276                              <1> ed1:    call    ekey
+  1277                              <1>         cmp     al,7Fh
+  1278                              <1>         je      bsp                     ; DEL
+  1279                              <1>         cmp     al,' '
+  1280                              <1>         jae     insc
+  1281                              <1>         cmp     al,9
+  1282                              <1>         je      insc                    ; Tab is text
+  1283                              <1>         cmp     al,8
+  1284                              <1>         je      bsp
+  1285                              <1>         cmp     al,2
+  1286                              <1>         je      left                    ; ^B
+  1287                              <1>         cmp     al,6
+  1288                              <1>         je      right                   ; ^F
+  1289                              <1>         cmp     al,1Bh
+  1290                              <1>         je      esc
+  1291                              <1>         push    edi                     ; a command key? Look it up
+  1292                              <1>         mov     edi,ckeys
+  1293                              <1>         push    NCMD
+  1294                              <1>         pop     ecx
+  1295                              <1>         repne   scasb
+  1296                              <1>         pop     edi
+  1297                              <1>         jne     ed1                     ; no: the key is ignored
+  1298                              <1>         movzx   eax,word [ctabr+ecx*2]  ; the command's address: fin returns
+  1299                              <1>         add     eax,IB                  ;   to it
+  1300                              <1>         push    eax
+  1301                              <1> ; fin: end the input line: CR LF and a NUL after it, and a new line on the
+  1302                              <1> ; terminal. Leaves ESI -> the line.
+  1303                              <1> fin:    mov     word [edx],0A0Dh
+  1304                              <1>         mov     esi,edx
+  1305                              <1>         call    prl                     ; (prints the CR LF)
+  1306                              <1>         mov     byte [esi],0
+  1307                              <1>         mov     esi,ARENA+LINEBUF
+  1308                              <1>         ret
+  1309                              <1> 
+  1310                              <1> ; Backspace, DEL: the character before the cursor goes. The cursor moves
+  1311                              <1> ; left, the rest of the line moves down over it, and the last place (now a
+  1312                              <1> ; space) is printed over along with the rest.
+  1313                              <1> bsp:    cmp     bl,80h
+  1314                              <1>         je      ed1                     ; at the start
+  1315                              <1>         dec     ebx
+  1316                              <1>         mov     al,8
+  1317                              <1>         call    putc
+  1318                              <1>         mov     ecx,ebx
+  1319                              <1> .bs1:   mov     al,[ecx+1]
+  1320                              <1>         mov     [ecx],al
+  1321                              <1>         inc     ecx
+  1322                              <1>         cmp     ecx,edx
+  1323                              <1>         jne     .bs1
+  1324                              <1>         mov     byte [ecx-1],' '
+  1325                              <1>         dec     edx
+  1326                              <1>         jmp     short ic2
+  1327                              <1> ; A character goes in at the cursor: it ripples up through the rest of the
+  1328                              <1> ; line, the cursor moves on, and the rest is printed again.
+  1329                              <1> insc:   cmp     dl,0FDh
+  1330                              <1>         je      ed1                     ; the line is full: 125 characters
+  1331                              <1>         call    putc
+  1332                              <1>         mov     ecx,ebx
+  1333                              <1> .ic1:   xchg    al,[ecx]
+  1334                              <1>         inc     ecx
+  1335                              <1>         cmp     ecx,edx
+  1336                              <1>         jbe     .ic1
+  1337                              <1>         inc     ebx
+  1338                              <1>         inc     edx
+  1339                              <1>         mov     ecx,edx
+  1340                              <1> ic2:    call    tail
+  1341                              <1>         jmp     ed1
+  1342                              <1> ; tail: print the line from the cursor to ECX, and bring the cursor back
+  1343                              <1> ; with backspaces. Nothing at all if the cursor is at ECX.
+  1344                              <1> tail:   mov     esi,ebx
+  1345                              <1> .ta1:   cmp     esi,ecx
+  1346                              <1>         je      .ta2
+  1347                              <1>         lodsb
+  1348                              <1>         call    putc
+  1349                              <1>         jmp     .ta1
+  1350                              <1> .ta2:   cmp     esi,ebx
+  1351                              <1>         je      .ta3
+  1352                              <1>         mov     al,8
+  1353                              <1>         call    putc
+  1354                              <1>         dec     esi
+  1355                              <1>         jmp     .ta2
+  1356                              <1> .ta3:   ret
+  1357                              <1> 
+  1358                              <1> ; ekey: wait for a key
+  1359                              <1> ekey:   or      eax,-1
+  1360                              <1>         jmp     waitk
+  1361                              <1> 
+  1362                              <1> ; The command keys, and where each goes (after fin). REPNE SCASB leaves ECX
+  1363                              <1> ; = the number of keys after the one found, so the table is backwards. (The
+  1364                              <1> ; addresses are kept as RVAs, which fit in a word.)
+  1365                              <1> ckeys:  db      13, 7, 12, 5, 18, 23, 14, 22, 24
+  1366                              <1> NCMD    equ     $-ckeys
+  1367                              <1> ctabr:  dw      exit-IB                 ; ^X
+  1368                              <1>         dw      cview-IB                   ; ^V
+  1369                              <1>         dw      cnew-IB                 ; ^N
+  1370                              <1>         dw      cwrite-IB                  ; ^W
+  1371                              <1>         dw      cread-IB                   ; ^R
+  1372                              <1>         dw      cedln-IB                   ; ^E
+  1373                              <1>         dw      clist-IB                   ; ^L
+  1374                              <1>         dw      crun-IB                 ; ^G
+  1375                              <1>         dw      cret-IB                 ; Return
+  1376                              <1> 
+  1377                              <1> ; ^N ^N: no program, if the next key is ^N too
+  1378                              <1> cnew:   call    ekey
+  1379                              <1>         cmp     al,14
+  1380                              <1>         jne     gedit
+  1381                              <1>         mov     byte [ARENA+PROG],0
+  1382                              <1> gedit:  jmp     edit
+  1383                              <1> 
+  1384                              <1> ; ^E: line n goes into the input line, to be changed. V_EDLN remembers
+  1385                              <1> ; which line it was: Return puts the text back in its place.
+  1386                              <1> cedln:  call    rdnum
+  1387                              <1>         movzx   eax,dx
+  1388                              <1>         push    eax
+  1389                              <1>         call    find                    ; EDI -> the line, or the NUL
+  1390                              <1>         pop     eax
+  1391                              <1>         cmp     byte [edi],0
+  1392                              <1>         je      gedit
+  1393                              <1>         mov     [V(v_edln)],eax
+  1394                              <1>         mov     ebx,ARENA+LINEBUF
+  1395                              <1> .ce1:   mov     al,[edi]                ; copy it, and show it, up to its CR
+  1396                              <1>         cmp     al,13                   ;   (or LF)
+  1397                              <1>         je      .ce2
+  1398                              <1>         cmp     al,10
+  1399                              <1>         je      .ce2
+  1400                              <1>         mov     [ebx],al
+  1401                              <1>         call    putc
+  1402                              <1>         inc     edi
+  1403                              <1>         inc     ebx
+  1404                              <1>         cmp     bl,0FDh                 ; (a longer line is cut at 125)
+  1405                              <1>         jne     .ce1
+  1406                              <1> .ce2:   mov     edx,ebx                 ; the cursor is at the line's end
+  1407                              <1>         jmp     ed1
+  1408                              <1> 
+  1409                              <1> ; Return. If ^E put a line here, the text goes back in its place. If not:
+  1410                              <1> ; a number and text is a line to put in, a number alone a line to take out,
+  1411                              <1> ; and anything else is run where it is.
+  1412                              <1> cret:   push    edx                     ; the end of what was typed
+  1413                              <1>         mov     eax,[V(v_edln)]
+  1414                              <1>         test    eax,eax
+  1415                              <1>         jz      .cr1
+  1416                              <1>         push    eax
+  1417                              <1>         call    delln
+  1418                              <1>         pop     eax
+  1419                              <1>         jmp     short ins
+  1420                              <1> .cr1:   call    rdnum                   ; DX = the number it starts with
+  1421                              <1>         mov     eax,esi                 ; ESI's low byte is still 80h if there
+  1422                              <1>         cmp     al,80h                  ;   was no number:
+  1423                              <1>         je      runln                   ;   then run the line
+  1424                              <1>         movzx   eax,dx
+  1425                              <1>         cmp     byte [esi],13
+  1426                              <1>         jne     .cr2
+  1427                              <1>         pop     edx                     ; the number alone: take that line out
+  1428                              <1>         call    delln
+  1429                              <1>         jmp     gedit
+  1430                              <1> .cr2:   inc     esi                     ; step over the one character after it
+  1431                              <1> 
+  1432                              <1> ; Put the text at ESI in as line EAX: open a gap of its length there, CR
+  1433                              <1> ; and LF included, and copy it in.
+  1434                              <1> ins:    call    find                    ; EDI -> where it goes
+  1435                              <1>         pop     ecx                     ; the end of what was typed
+  1436                              <1>         inc     ecx
+  1437                              <1>         inc     ecx
+  1438                              <1>         sub     ecx,esi                 ; the length, with its CR LF
+  1439                              <1>         push    esi                     ; the text
+  1440                              <1>         push    ecx                     ; its length
+  1441                              <1>         push    edi                     ; where it goes
+  1442                              <1>         mov     esi,edi
+  1443                              <1> .in1:   lodsb                           ; find the program's NUL
+  1444                              <1>         test    al,al
+  1445                              <1>         jnz     .in1
+  1446                              <1>         dec     esi
+  1447                              <1>         mov     ecx,esi
+  1448                              <1>         sub     ecx,edi
+  1449                              <1>         inc     ecx                     ; the bytes to move up, NUL included
+  1450                              <1>         mov     edi,esi
+  1451                              <1>         add     edi,[esp+4]             ; the NUL's new place
+  1452                              <1>         std
+  1453                              <1>         rep     movsb                   ; move the rest of the program up
+  1454                              <1>         cld
+  1455                              <1>         pop     edi
+  1456                              <1>         pop     ecx
+  1457                              <1>         pop     esi
+  1458                              <1>         rep     movsb
+  1459                              <1>         jmp     gedit
+  1460                              <1> 
+  1461                              <1> ; ^G: run the program. runln: run the typed line (ESI -> it).
+  1462                              <1> crun:   mov     esi,ARENA+PROG
+  1463                              <1>         db      3Ch                     ; (CMP AL,n: steps over the POP)
+  1464                              <1> runln:   pop     eax                     ; (the end of what was typed)
+  1465                              <1> %endif
+  1466                              <1> ; run0: start running at ESI. The heap starts after the stored program's
+  1467                              <1> ; NUL. TOS is popped: the data stack is as the last line left it.
+  1468 00000404 BA00024100          <1> run0:    mov     edx,ARENA+PROG
+  1469 00000409 42                  <1> .st1:   inc     edx
+  1470 0000040A 807AFF00            <1>         cmp     byte [edx-1],0
+  1471 0000040E 75F9                <1>         jne     .st1
+  1472 00000410 6689157C014100      <1>         mov     [ARENA+HEAP],dx
+  1473                              <1> %if CHECKED
+  1474                              <1>         movzx   eax,dx                  ; '_' may not release below this
+  1475                              <1>         mov     [V(v_npend)],eax
+  1476                              <1> %endif
+  1477 00000417 5B                  <1>         pop     ebx
+  1478 00000418 FFE5                <1>         jmp     ebp
+  1479                              <1> 
+  1480                              <1> %if EDITOR
+  1481                              <1> ; ^L: list from line n. EDX = the number of the line at ESI.
+  1482                              <1> clist:  call    rdnum                   ; DX = n, or 0 if there was none:
+  1483                              <1>         movzx   eax,dx
+  1484                              <1>         test    eax,eax
+  1485                              <1>         jnz     .li0
+  1486                              <1>         inc     eax                     ;   then from line 1
+  1487                              <1> .li0:   push    eax
+  1488                              <1>         call    find
+  1489                              <1>         pop     edx
+  1490                              <1>         mov     esi,edi
+  1491                              <1> .li1:   cmp     byte [esi],0
+  1492                              <1>         je      gedit                   ; the end of the text
+  1493                              <1>         xor     eax,eax
+  1494                              <1>         call    waitk
+  1495                              <1>         jz      .li3                    ; no key: carry on
+  1496                              <1>         cmp     al,3
+  1497                              <1>         je      gedit                   ; Ctrl-C ends the list,
+  1498                              <1>         call    ekey                    ;   any other key holds it until the
+  1499                              <1>         cmp     al,3                    ;   next (and a Ctrl-C then ends it)
+  1500                              <1>         je      gedit
+  1501                              <1> .li3:   push    edx
+  1502                              <1>         xchg    eax,edx
+  1503                              <1>         call    pdec                    ; the line's number,
+  1504                              <1>         mov     al,' '
+  1505                              <1>         call    putc                    ;   a space,
+  1506                              <1>         pop     edx
+  1507                              <1>         inc     edx
+  1508                              <1>         call    prl                     ;   and the line
+  1509                              <1>         jmp     .li1
+  1510                              <1> 
+  1511                              <1> ; ^V: view.
+  1512                              <1> cview:  call    pmsg
+  1513                              <1>  %if CHECKED
+  1514                              <1>         db      'B8SWINEC 2026-11-21',22h
+  1515                              <1>  %else
+  1516                              <1>         db      'B8SWINE 2026-11-21',22h
+  1517                              <1>  %endif
+  1518                              <1>         call    pstk                    ; both stacks
+  1519                              <1>         mov     edi,ARENA+PROG
+  1520                              <1>         or      ecx,-1
+  1521                              <1> .cv1:   inc     ecx                     ; count the lines, and find the end
+  1522                              <1>         call    nxl
+  1523                              <1>         jnz     .cv1
+  1524                              <1>         push    ecx
+  1525                              <1>         call    pmsg
+  1526                              <1>         db      '/M/JProg ',22h
+  1527                              <1>         lea     eax,[edi-(ARENA+PROG)]
+  1528                              <1>         call    pdec                    ; the program's size
+  1529                              <1>         call    pmsg
+  1530                              <1>         db      '/M/JLines ',22h
+  1531                              <1>         pop     eax
+  1532                              <1>         call    pdec
+  1533                              <1>         call    pmsg
+  1534                              <1>         db      '/M/JFree ',22h
+  1535                              <1>         mov     eax,ARENA+LIMIT-1
+  1536                              <1>         sub     eax,edi
+  1537                              <1>         call    pdec                    ; the room left for text and heap
+  1538                              <1>         call    pmsg
+  1539                              <1>         db      '/M/J',22h
+  1540                              <1>         jmp     gedit
+  1541                              <1> 
+  1542                              <1> ; delln: take line EAX out: copy everything after it down over it. Keeps ESI.
+  1543                              <1> delln:  push    esi
+  1544                              <1>         call    find
+  1545                              <1>         push    edi
+  1546                              <1>         call    nxl                     ; EDI -> the next line
+  1547                              <1>         mov     esi,edi
+  1548                              <1>         pop     edi
+  1549                              <1> .de1:   lodsb
+  1550                              <1>         stosb
+  1551                              <1>         test    al,al
+  1552                              <1>         jnz     .de1
+  1553                              <1>         pop     esi
+  1554                              <1>         ret
+  1555                              <1> 
+  1556                              <1> ; find: EAX = a line number. Returns EDI -> that line, or -> the NUL at the
+  1557                              <1> ; end of the text if there are fewer lines (or the number is 0). Keeps ESI.
+  1558                              <1> find:   xchg    eax,ecx
+  1559                              <1>         mov     edi,ARENA+PROG
+  1560                              <1> .fi1:   dec     cx
+  1561                              <1>         jz      .fi2
+  1562                              <1>         call    nxl
+  1563                              <1>         jnz     .fi1
+  1564                              <1> .fi2:   ret
+  1565                              <1> 
+  1566                              <1> ; nxl: step EDI over one line, to just past its LF (and return not-zero),
+  1567                              <1> ; or stop at the NUL that ends the text (and return zero).
+  1568                              <1> nxl:    mov     al,[edi]
+  1569                              <1>         test    al,al
+  1570                              <1>         jz      .nx1
+  1571                              <1>         inc     edi
+  1572                              <1>         cmp     al,10
+  1573                              <1>         jne     nxl
+  1574                              <1>         test    al,al
+  1575                              <1> .nx1:   ret
+  1576                              <1> 
+  1577                              <1> ; prl: print the line at ESI, to its LF; ESI -> just past it.
+  1578                              <1> prl:    lodsb
+  1579                              <1>         call    putc
+  1580                              <1>         cmp     al,10
+  1581                              <1>         jne     prl
+  1582                              <1>         ret
+  1583                              <1> 
+  1584                              <1> ; ^R: read the file. ^W: write the file (made anew, or emptied first). A
+  1585                              <1> ; name typed before the key is the file's name from now on. (A file that
+  1586                              <1> ; can't be made or written is not noticed: nothing is written.)
+  1587                              <1> cread:  call    setname
+  1588                              <1>         call    load
+  1589                              <1>         jmp     gedit
+  1590                              <1> cwrite: call    setname
+  1591                              <1>         mov     edi,ARENA+PROG
+  1592                              <1>         xor     eax,eax
+  1593                              <1>         or      ecx,-1
+  1594                              <1>         repne   scasb
+  1595                              <1>         not     ecx
+  1596                              <1>         dec     ecx                     ; the length of the text
+  1597                              <1>         push    ecx
+  1598                              <1>         push    eax                     ; hTemplateFile
+  1599                              <1>         push    eax                     ; dwFlagsAndAttributes
+  1600                              <1>         push    2                       ; CREATE_ALWAYS
+  1601                              <1>         push    eax                     ; lpSecurityAttributes
+  1602                              <1>         push    eax                     ; no sharing
+  1603                              <1>         push    40000000h               ; GENERIC_WRITE
+  1604                              <1>         push    NAMEBUF
+  1605                              <1>         call    [V(iat_CreateFileA)]
+  1606                              <1>         pop     ecx
+  1607                              <1>         push    eax                     ; (for CloseHandle)
+  1608                              <1>         push    0
+  1609                              <1>         lea     edx,[V(v_cnt)]
+  1610                              <1>         push    edx
+  1611                              <1>         push    ecx
+  1612                              <1>         push    ARENA+PROG
+  1613                              <1>         push    eax
+  1614                              <1>         call    [V(iat_WriteFile)]
+  1615                              <1>         call    [V(iat_CloseHandle)]
+  1616                              <1>         jmp     gedit
+  1617                              <1> 
+  1618                              <1> ; setname: if a name was typed (the line does not start with its CR), it is
+  1619                              <1> ; the file's name from now on, as typed (a Windows path).
+  1620                              <1> setname:mov     esi,ARENA+LINEBUF
+  1621                              <1>         cmp     byte [esi],13
+  1622                              <1>         je      .sn2
+  1623                              <1>         mov     edi,NAMEBUF
+  1624                              <1> .sn1:   lodsb
+  1625                              <1>         cmp     al,13
+  1626                              <1>         jne     .sn3
+  1627                              <1>         mov     al,0
+  1628                              <1> .sn3:   stosb
+  1629                              <1>         test    al,al
+  1630                              <1>         jnz     .sn1
+  1631                              <1> .sn2:   ret
+  1632                              <1> %endif
+  1633                              <1> 
+  1634                              <1> ; The dispatch table: each handler's distance from hbase (an error if it
+  1635                              <1> ; is not in the window).
+  1636                              <1> %macro  PT 1
+  1637                              <1>         db      (%1-hbase) & 0FFh
+  1638                              <1>         times   -((%1-hbase) > 255) db 0
+  1639                              <1> %endmacro
+  1640                              <1> ptab:   PT h_store      ; !
+  1640                              <2> ptab: 
+  1637 0000041A B5                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1641                              <1>         PT h_str        ; "
+  1637 0000041B BC                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1642                              <1>         PT h_num        ; #
+  1637 0000041C D8                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1643                              <1>         PT h_print      ; $
+  1637 0000041D C6                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1644                              <1>         PT h_swap       ; %
+  1637 0000041E AB                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1645                              <1>         PT h_and        ; &
+  1637 0000041F 5B                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1646                              <1>         PT h_emit       ; '
+  1637 00000420 CF                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1647                              <1>         PT h_open       ; (
+  1637 00000421 23                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1648                              <1>         PT h_close      ; )
+  1637 00000422 16                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1649                              <1>         PT h_mul        ; *
+  1637 00000423 72                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1650                              <1>         PT h_add        ; +
+  1637 00000424 55                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1651                              <1>         PT h_cfetch     ; ,
+  1637 00000425 E1                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1652                              <1>         PT h_sub        ; -
+  1637 00000426 46                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1653                              <1>         PT h_cstore     ; .
+  1637 00000427 B0                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1654                              <1>         PT h_div        ; /
+  1637 00000428 95                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1655                              <1>         PT h_dup        ; :
+  1637 00000429 A8                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1656                              <1>         PT h_drop       ; ;
+  1637 0000042A B9                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1657                              <1>         PT h_lt         ; <
+  1637 0000042B 79                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1658                              <1>         PT h_eq         ; =
+  1637 0000042C 8B                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1659                              <1>         PT h_gt         ; >
+  1637 0000042D 7C                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1660                              <1>         PT h_key        ; ?
+  1637 0000042E EF                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1661                              <1>         PT h_fetch      ; @
+  1637 0000042F 41                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1662                              <1>         PT h_def        ; [
+  1637 00000430 E9                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1663                              <1>         PT h_break      ; backslash
+  1637 00000431 05                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1664                              <1>         PT h_ret        ; ]
+  1637 00000432 00                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1665                              <1>         PT h_xor        ; ^
+  1637 00000433 67                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1666                              <1>         PT h_alloc      ; _
+  1637 00000434 EB                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1667                              <1>         PT h_grave      ; `
+  1637 00000435 ED                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1668                              <1>         PT h_tor        ; {
+  1637 00000436 34                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1669                              <1>         PT h_or         ; |
+  1637 00000437 61                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1670                              <1>         PT h_fromr      ; }
+  1637 00000438 3C                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1671                              <1>         PT h_not        ; ~
+  1637 00000439 6D                  <2>  db (%1-hbase) & 0FFh
+  1638                              <2>  times -((%1-hbase) > 255) db 0
+  1672                              <1> 
+  1673                              <1> ; =============================================================================
+  1674                              <1> ;  The imports: kernel32.dll only. An import directory entry, the import
+  1675                              <1> ;  lookup table, the hint/name entries and the DLL's name; then the import
+  1676                              <1> ;  address table, which the loader fills in, right below `next`, so that
+  1677                              <1> ;  CALL [EBP+d8] reaches it.
+  1678                              <1> ; =============================================================================
+  1679                              <1> %macro  IMPORTS 1
+  1680                              <1>         IMP     GetStdHandle
+  1681                              <1>         IMP     GetConsoleMode
+  1682                              <1>         IMP     SetConsoleMode
+  1683                              <1>         IMP     GetCommandLineA
+  1684                              <1>         IMP     CreateFileA
+  1685                              <1>         IMP     ReadFile
+  1686                              <1>         IMP     WriteFile
+  1687                              <1> %if EDITOR
+  1688                              <1>         IMP     CloseHandle             ; (a runner leaves its file open)
+  1689                              <1> %endif
+  1690                              <1>         IMP     WaitForSingleObject
+  1691                              <1>         IMP     ReadConsoleInputA
+  1692                              <1>         IMP     ExitProcess
+  1693                              <1> %endmacro
+  1694 0000043A 00<rep 2h>          <1>         align   4, db 0
+  1695 0000043C [6404C0FF]          <1> idesc:  dd      ilt-IB                  ; OriginalFirstThunk: the lookup table
+  1696 00000440 00000000            <1>         dd      0                       ; TimeDateStamp
+  1697 00000444 00000000            <1>         dd      0                       ; ForwarderChain
+  1698 00000448 [3405C0FF]          <1>         dd      dllname-IB              ; Name
+  1699 0000044C [4405C0FF]          <1>         dd      iat-IB                  ; FirstThunk: the IAT
+  1700 00000450 00<rep 14h>         <1>         times   20 db 0                 ; the null entry that ends the list
+  1701                              <1> idesc_end:
+  1702                              <1> %macro  IMP 1
+  1703                              <1>         dd      hn_%1-IB
+  1704                              <1> %endmacro
+  1705                              <1> ilt:    IMPORTS 0
+  1705                              <2> ilt: 
+  1680                              <2>  IMP GetStdHandle
+  1703 00000464 [9004C0FF]          <3>  dd hn_%1-IB
+  1681                              <2>  IMP GetConsoleMode
+  1703 00000468 [A004C0FF]          <3>  dd hn_%1-IB
+  1682                              <2>  IMP SetConsoleMode
+  1703 0000046C [B204C0FF]          <3>  dd hn_%1-IB
+  1683                              <2>  IMP GetCommandLineA
+  1703 00000470 [C404C0FF]          <3>  dd hn_%1-IB
+  1684                              <2>  IMP CreateFileA
+  1703 00000474 [D604C0FF]          <3>  dd hn_%1-IB
+  1685                              <2>  IMP ReadFile
+  1703 00000478 [E404C0FF]          <3>  dd hn_%1-IB
+  1686                              <2>  IMP WriteFile
+  1703 0000047C [F004C0FF]          <3>  dd hn_%1-IB
+  1687                              <2> %if EDITOR
+  1688                              <2>  IMP CloseHandle
+  1689                              <2> %endif
+  1690                              <2>  IMP WaitForSingleObject
+  1703 00000480 [FC04C0FF]          <3>  dd hn_%1-IB
+  1691                              <2>  IMP ReadConsoleInputA
+  1703 00000484 [1205C0FF]          <3>  dd hn_%1-IB
+  1692                              <2>  IMP ExitProcess
+  1703 00000488 [2605C0FF]          <3>  dd hn_%1-IB
+  1706 0000048C 00000000            <1>         dd      0
+  1707                              <1> %macro  IMP 1
+  1708                              <1> hn_%1:  dw      0                       ; hint
+  1709                              <1>         db      %str(%1),0
+  1710                              <1>         align   2, db 0
+  1711                              <1> %endmacro
+  1712                              <1>         IMPORTS 0
+  1680                              <2>  IMP GetStdHandle
+  1708 00000490 0000                <3> hn_%1: dw 0
+  1709 00000492 47657453746448616E- <3>  db %str(%1),0
+  1709 0000049B 646C6500            <3>
+  1710 0000049F 00                  <3>  align 2, db 0
+  1681                              <2>  IMP GetConsoleMode
+  1708 000004A0 0000                <3> hn_%1: dw 0
+  1709 000004A2 476574436F6E736F6C- <3>  db %str(%1),0
+  1709 000004AB 654D6F646500        <3>
+  1710 000004B1 00                  <3>  align 2, db 0
+  1682                              <2>  IMP SetConsoleMode
+  1708 000004B2 0000                <3> hn_%1: dw 0
+  1709 000004B4 536574436F6E736F6C- <3>  db %str(%1),0
+  1709 000004BD 654D6F646500        <3>
+  1710 000004C3 00                  <3>  align 2, db 0
+  1683                              <2>  IMP GetCommandLineA
+  1708 000004C4 0000                <3> hn_%1: dw 0
+  1709 000004C6 476574436F6D6D616E- <3>  db %str(%1),0
+  1709 000004CF 644C696E654100      <3>
+  1710                              <3>  align 2, db 0
+  1684                              <2>  IMP CreateFileA
+  1708 000004D6 0000                <3> hn_%1: dw 0
+  1709 000004D8 43726561746546696C- <3>  db %str(%1),0
+  1709 000004E1 654100              <3>
+  1710                              <3>  align 2, db 0
+  1685                              <2>  IMP ReadFile
+  1708 000004E4 0000                <3> hn_%1: dw 0
+  1709 000004E6 5265616446696C6500  <3>  db %str(%1),0
+  1710 000004EF 00                  <3>  align 2, db 0
+  1686                              <2>  IMP WriteFile
+  1708 000004F0 0000                <3> hn_%1: dw 0
+  1709 000004F2 577269746546696C65- <3>  db %str(%1),0
+  1709 000004FB 00                  <3>
+  1710                              <3>  align 2, db 0
+  1687                              <2> %if EDITOR
+  1688                              <2>  IMP CloseHandle
+  1689                              <2> %endif
+  1690                              <2>  IMP WaitForSingleObject
+  1708 000004FC 0000                <3> hn_%1: dw 0
+  1709 000004FE 57616974466F725369- <3>  db %str(%1),0
+  1709 00000507 6E676C654F626A6563- <3>
+  1709 00000510 7400                <3>
+  1710                              <3>  align 2, db 0
+  1691                              <2>  IMP ReadConsoleInputA
+  1708 00000512 0000                <3> hn_%1: dw 0
+  1709 00000514 52656164436F6E736F- <3>  db %str(%1),0
+  1709 0000051D 6C65496E7075744100  <3>
+  1710                              <3>  align 2, db 0
+  1692                              <2>  IMP ExitProcess
+  1708 00000526 0000                <3> hn_%1: dw 0
+  1709 00000528 4578697450726F6365- <3>  db %str(%1),0
+  1709 00000531 737300              <3>
+  1710                              <3>  align 2, db 0
+  1713 00000534 4B45524E454C33322E- <1> dllname:db      'KERNEL32.dll',0
+  1713 0000053D 646C6C00            <1>
+  1714 00000541 00<rep 3h>          <1>         align   4, db 0
+  1715                              <1> %macro  IMP 1
+  1716                              <1> iat_%1: dd      hn_%1-IB
+  1717                              <1> %endmacro
+  1718                              <1> iat:    IMPORTS 0
+  1718                              <2> iat: 
+  1680                              <2>  IMP GetStdHandle
+  1716 00000544 [9004C0FF]          <3> iat_%1: dd hn_%1-IB
+  1681                              <2>  IMP GetConsoleMode
+  1716 00000548 [A004C0FF]          <3> iat_%1: dd hn_%1-IB
+  1682                              <2>  IMP SetConsoleMode
+  1716 0000054C [B204C0FF]          <3> iat_%1: dd hn_%1-IB
+  1683                              <2>  IMP GetCommandLineA
+  1716 00000550 [C404C0FF]          <3> iat_%1: dd hn_%1-IB
+  1684                              <2>  IMP CreateFileA
+  1716 00000554 [D604C0FF]          <3> iat_%1: dd hn_%1-IB
+  1685                              <2>  IMP ReadFile
+  1716 00000558 [E404C0FF]          <3> iat_%1: dd hn_%1-IB
+  1686                              <2>  IMP WriteFile
+  1716 0000055C [F004C0FF]          <3> iat_%1: dd hn_%1-IB
+  1687                              <2> %if EDITOR
+  1688                              <2>  IMP CloseHandle
+  1689                              <2> %endif
+  1690                              <2>  IMP WaitForSingleObject
+  1716 00000560 [FC04C0FF]          <3> iat_%1: dd hn_%1-IB
+  1691                              <2>  IMP ReadConsoleInputA
+  1716 00000564 [1205C0FF]          <3> iat_%1: dd hn_%1-IB
+  1692                              <2>  IMP ExitProcess
+  1716 00000568 [2605C0FF]          <3> iat_%1: dd hn_%1-IB
+  1719 0000056C 00000000            <1>         dd      0
+  1720                              <1> iat_end:
+  1721                              <1> 
+  1722                              <1> ; =============================================================================
+  1723                              <1> ;  The letters and digits, the return stack's push, and the inner loop
+  1724                              <1> ; =============================================================================
+  1725                              <1> 
+  1726                              <1> ; A-Z: call the word. The return address (the IP after the letter) goes on
+  1727                              <1> ; the return stack, and the IP becomes the address in the letter's cell.
+  1728 00000570 89F2                <1> upper:  mov     edx,esi
+  1729 00000572 668BB40000014100    <1>         mov     si,[ARENA+LET+eax*2]
+  1730                              <1> 
+  1731                              <1> ; rpush: push EDX on the return stack, then next. Everything that pushes the
+  1732                              <1> ; return stack ends here, and the true ')' comes to rpoll.
+  1733                              <1> ;
+  1734                              <1> ; The break key is looked at here, so at every word call and loop-back (and
+  1735                              <1> ; block entry and '{'), but only one time in 256: V_PCNT counts them.
+  1736 0000057A 83EF04              <1> rpush:  sub     edi,4
+  1737 0000057D 8917                <1>         mov     [edi],edx
+  1738 0000057F FE4D60              <1> rpoll:  dec     byte [V(v_pcnt)]
+  1739 00000582 7505                <1>         jnz     .rp1
+  1740 00000584 E83BFEFFFF          <1>         call    pollk
+  1741 00000589 FFE5                <1> .rp1:   jmp     ebp
+  1742                              <1> 
+  1743                              <1> ; =============================================================================
+  1744                              <1> ;  The inner loop: read one character and sort it by range.
+  1745                              <1> ;
+  1746                              <1> ;    00h          end of program
+  1747                              <1> ;    01h-20h, 7Fh-FFh   ignored (control, space, DEL, high bytes; the checked
+  1748                              <1> ;                 build stops on 80h-FFh: X)
+  1749                              <1> ;    30h-39h      digit: read a whole number
+  1750                              <1> ;    41h-5Ah      A-Z: call the word in that letter's cell
+  1751                              <1> ;    61h-7Ah      a-z: push the address of that letter's cell
+  1752                              <1> ;    the rest     punctuation: jump through PTAB, 32 entries
+  1753                              <1> ; =============================================================================
+  1754                              <1> ; Digits: step back onto the first digit and read the whole number.
+  1755 0000058B 53                  <1> digit:  push    ebx
+  1756 0000058C 4E                  <1>         dec     esi
+  1757 0000058D E8F9FCFFFF          <1>         call    rdnum
+  1758 00000592 FFE5                <1>         jmp     ebp
+  1759                              <1> 
+  1760                              <1> ; a-z: push the cell's address (the cell is the variable).
+  1761 00000594 53                  <1> lower:  push    ebx
+  1762 00000595 8D9C0000014100      <1>         lea     ebx,[ARENA+LET+eax*2]
+  1763 0000059C FFE5                <1>         jmp     ebp
+  1764                              <1> ; (digit, lower and ctl are here, before next, to keep the variables after
+  1765                              <1> ; next in reach)
+  1766 0000059E 0421                <1> ctl:    add     al,21h                  ; back to c; zero only for NUL
+  1767 000005A0 7505                <1>         jnz     next                    ; the rest are ignored
+  1768 000005A2 E958FEFFFF          <1>         jmp     endprog
+  1769                              <1> %if CHECKED
+  1770                              <1> e_hi:   mov     al,'X'                  ; a reserved byte outside a string
+  1771                              <1>         jmp     error
+  1772                              <1> %endif
+  1773                              <1> next:
+  1774                              <1> %if CHECKED
+  1775                              <1>         call    chkstk                  ; both stacks, once per character
+  1776                              <1> %endif
+  1777 000005A7 31C0                <1>         xor     eax,eax
+  1778 000005A9 AC                  <1>         lodsb
+  1779 000005AA 2C21                <1>         sub     al,21h                  ; AL = c - 21h
+  1780 000005AC 72F0                <1>         jb      ctl                     ; c < 21h: NUL ends, the rest are ignored
+  1781 000005AE 3C0F                <1>         cmp     al,0Fh
+  1782 000005B0 7222                <1>         jb      punct                   ; 21h-2Fh: PTAB index 0-14
+  1783 000005B2 2C0F                <1>         sub     al,0Fh                  ; AL = c - 30h
+  1784 000005B4 3C0A                <1>         cmp     al,0Ah
+  1785 000005B6 72D3                <1>         jb      digit                   ; 30h-39h
+  1786 000005B8 3C11                <1>         cmp     al,11h
+  1787 000005BA 7216                <1>         jb      p3a                     ; 3Ah-40h
+  1788 000005BC 2C11                <1>         sub     al,11h                  ; AL = c - 41h
+  1789 000005BE 3C1A                <1>         cmp     al,1Ah
+  1790 000005C0 72AE                <1>         jb      upper                   ; 41h-5Ah: AL = letter index 0-25
+  1791 000005C2 3C20                <1>         cmp     al,20h
+  1792 000005C4 720A                <1>         jb      p5b                     ; 5Bh-60h
+  1793 000005C6 3C3A                <1>         cmp     al,3Ah
+  1794 000005C8 72CA                <1>         jb      lower                   ; 61h-7Ah: AL = 20h-39h (cell +64 bytes)
+  1795 000005CA 3C3E                <1>         cmp     al,3Eh
+  1796                              <1> %if CHECKED
+  1797                              <1>         je      next                    ; 7Fh, DEL: ignored
+  1798                              <1>         jae     e_hi                    ; 80h-FFh: reserved
+  1799                              <1> %else
+  1800 000005CC 73D9                <1>         jae     next                    ; 7Fh-FFh: ignored
+  1801                              <1> %endif
+  1802 000005CE 2C1A                <1>         sub     al,1Ah                  ; 7Bh-7Eh: -1Eh in all, index 28-31
+  1803 000005D0 2C09                <1> p5b:    sub     al,9                    ; 5Bh-60h: -4 in all, index 22-27
+  1804 000005D2 0405                <1> p3a:    add     al,5                    ; 3Ah-40h: index 15-21
+  1805 000005D4 8A80[1A040000]      <1> punct:  mov     al,[ptab+eax]
+  1806 000005DA 8D80[C0000000]      <1>         lea     eax,[hbase+eax]
+  1807 000005E0 FFE0                <1>         jmp     eax
+  1808                              <1> 
+  1809                              <1> codeend:
+  1810                              <1> 
+  1811                              <1> rawend:
+  1812                              <1> RAWSIZE equ     (rawend-tstart+1FFh) & ~1FFh
+  1813 000005E2 00<rep 1Eh>         <1>         times   (-(rawend-tstart)) & 1FFh db 0
+  1814                              <1> 
+  1815                              <1> ; ---- the interpreter's variables, after the code (zero at the start) -------
+  1816                              <1> ; They are in the zeros that pad the section to its FileAlignment, or past
+  1817                              <1> ; them in the uninitialised part: within 127 bytes of `next` either way.
+  1818                              <1>         absolute rawend
+  1819 000005E2 <res 14h>           <1> v_rec:  resb    20              ; an INPUT_RECORD; ReadFile's byte
+  1820 000005F6 ????????            <1> v_cnt:  resd    1               ; a count for ReadFile and the like
+  1821 000005FA ????????            <1> v_hin:  resd    1               ; the standard input handle
+  1822 000005FE ????????            <1> v_outh: resd    1               ; the handle putc writes to
+  1823 00000602 ????????            <1> v_dstop:resd    1               ; ESP for the empty data stack
+  1824 00000606 ??                  <1> v_iscon:resb    1               ; non-zero if the input is a console
+  1825 00000607 ??                  <1> v_pcnt: resb    1               ; the break key's countdown
+  1826 00000608 ????????            <1> v_mode: resd    1               ; the console's input mode at the start
+  1827 0000060C ????????            <1> v_npend:resd    1               ; the heap's first address (checked '_')
+  1828 00000610 ????????            <1> v_skat: resd    1               ; where the skip started (checked N)
+  1829 00000614 ????????            <1> v_edln: resd    1               ; the editor: the line ^E put in the input
+  1830                              <1> v_end:
+  1831                              <1>         times   -((v_end-next) > 128) db 0      ; (an error if out of reach)
+  1832                              <1>         times   -((next-iat) > 128) db 0

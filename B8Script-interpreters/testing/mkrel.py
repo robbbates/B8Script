@@ -4,7 +4,9 @@ usage: mkrel.py [OUTDIR]   (after build.sh has filled OUTDIR/z80, OUTDIR/8080,
                            ...; OUTDIR defaults to out)
 
 For each CPU it writes the ROM images (.bin), the CP/M programs (.COM, Z80
-and 8080 only) and the listings (.lst), under the names the README uses.
+and 8080 only) and the listings (.lst), under the names the README uses;
+for Windows (OUTDIR/win32, from build_win32.sh) the four .EXE files and
+their listings.
 """
 import os, shutil, sys
 here = os.path.dirname(os.path.abspath(__file__))
@@ -39,3 +41,10 @@ for cpu, (org, com) in CPUS.items():
         open(f'{dst}/{name}', 'wb').write(bytes(img))
         shutil.copy(base + '.lst', f'{dst}/b8s-{cpu}-{variant}.lst')
         print(f'{cpu:5} {variant:10} {len(img):5} bytes -> {name}')
+# Windows: the .EXE files and their listings, as they are
+src, dst = f'{out}/win32', f'{here}/../win32'
+for name in ('B8SWIN', 'B8SWINC', 'B8SWINE', 'B8SWINEC'):
+    if os.path.exists(f'{src}/{name}.EXE'):
+        shutil.copy(f'{src}/{name}.EXE', f'{dst}/{name}.EXE')
+        shutil.copy(f'{src}/{name}.lst', f'{dst}/{name}.lst')
+        print(f'win32 {name:10} {os.path.getsize(src + "/" + name + ".EXE"):5} bytes -> {name}.EXE')

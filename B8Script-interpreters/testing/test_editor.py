@@ -14,6 +14,10 @@ The expected output comes from a model of the editor here, Ed, which follows
 the source key for key, the echo included; ref.py runs whatever the editor
 runs. A few sessions can't be modelled (a key pressed while a program is
 busy): those are checked against patterns.
+
+check_editor() takes a `target` for builds of other machines (see
+win32_target): the build's name, how it stores files, and how it is run.
+Without one it is the Z80's.
 """
 import sys, os, re, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -38,19 +42,25 @@ class Left(Exception):
 class Ed:
     """The editor, as the source has it."""
 
-    def __init__(self, sy, cpm, checked, files=None):
+    def __init__(self, sy, cpm, checked, files=None, target=None):
         self.sy, self.cpm, self.checked = sy, cpm, checked
+        t = target or {}
+        self.disk = t.get('disk', cpm)          # read and write use files
+        self.pad = t.get('pad', cpm)            # a written file is padded with ^Z
+        self.refcpm = t.get('refcpm', cpm)      # -n? is BDOS 10
+        self.build = t.get('build', b'B8SZ80E')
+        self.fname = t.get('fname')             # typed name -> the file's name
         self.lines = []                 # the program: each line with its CR LF
         self.out = bytearray()
         self.ds = []                    # the data stack lasts from line to line
         self.cells = bytes(0x74)        # so do the words and the variables
         self.undef = set(range(0x41, 0x5B)) if checked else set()
         self.files = files if files is not None else {}
-        self.name = b'PROG    B8S'      # the file named on the command line
+        self.name = t.get('default', b'PROG    B8S')     # the file named on the command line
         self.timed = []                 # keys to press while a list is running
         self.chunks = []
-        self.heaplim = (TRAP & 0xFF00) if cpm else sy['HEAPLIM'] << 8
-        if cpm:
+        self.heaplim = t.get('heaplim', (TRAP & 0xFF00) if cpm else sy['HEAPLIM'] << 8)
+        if self.disk:
             self.load()
 
     # ---- the program text ----
@@ -65,11 +75,18 @@ class Ed:
             t += b'\r\n'
         self.lines = [l + b'\n' for l in t.split(b'\n')[:-1]]
 
+    def key(self, name):
+        """The name a file is kept under (the same one, or another way)."""
+        return self.fname(self.files, name) if self.fname else name
+
     def load(self):
-        self.set_text(self.files.get(self.name, b''))
+        self.set_text(self.files.get(self.key(self.name), b''))
 
     def setname(self, typed):
         if not typed:
+            return
+        if self.fname:
+            self.name = typed
             return
         name, _, ext = typed.partition(b'.')
         up = lambda s: bytes(c & 0x5F if c >= 0x61 else c for c in s)
@@ -79,7 +96,7 @@ class Ed:
     def run(self, typed, queue, stored):
         sy = self.sy
         r = Ref(self.text(), bytes(queue), prog_at=sy['PROG'], let=sy['LET'], linebuf=sy['LINEBUF'],
-                heaplim=self.heaplim, cpm=self.cpm, checked=self.checked, filepad=False)
+                heaplim=self.heaplim, cpm=self.refcpm, checked=self.checked, filepad=False)
         r.m[sy['LINEBUF']:sy['LINEBUF'] + len(typed) + 3] = typed + b'\r\n\0'
         r.m[sy['LET']:sy['LET'] + 0x74] = self.cells
         r.undef, r.ds = self.undef, self.ds
@@ -200,7 +217,7 @@ class Ed:
             if queue and queue.pop(0) == 14:
                 del lines[:]
         elif c == 18:
-            if self.cpm:
+            if self.disk:
                 self.setname(typed)
                 self.load()
             else:                                   # what is typed until ^Z is the program
@@ -220,15 +237,15 @@ class Ed:
                         prev = 10
                 self.set_text(bytes(t))
         elif c == 23:
-            if self.cpm:
+            if self.disk:
                 self.setname(typed)
                 t = self.text()
-                self.files[self.name] = t + b'\x1a' * (-len(t) % 128)
+                self.files[self.key(self.name)] = t + (b'\x1a' * (-len(t) % 128) if self.pad else b'')
             else:
                 out += self.text()
         elif c == 22:
             t = self.text()
-            out += b'B8SZ80E' + (b'C' if self.checked else b'') + b' ' + VERSION + self.stack_lines()
+            out += self.build + (b'C' if self.checked else b'') + b' ' + VERSION + self.stack_lines()
             out += b'\r\nProg %d\r\nLines %d\r\nFree %d\r\n' % (
                 len(t), len(lines), self.heaplim - 1 - (self.sy['PROG'] + len(t)))
         elif c == 24:
@@ -367,12 +384,35 @@ TIMED = {
 }
 
 
-def check_editor(base, verbose=True):
+def win32_target(exe):
+    """The Windows editor builds (B8SWINE.EXE, B8SWINEC.EXE): files on a
+    disk, named as typed (and found whatever their case, as Windows does),
+    not padded; -n? is the generic line read; ^X ends the process."""
+    from harness_win32 import Run as WRun, symbols as wsymbols
+    sy = wsymbols(exe[:-4] + '.map')
+
+    def fname(files, name):
+        return next((k for k in files if k.lower() == name.lower()), name)
+    return dict(sy=sy, cpm=False, disk=True, pad=False, refcpm=False, build=b'B8SWINE',
+                checked=exe[:-4].endswith('C'), default=b'PROG.B8S', fname=fname,
+                heaplim=sy['HEAPLIM'] << 8, prog=lambda f: {b'PROG.B8S': f},
+                run=lambda steps, timed, files: WRun(exe, b'', steps, mode='editor', timed=timed, files=files))
+
+
+def check_editor(base, verbose=True, target=None):
     """Run every session against base.hex/.lst; return the number that failed."""
-    sy = symbols(base + '.lst')
     name = os.path.basename(base)
-    cpm, checked = '-cpm' in name, name.endswith('-chk')
-    mode = 'cpm-editor' if cpm else 'editor'
+    if target is None:
+        sy = symbols(base + '.lst')
+        cpm, checked = '-cpm' in name, name.endswith('-chk')
+        mode = 'cpm-editor' if cpm else 'editor'
+        disk = cpm
+        prog = lambda f: {b'PROG    B8S': f + b'\x1a' * (-len(f) % 128)}
+        mkrun = lambda steps, timed, files: Run(base + '.hex', base + '.lst', b'', steps, cpu='z80',
+                                                mode=mode, timed=timed, files=files)
+    else:
+        sy, cpm, checked, disk = target['sy'], target['cpm'], target['checked'], target['disk']
+        prog, mkrun = target['prog'], target['run']
     fails = 0
 
     def report(ok, title, r, got, exp=None):
@@ -394,12 +434,12 @@ def check_editor(base, verbose=True):
         print('     on the screen: ' + ('the same' if a == b else f'row {j}: got {a[j][:70] if j is not None else None!r} exp {b[j][:70] if j is not None else None!r}'))
 
     todo = [(t, None, st) for t, st in sessions().items()]
-    todo += [(t, f, st) for t, (f, st) in CPM_SESSIONS.items()] if cpm else [(t, None, st) for t, st in GEN_SESSIONS.items()]
+    todo += [(t, f, st) for t, (f, st) in CPM_SESSIONS.items()] if disk else [(t, None, st) for t, st in GEN_SESSIONS.items()]
     if checked:
         todo += [(t, None, st) for t, st in CHK_SESSIONS.items()]
     for title, file, steps in todo:
-        files = {} if file is None else {b'PROG    B8S': file + b'\x1a' * (-len(file) % 128)}
-        ed = Ed(sy, cpm, checked, dict(files))
+        files = {} if file is None else prog(file)
+        ed = Ed(sy, cpm, checked, dict(files), target)
         left = False
         for step in steps:
             try:
@@ -410,11 +450,11 @@ def check_editor(base, verbose=True):
                 print('  (the model failed in:', title, step, ')')
                 raise
         exp, timed = bytes(ed.out), ed.timed
-        r = Run(base + '.hex', base + '.lst', b'', ed.chunks, cpu='z80', mode=mode, timed=timed, files=dict(files))
+        r = mkrun(ed.chunks, timed, dict(files))
         got = r.run()
         ok = got == exp and not r.timed
         ok = ok and (r.ended == 'exit' if left else r.ended == 'needkey' and not r.stages)
-        if cpm:
+        if disk:
             ok = ok and r.files == ed.files
             if r.files != ed.files and got == exp:
                 print('     files:', {k: v[:40] for k, v in r.files.items()}, 'exp', {k: v[:40] for k, v in ed.files.items()})
@@ -423,7 +463,7 @@ def check_editor(base, verbose=True):
         if only is not None and only != checked:
             continue
         steps = [s.replace(b' 1 0.', b' 1 %d.' % (sy['LET'] + 0x7B)) for s in steps]
-        r = Run(base + '.hex', base + '.lst', b'', steps, cpu='z80', mode=mode, timed=timed)
+        r = mkrun(steps, timed, None)
         got = r.run()
         at, ok = 0, r.ended == 'needkey' and not r.stages
         for p in pats:

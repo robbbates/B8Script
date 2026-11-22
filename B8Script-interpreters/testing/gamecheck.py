@@ -1,7 +1,8 @@
 """Run every game in games/ on every build under DIR for a short while and
 compare what it prints with the reference interpreter.
 
-usage: gamecheck.py OUTDIR      (OUTDIR holds z80/, 8080/, 6502/, 6809/ from build.sh)
+usage: gamecheck.py OUTDIR      (OUTDIR holds z80/, 8080/, 6502/, 6809/ from build.sh,
+                                 and win32/ from build_win32.sh)
 
 The same keys are typed at each game. A run is cut off after a set amount of
 work, so only the output up to the shorter of the two runs is compared.
@@ -10,27 +11,29 @@ import sys, os, glob
 here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, here)
 from ref import Ref
-import harness_z80, harness_6502, harness_6809
+import harness_z80, harness_6502, harness_6809, harness_win32
 
 INP = b'y12345 nswe\rabc\r3\r7\r' * 20
 out = sys.argv[1]
 bad = 0
-for cpu in ('z80', '8080', '6502', '6809'):
-    for hexf in sorted(glob.glob(f'{out}/{cpu}/*.hex')):
+for cpu in ('z80', '8080', '6502', '6809', 'win32'):
+    for hexf in sorted(glob.glob(f'{out}/{cpu}/*.hex') + glob.glob(f'{out}/{cpu}/*.EXE')):
         base = hexf[:-4]
         name = os.path.basename(base)
-        if '-ed' in name:               # the editor builds have their own test
+        if '-ed' in name or name.startswith('B8SWINE'):               # the editor builds have their own test
             continue
         cpm = '-cpm' in name
         short = []
         for g in sorted(glob.glob(f'{here}/games/*.B8S')):
             prog = open(g, 'rb').read()
-            exp = Ref(prog, INP, cpm=cpm, retbyte={'6502': 0x60, '6809': 0x39}.get(cpu, 0xC9)).run(300_000)
+            exp = Ref(prog, INP, cpm=cpm, retbyte={'6502': 0x60, '6809': 0x39, 'win32': 0xC3}.get(cpu, 0xC9)).run(300_000)
             if cpu in ('z80', '8080'):
                 r = harness_z80.Run(base + '.hex', base + '.lst', prog, INP, cpu=cpu,
                                     mode='cpm' if cpm else 'generic', maxticks=150_000_000)
             elif cpu == '6502':
                 r = harness_6502.Run(base + '.hex', base + '.lst', prog, INP, maxsteps=3_000_000)
+            elif cpu == 'win32':
+                r = harness_win32.Run(hexf, prog, INP, maxinstr=30_000_000)
             else:
                 r = harness_6809.Run(base + ".hex", base + ".lst", prog, INP, maxops=3_000_000)
             got = r.run()

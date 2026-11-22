@@ -115,6 +115,29 @@ TESTS += [
 ]
 
 
+# Breakout, seed 1: a whole wall cleared, as played by a small bot that read the
+# ball and the paddle every frame. A number is that many frames with no key (NULs)
+BREAKOUT_WIN = (
+    'x 54aaaaa83ddd85dddd84aaaa84aa86dddddddd80aa94aaaa92ddddd91aaaaa83ddddd9'
+    '1d95aaaaaaa177ddddd91aaaa100a87dddddd98a103aaaaa99dddddddd96aaaaaaaa96dd'
+    'dddd215aaa75aaaa176a95dddddddd282aaaaaaa67ddd49dddddd46aaaaaaaaaa106dddd'
+    'dddd80aaaaa95dddd40ddd81aaaaaaaaaa46ddddd219aaaaa51ddddd69aaaa70dddddd68'
+    'a83aaa71dd72ddd47'
+)
+
+
+def frames(s):
+    return b''.join(b'\0' * int(n) if n else k.encode() for n, k in re.findall(r'(\d+)|([^\d.])', s))
+
+
+TESTS += [
+    ('BREAKOUT', 'clear the wall', frames(BREAKOUT_WIN) + b'\0n',
+     [b'Score 252', b'Balls 3', b'You cleared the wall!  Score 252. Play again?', b'Bye.']),
+    ('BREAKOUT', 'out of balls', b'x' + (b' ' + b'\0' * 150) * 3 + b'\0n',
+     [b'Balls 2', b'Balls 1', b'Balls 0', b'Out of balls.  Score ', b'Bye.']),
+]
+
+
 def play(game, keys, steps=20_000_000):
     prog = open(os.path.join(here, 'games', game + '.B8S'), 'rb').read()
     r = Play(prog, keys, checked=True)

@@ -156,6 +156,27 @@ TESTS += [
 ]
 
 
+# Klondike, seed 1, draw one: a win found by a search on a model of the deal
+# in Python (the same shuffle). Each move is d, or a source and a destination
+KLONDIKE_WIN = (
+    '4f4257dwf7fdddw6dw121dw6ddddwfdwfdwfddw6ddwf6fddw25225d52dw325d52d25d52d'
+    '25d52dw65626d62dw326d62dw526dw5155135313f146241d142641d146241d142641dw11'
+    '46241d142641d146241d142641d146241d142641d146241d142641dw1717f67757673145'
+    '2415314233635415362143541676f76w7w5w3636f2f1f2f1f3f3f1416173546536735711'
+    '4164653dw7674635711617537161dw7676f4f7f171f353f537135dwf2f1f1f5f1f5f1f5f'
+    '1f1f3f1f5f535f1f353f3f717fdwf1f1f5f1f5f1f5f1f5f'
+)
+
+TESTS += [
+    ('KLONDIKE', 'all 52 home', b'1' + KLONDIKE_WIN.encode() + b'n',
+     [b'KS KH KD KC', b'All 52 are home. You win!', b'Bye.']),
+    ('KLONDIKE', 'bad moves', b'x173w3wf1f1xqn',
+     [b'KLONDIKE   draw 1', b"That doesn't go there.", b'The waste is empty.', b'Bye.']),
+    ('KLONDIKE', 'draw three, turn the waste over', b'3' + b'd' * 9 + b'qn',
+     [b'3S 2C AH', b'\x1b[3;3H  \x1b[3;6H0 ', b'Bye.']),
+]
+
+
 def play(game, keys, steps=20_000_000):
     prog = open(os.path.join(here, 'games', game + '.B8S'), 'rb').read()
     r = Play(prog, keys, checked=True)

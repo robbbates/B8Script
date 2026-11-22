@@ -24,7 +24,8 @@ Run(exe, prog, inp, timed=(), mode='runner', files=None, cmdline=None)
   which handle each byte went to ('out' or 'err'). .ended is 'exit'
   (ExitProcess), 'needkey' (waiting for a key with none left), 'timeout'
   or 'fault ...'. .looks counts the looks at the keyboard (waits on the
-  input handle). .modes lists the SetConsoleMode calls.
+  input handle). .modes lists the SetConsoleMode calls. With `outcon=False`
+  standard output is not a console (redirected), so SetConsoleMode fails on it.
 
 Keys are typed as a person types them: a key of the input is given only
 when the program waits for one, which is a wait on the input handle with a
@@ -93,7 +94,7 @@ def keyrec(c, down):
 
 class Run:
     def __init__(self, exe, prog=b'', inp=b'', timed=(), mode='runner', files=None, cmdline=None,
-                 maxinstr=3_000_000_000, console=True, brk_at=None):
+                 maxinstr=3_000_000_000, console=True, brk_at=None, outcon=True):
         self.pe = chkpe.parse(exe)
         self.mode = mode
         self.stages = []
@@ -114,6 +115,7 @@ class Run:
         self.waited = 0            # ms spent in waits
         self.maxinstr = maxinstr
         self.console = console
+        self.outcon = outcon            # standard output is a console
         if files is None:
             files = {b'PROG.B8S': prog} if mode == 'runner' else {}
         self.files = files
@@ -246,7 +248,7 @@ class Run:
 
     def k_SetConsoleMode(self, h, m):
         self.modes.append((h, m))
-        return 1 if h == HIN and self.console else 0
+        return 1 if (h == HIN and self.console) or (h == HOUT and self.outcon) else 0
 
     def k_GetCommandLineA(self):
         return CMDLINE

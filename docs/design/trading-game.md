@@ -92,8 +92,14 @@ Decided (Nov 22).
 
 ### Loan and rare items
 
-- **Decided:** you start with a loan and interest; rare items are found by chance, stay where they are, and cost goods, not money.
-- **To detail:** the loan's size and rate, and what happens if it isn't repaid (a deadline? debt collectors as encounters?); how many rare items there are and what winning means (repay the loan and collect them all? a score?); how you learn of one (a rumour, or arriving there); which goods each one asks for; whether an item does anything once you have it.
+Decided (Nov 22).
+
+- **The loan:** 10,000 at the start, kept in one cell, never above 30,000. Each day adds 1% (debt ÷ 100). Pay it off in any amount when docked.
+- **Not paying:** once the debt reaches 30,000, debt collectors turn up as encounters (pay, fight or flee) until it is paid. No game over for debt; it reuses the encounter and duel code.
+- **Winning:** the loan repaid and all six rare items held. The score is the number of days taken: fewer is better.
+- **Six rare items,** one bit each, so the collection is one save-code character. Trophies only: they do nothing once held (perks are under Later).
+- **Where:** the seed places them in six systems, mostly frontier and lawless. You learn of one by docking there or from a rumour. An item stays in its system until you trade for it.
+- **The price:** goods, not money. The seed sets two different goods for each item, 10 to 30 tonnes of each and at most 40 tonnes in all, sometimes one of them contraband. Hand them over and the item is yours.
 
 ### Combat
 
@@ -155,7 +161,7 @@ The map, the economy, the loan, rare items, the duel, law and contraband, ship u
 
 ## Later
 
-Events (shortages, booms); colonies and outposts; ranks with titles; more opponent kinds; a second galaxy.
+Events (shortages, booms); colonies and outposts; perks for the rare items; ranks with titles; more opponent kinds; a second galaxy.
 
 ## Data budget (estimate)
 

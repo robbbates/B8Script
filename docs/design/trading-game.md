@@ -150,19 +150,24 @@ Decided (Nov 22).
 
 ### Contracts and rumours
 
-Decided (Nov 22), apart from selling contract cargo (open).
+Decided (Nov 22).
 
 - **Two kinds of contract.** **Carry:** sealed cargo or passengers (the same rules, other words), taking hold space, to system S by day D. **Bounty:** a tougher pirate waits at system S; winning that duel pays.
 - **One contract at a time,** so the save code holds one.
 - **Offers:** each system offers 0 to 2 when you dock, generated from the seed, the system and the day; nothing is stored until you accept one.
 - **Pay:** 100 per unit of fuel distance plus 20 a tonne (to tune). The deadline is the trip's length plus some slack. Late: half pay. Cargo lost in a fight: the contract ends unpaid. No deposit.
-- **Open:** whether sealed cargo can be sold, and what it costs you.
+- **Selling sealed cargo** is allowed: you become wanted, and the cargo's base value is added to your loan (the shipper's insurer bills you through your lender), so theft only pays where the price is well above base. Passengers can't be sold; leaving them anywhere else fails the contract.
 - **Rumours:** one free rumour each time you dock, always true, of three kinds: where a good is scarce (a real consumer), where pirates are thick, or where a rare item lies (only ones not yet found).
 
 ### Screen
 
-- **Decided:** fixed panels in 80 × 24, using only the console subset.
-- **To detail:** the layout, the keys for each view, what the message log keeps.
+Decided (Nov 22).
+
+- **Layout,** 80 × 24, drawn with single-line borders (`+ - |`) once at the start: row 1 status; rows 3 to 18 the main area (56 wide) beside the side panel (21 wide: cargo, contract); rows 20 to 22 messages; row 23 the command line. Only what changes is redrawn.
+- **Main-area views:** Chart, Market, Shipyard (upgrades and ships), Duel, Help. Contract offers and the rumour appear in the messages on docking; an accepted contract shows in the side panel.
+- **Keys.** Docked: `c` chart, `m` market, `y` shipyard, `k` take a contract, `l` pay the loan, `f` refuel, `r` repair, `t` trade for a rare item, `v` show the save code, `?` help, `q` quit. Market and shipyard: `w` and `s` move the row (the terminal's cursor sits on it), `b` buy, `x` sell, then a quantity. Chart: two keys step through the systems in range, Return jumps. Duel: `l` lasers, `m` missile, `c` close, `p` pull back, `f` flee, `$` pay. Each view lists its keys on its last line.
+- **Quantities** are typed (read with `-4?`); Return alone means as many as possible: all you can afford and fit, or all you hold.
+- **Messages:** the newest on row 22, older ones moving up, kept in a 3 × 78-byte buffer and redrawn on each new message.
 
 A first sketch:
 

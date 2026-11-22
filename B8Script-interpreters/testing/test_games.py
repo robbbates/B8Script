@@ -180,6 +180,18 @@ TESTS += [
 ]
 
 
+# Lights Out, seed 1: three levels solved (by chasing the lights down from the
+# top row, with the best of the 32 first rows), then q. And a new puzzle, then q
+LIGHTS_WIN = b'xaaww sss dddd yaaww d dd aas ass ydww d aaaas dddd aas ds ds '
+
+TESTS += [
+    ('LIGHTS', 'three levels', LIGHTS_WIN + b'n',
+     [b'Made with 3 presses.', b'Level 2', b'Made with 7 presses.', b'All out in 7 moves! Next level?', b'Bye.']),
+    ('LIGHTS', 'a new puzzle, then quit', b'x  n q',
+     [b'Level 1    Moves 2', b'Level 1    Moves 0', b'Bye.']),
+]
+
+
 def play(path, keys, steps=20_000_000):
     r = Play(open(path, 'rb').read(), keys, checked=True)
     out = r.run(steps)

@@ -265,6 +265,12 @@ TESTS += [
     ('IDOL', 'a profitable trade', b'xmsssb\rcsssssss\rmsssx\r',
      [b'Buy Machinery: how many (Return for 18)? ', b'Bought 18 t of Machinery for 954.',
       b'Docked at Talo.', b'Sold 18 t of Machinery for 1188.', b'Cr 1234']),
+    ('IDOL', 'an upgrade, then too little money', b'xysbsbr',
+     [b'Shield      \x1b[5;17H0 of 2\x1b[5;46H  1000', b'Bought: shield level.',
+      b'Courier L1 S1 M0', b'Cr 0\x1b', b"You can't pay for that.", b'The hull needs no repair.']),
+    ('IDOL', 'ships at a high-tech system, at the trade-in price', b'xsss\rysssssssb',
+     [b'Docked at Orelma.', b'Freighter\x1b[12;17H50 t, tank 8, hull 50\x1b[12;46H  6500',
+      b'Clipper\x1b[14;17H70 t, tank 10, hull 80\x1b[14;46H 27500', b'You fly one already.']),
 ]
 
 

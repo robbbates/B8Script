@@ -1431,6 +1431,12 @@ er7:    DEC     C
         POP     HL
         JR      er7
 er8:    CALL    pnl
+        ENDIF
+        IF      (1-CHECKED)*EDITOR
+        DB      "Rtn 0",22h     ; (only ^V comes here, and at the editor the
+        RET                     ;   return stack is always empty)
+        ENDIF
+        IF      CHECKED
         DB      "Rtn ",22h
         EXX
         PUSH    HL
@@ -1569,14 +1575,6 @@ ini1:   LD      (HL),A
         JR      edit0
         ENDIF
         IF      EDITOR
-; ^B, left arrow: the cursor goes one to the left
-left:   LD      A,L
-        ADD     A,A
-        JR      Z,ed1           ; (L = 80h: at the start)
-        DEC     L
-        LD      A,8
-lf1:    RST     28h
-        JR      ed1
 ; ^F, right arrow: one to the right, by printing the character there
 right:  LD      A,L
         CP      E
@@ -1602,10 +1600,17 @@ es2:    CP      '['
 es3:    CALL    ekey
         CP      40h
         JR      C,es3           ; (its parameters)
-        CP      'C'
+        SUB     'C'
         JR      Z,right
-        CP      'D'
-        JR      Z,left
+        DEC     A               ; 'D'?
+        JR      NZ,ed1          ; no: on into left
+; ^B, left arrow: the cursor goes one to the left
+left:   LD      A,L
+        ADD     A,A
+        JR      Z,ed1           ; (L = 80h: at the start)
+        DEC     L
+        LD      A,8
+lf1:    RST     28h
         JR      ed1
 
 ; edit0: reset, an error or a break: both stacks are cleared.
@@ -1777,25 +1782,21 @@ cedln:  CALL    rdnum
         JR      Z,ged0
         LD      (EDLN),DE
         LD      DE,LINEBUF
-ce1:    LD      A,(HL)
+ce1:    LD      A,(HL)          ; copy it, and show it, up to its CR (or LF)
         CP      13
         JR      Z,ce2
         CP      10
         JR      Z,ce2
         LD      (DE),A
+        RST     28h
         INC     HL
         INC     E
         LD      A,E
         CP      0FDh            ; (a longer line is cut at 125 characters)
         JR      NZ,ce1
-ce2:    LD      HL,LINEBUF      ; show it; the cursor ends up at its end
-ce3:    LD      A,L
-        CP      E
-        JP      Z,ed1
-        LD      A,(HL)
-        RST     28h
-        INC     L
-        JR      ce3
+ce2:    EX      DE,HL           ; the cursor is at the line's end
+        LD      E,L
+        JP      ed1
 
 ; Return. If ^E put a line here, the text goes back in its place. If not:
 ; a number and text is a line to put in, a number alone a line to take out,
@@ -1888,10 +1889,9 @@ li1:    LD      A,(HL)
         CALL    rawk
         JR      Z,li3           ; no key: carry on
         CP      3
-        JR      Z,gedit         ; Ctrl-C
-        CALL    ekey            ; any other key: wait for one more
+        CALL    NZ,ekey         ; any key but Ctrl-C: wait for one more
         CP      3
-        JR      Z,gedit
+        JR      Z,gedit         ; Ctrl-C, first or second, ends the list
 li3:    PUSH    HL
         PUSH    DE
         EX      DE,HL
@@ -1915,16 +1915,11 @@ cview:  CALL    pmsg
         DB      " 2026-11-21",22h
         CALL    pstk            ; both stacks
         LD      HL,PROG
-        LD      DE,0
-cv1:    LD      A,(HL)          ; count the lines, and find the end
-        OR      A
-        JR      Z,cv2
-        INC     HL
-        CP      10
+        LD      DE,0FFFFh
+cv1:    INC     DE              ; count the lines, and find the end
+        CALL    nxl
         JR      NZ,cv1
-        INC     DE
-        JR      cv1
-cv2:    PUSH    HL              ; the NUL
+        PUSH    HL              ; the NUL
         PUSH    DE              ; the lines
         LD      DE,(0-PROG)&0FFFFh
         ADD     HL,DE
@@ -2009,34 +2004,30 @@ prl:    LD      A,(HL)
 ; line with no end is given one. Nothing is echoed, and there is no check
 ; for running out of memory.
 cread:  LD      HL,PROG-1
-        LD      A,10
-        DB      0FEh            ; (CP n: steps over the LD A,13)
-rd1:    LD      A,13            ; a LF alone ends a line
-rd2:    LD      (HL),A
-        INC     HL
-        CP      13
-        LD      A,10
-        JR      Z,rd2           ; after a CR goes a LF
-rd3:    CALL    ekey
+        LD      (HL),10         ; (as if a line had just ended: the byte is
+        INC     HL              ;   the line buffer's last, and spare)
+rd1:    CALL    ekey
+        LD      C,A
         CP      1Ah
-        JR      Z,rd4
-        CP      10
         JR      NZ,rd2
+        LD      A,10            ; ^Z ends the last line, as a LF would
+rd2:    CP      10
+        JR      NZ,rd3
         DEC     HL
         CP      (HL)
         INC     HL
-        JR      Z,rd3           ; (the LF is dropped)
-        JR      rd1
-rd4:    DEC     HL
-        LD      A,(HL)
+        JR      Z,rd4           ; straight after a line end: dropped
+        LD      A,13            ; anywhere else it ends the line
+rd3:    LD      (HL),A
         INC     HL
-        CP      10
-        JR      Z,rd5
-        LD      (HL),13
+        CP      13
+        JR      NZ,rd4
+        LD      (HL),10         ; after a CR goes a LF
         INC     HL
-        LD      (HL),10
-        INC     HL
-rd5:    LD      (HL),0
+rd4:    LD      A,C
+        CP      1Ah
+        JR      NZ,rd1
+        LD      (HL),0
         JR      ged1
 
 ; ^W, generic: the text is printed as it is, for the terminal to capture.
@@ -2060,15 +2051,13 @@ cread:  CALL    setname
 
 ; ^W, CP/M: write the file: delete the old one, make it anew, write the
 ; text in records of 128 bytes, and close it. The text's NUL and the 127
-; bytes after it are set to ^Z meanwhile, which pads the last record.
+; bytes after it are set to ^Z meanwhile, which pads the last record. (A
+; full disk or directory is not noticed: the calls fail and that is all.)
 cwrite: CALL    setname
-        CALL    fcbclr
         LD      C,19            ; delete
         CALL    fbdos
         LD      C,22            ; make
         CALL    fbdos
-        INC     A
-        JP      Z,edit          ; no room in the directory
         LD      HL,PROG
         XOR     A
 cw1:    CP      (HL)
@@ -2088,15 +2077,8 @@ cw3:    LD      A,E             ; a record that starts before the end is written
         SBC     A,H
         JR      NC,cw4
         PUSH    HL
-        PUSH    DE
-        LD      C,26            ; set the DMA address: the record is written
-        CALL    BDOS            ;   from where it lies
-        LD      C,21            ; write
-        CALL    fbdos
-        POP     HL
-        LD      DE,128
-        ADD     HL,DE
-        EX      DE,HL
+        LD      C,21            ; write, from where the record lies
+        CALL    frec
         POP     HL
         JR      cw3
 cw4:    LD      (HL),0          ; the NUL again
@@ -2104,13 +2086,29 @@ cw4:    LD      (HL),0          ; the NUL again
         CALL    fbdos
         JP      edit
 
+; frec: BDOS function C (read or write a record) with the 128 bytes at DE.
+; Returns A = the BDOS's answer, HL = DE and DE = DE + 128.
+frec:   PUSH    DE
+        PUSH    BC
+        LD      C,26            ; set the DMA address
+        CALL    BDOS
+        POP     BC
+        CALL    fbdos
+        POP     HL
+        LD      DE,128
+        EX      DE,HL
+        ADD     HL,DE
+        EX      DE,HL
+        RET
+
 ; setname: if a name was typed (the line does not start with its CR), put it
-; in the CFCB: up to 8 characters, a dot, up to 3 more, in capitals. The drive
-; is the current one.
+; in the FCB: up to 8 characters, a dot, up to 3 more, in capitals. The drive
+; is the current one. Then, name or no name, clear the FCB after the name,
+; as it must be before a file is opened or made.
 setname:LD      DE,LINEBUF
         LD      A,(DE)
         CP      13
-        RET     Z
+        JR      Z,fcbclr
         LD      HL,CFCB
         LD      (HL),0          ; the current drive
         LD      B,11
@@ -2121,10 +2119,10 @@ sn1:    INC     L
 sn2:    LD      A,(DE)
         INC     DE
         CP      13
-        RET     Z
+        JR      Z,fcbclr
         CP      '.'
         JR      NZ,sn3
-        LD      L,CFCB+9         ; the type
+        LD      L,CFCB+9        ; the type
         JR      sn2
 sn3:    CP      'a'
         JR      C,sn4
@@ -2132,8 +2130,6 @@ sn3:    CP      'a'
 sn4:    LD      (HL),A
         INC     L
         JR      sn2
-
-; fcbclr: clear the CFCB after its name, as it must be before a file is opened
 fcbclr: LD      HL,CFCB+12
         LD      B,24
 fc1:    LD      (HL),0
@@ -2148,24 +2144,16 @@ fbdos:  LD      DE,CFCB
 ; load: read the file into PROG. No such file: no program. The text ends at
 ; the file's first ^Z (1Ah), which pads a text file's last record; one more
 ; goes after the last record, so the search always stops. And every line
-; must end in LF: a last line without one is given a CR LF.
-load:   CALL    fcbclr
-        LD      C,15            ; open (no such file: the first read fails
+; must end in LF: a last line without one is given a CR LF. (The FCB is
+; clear after its name: the CCP left it so, or setname did.)
+load:   LD      C,15            ; open (no such file: the first read fails
         CALL    fbdos           ;   too)
         LD      DE,PROG
-ld1:    PUSH    DE
-        LD      C,26            ; set the DMA address
-        CALL    BDOS
-        LD      C,20            ; read the next 128 bytes
-        CALL    fbdos
-        POP     HL              ; HL = the address this record went to
+ld1:    LD      C,20            ; read the next 128 bytes
+        CALL    frec
         OR      A
-        JR      NZ,ld2
-        LD      DE,128
-        ADD     HL,DE
-        EX      DE,HL
-        JR      ld1
-ld2:    LD      (HL),1Ah
+        JR      Z,ld1
+        LD      (HL),1Ah        ; (HL = where the record that failed would be)
         LD      HL,PROG-1
         LD      A,10            ; (a file with no text needs nothing added)
 tr1:    INC     HL
@@ -2184,8 +2172,6 @@ tr2:    LD      (HL),0
         RET
         ENDIF
 
-; =============================================================================
-;  CP/M startup (the generic build starts at address 0: see st0)
 ; =============================================================================
         IF      CPM
         ; The RAM pages follow the image; the heap may grow to the BDOS.

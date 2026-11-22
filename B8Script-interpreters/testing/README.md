@@ -6,6 +6,7 @@ Everything here runs from this folder.
 
 - `npm install -g asm80@1.11.14`. Or set `ASM80=/path/to/asm80.js`. Version 0.9.x does not work: it assembles the inside of a false `IF`.
 - `pip install z80 py65 MC6809`. The `z80` package includes an 8080 machine.
+- For the Windows builds: NASM 2.16 (`apt-get install nasm`) and `pip install unicorn`.
 
 ## Build and test
 
@@ -20,6 +21,9 @@ VARIANTS=$'0 0\n0 1' ./build.sh C6502 ../6502/b8s-6502-zp.asm out/6502
 python3 run_6502.py out/6502                       # --nogames skips Tiny BASIC
 VARIANTS=$'0 0\n0 1' ./build.sh M6809 ../6809/b8s-6809.asm out/6809
 python3 run_6809.py out/6809                       # -nogames skips Tiny BASIC
+
+./build_win32.sh                                   # the four Windows .EXE files (NASM), then chkpe.py
+python3 run_win32.py out/win32                     # --nogames skips Tiny BASIC
 
 python3 chktab.py out/z80/*.lst out/8080/*.lst     # layout rules (see the main README)
 python3 chktab09.py out/6809/*.lst
@@ -46,12 +50,16 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `harness_6502.py`, `harness_6809.py` | The same wrapper for py65 and MC6809 |
 | `run_z80.py`, `run_8080.py`, `run_6502.py`, `run_6809.py` | Run every build in a folder through `check()`. `run_6502.py` holds the two 6502 machine-code tests, one per interpreter |
 | `test_editor.py` | Types sessions at the Z80 editor builds, each step when the editor is waiting for it, and compares the output byte for byte with a model of the editor (which follows the source key for key, and uses `ref.py` for whatever a line runs). Generic builds get paste and print sessions, CP/M builds file ones (the disk is compared too), checked builds error ones; a few sessions with keys pressed while a program is busy are compared with patterns |
+| `build_win32.sh` | Builds the four Windows programs into `out/win32` (each with a listing and a map file of its symbols), then runs `chkpe.py` |
+| `harness_win32.py` | Runs a Windows .EXE in the Unicorn emulator: maps the file as Windows would, models the `kernel32` calls it makes, gives it a command line, a console (or redirected input) and a few files. Same interface as the others |
+| `run_win32.py` | Runs every Windows build through `check()`, the editor builds through `test_editor.py`, and all of them through a few Windows-only tests |
+| `chkpe.py` | Checks a Windows .EXE's header against the rules: alignments, sizes, the section, the entry point, the import table |
 | `gamecheck.py` | Runs every game on every build for a short while and compares the output with `ref.py` |
 | `chktab.py`, `chktab09.py`, `chktab6502.py` | Check the dispatch-table layout rules on Z80/8080, 6809 and zero-page 6502 listings |
 | `chkbr6502.py` | Checks every 6502 branch against its target |
 | `games/` | Your programs. `TINYBAS.B8S` is part of the suite |
 | `esc2slash.py` | Converts older programs to the `/` escape |
-| `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM` and `.lst` files next to each source |
+| `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files next to each source |
 
 Notes on the harnesses:
 - **Keys are typed as a person types them:** a key from the input is given only when the program is waiting for one, which the harness takes to be two looks at the keyboard close together (`GAP`: clock ticks on the Z80 and 8080, instructions on the others). Every build looks at the keyboard now and then for the break key, and holds only the newest key it finds, so a queue of keys handed over at every look would mostly be lost.

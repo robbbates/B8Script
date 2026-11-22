@@ -25,6 +25,7 @@ B8Script is a postfix stack language for 64 KB 8-bit computers. Every instructio
 - [Appendix D: 6809](#appendix-d-6809)
 - [Appendix E: B8SIC](#appendix-e-b8sic)
 - [Appendix F: the B8Script TTL computer](#appendix-f-the-b8script-ttl-computer)
+- [Appendix G: Windows (32-bit x86)](#appendix-g-windows-32-bit-x86)
 
 ## Execution model
 
@@ -1013,5 +1014,39 @@ B8SIC was built with B8Script in mind: its microcode reads, sorts and dispatches
 ## Appendix F: the B8Script TTL computer
 
 Also built with B8Script in mind. On this machine the hex loader's RET byte is `]`. This appendix is to come.
+
+## Appendix G: Windows (32-bit x86)
+
+Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`, `EDITOR`. These programs run in the Windows command shell; a program is a file named on the command line. They are tested in an emulator and have not yet been run on Windows itself.
+
+**Builds**
+
+| Build | File | Bytes | Notes |
+|---|---|---|---|
+| Runner | `B8SWIN.EXE` | 2,048 | `B8SWIN PROG.B8S` |
+| Runner, checked | `B8SWINC.EXE` | 2,560 |  |
+| With the line editor | `B8SWINE.EXE` | 3,072 | `B8SWINE PROG.B8S`, or with no file. The suggested standard under [Environments](#environments) |
+| The same, checked | `B8SWINEC.EXE` | 3,584 |  |
+
+**Memory map.** The machine is the 64 KB one of this spec, held in the last 64 KB of the program's image (at 00410000h). A B8Script address is an offset into it.
+
+| Item | Hex | Unsigned | Signed |
+|---|---|---|---|
+| Unused, all zero (undefined words point here) | 0000h | 0 | 0 |
+| Letter page: A–Z at +00h, a–z at +40h | 0100h | 256 | 256 |
+| Held key | 017Ah | 378 | 378 |
+| Break-off cell | 017Bh | 379 | 379 |
+| Heap pointer cell | 017Ch | 380 | 380 |
+| -n? line buffer (127 characters and CR) | 0180h | 384 | 384 |
+| Program text | 0200h | 512 | 512 |
+| Heap limit | FF00h | 65280 | −256 |
+
+The stacks are outside the 64 KB. The data stack is the program's own Windows stack, one 32-bit slot per cell: 127 cells in a checked build, as much as Windows gives (1 MB) in an unchecked one. The return stack holds 112 entries in a checked build. Memory starts as zeros in every build.
+
+**Console.** Output goes to standard output, and a checked build's report to standard error. Keys come from the console unechoed, Ctrl-C among them; when input is redirected, bytes are read from it instead, by `?`, `-n?` and the editor only. `-n?` is the plain line read of the generic builds.
+
+**The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
+
+**Machine-code contract.** The code is 32-bit x86, entered by CALL: the return address is on top of the stack, and the data cells are above it, one 32-bit slot each with the cell in the low 16 bits. EBX holds the code's own address (00410000h plus its B8Script address). The code may change EAX, EBX, ECX, EDX and the flags, and may push and pop. It must keep ESI, EDI and EBP, and leave the direction flag clear. It returns with RET (C3h), which the loader writes; the slot then on top of the stack becomes the new TOS. Only the low 16 bits of a slot count: the interpreter sets the rest itself after the call.
 
 [↑ Back to top](#b8script-spec)

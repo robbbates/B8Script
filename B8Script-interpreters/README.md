@@ -1,11 +1,11 @@
-# B8Script interpreters: Z80, 8080, 6502, 6809
+# B8Script interpreters: Z80, 8080, 6502, 6809 and Windows
 
-Generic interpreters for minimal homebrew machines (serial console only), plus CP/M 2.2 versions for the Z80 and 8080. Each source has switches at the top:
+Generic interpreters for minimal homebrew machines (serial console only), CP/M 2.2 versions for the Z80 and 8080, and a 32-bit x86 one for the Windows command shell. Each source has switches at the top:
 
 ```
 CPM     EQU     0               ; 1 = CP/M .COM build        (Z80, 8080)
 CHECKED EQU     0               ; 1 = checked build          (all)
-EDITOR  EQU     0               ; 1 = with the line editor   (Z80)
+EDITOR  EQU     0               ; 1 = with the line editor   (Z80, Windows)
 ```
 
 The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, and `b8s-6502-zp.asm` is a smaller interpreter that keeps it in zero page.
@@ -21,7 +21,13 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | 6502, stack in zero page | 1,095 | 1,628 | n/a | n/a |
 | 6809 | 825 | 1,220 | n/a | n/a |
 
+| Windows .EXE | Unchecked | Checked | With the editor | Editor, checked |
+|---|---|---|---|---|
+| The file | 2,048 | 2,560 | 3,072 | 3,584 |
+| Of that: code and table | 1,198 | 1,724 | 2,210 | 2,640 |
+
 - A generic size is the whole ROM image: the code plus the punctuation table.
+- A Windows file is a 512-byte header and then the code, the table and about 310 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 30, 16, 22 and 104 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
 - Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 60 to 80 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 280 to 470 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
@@ -34,6 +40,7 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | `*-rom-XXXX.bin` | Generic ROM image, to load at XXXXh (`-zp-` = the zero-page 6502 interpreter, `-editor-` = Z80 with the line editor) |
 | `B8SZ80.COM`, `B8SZ80C.COM`, `B8S8080.COM`, `B8S8080C.COM` | CP/M builds; the C means checked. Run as `B8SZ80 PROG.B8S` |
 | `B8SZ80E.COM`, `B8SZ80EC.COM` | CP/M builds with the line editor; the C means checked. Run as `B8SZ80E PROG.B8S`, or with no file |
+| `win32/B8SWIN.EXE`, `B8SWINC.EXE`, `B8SWINE.EXE`, `B8SWINEC.EXE` | Windows command-shell builds: C means checked, E with the line editor. Run as `B8SWIN PROG.B8S` |
 | `*.lst` | The assembler's listings |
 
 ## The language
@@ -55,6 +62,14 @@ node asm80.js -m Z80 -t hex -o b8s-z80.hex b8s-z80.asm
 ```
 
 The machine name is `Z80`, `I8080`, `C6502` or `M6809`. To build a variant, edit the EQU lines first, or use `testing/build.sh`, which builds every variant.
+
+The Windows source is for NASM (2.16), which writes the .EXE directly, with no linker: the source lays the file's header out itself.
+
+```
+nasm -f bin -DCHECKED=1 -DEDITOR=1 -o B8SWINEC.EXE b8s-win32.asm
+```
+
+`testing/build_win32.sh` builds all four.
 
 asm80 has some quirks the sources work around:
 - `IF`/`IFN`/`ENDIF` must not be nested, and there is no `ELSE`. Combined conditions are written as arithmetic, like `IF (1-CPM)*CHECKED`.
@@ -161,6 +176,27 @@ A command key ends the line too, and takes what was typed before it as its argum
 
 The editor adds 723 bytes to the unchecked generic build and 832 to the CP/M one (633 and 744 to the checked ones, which have the report's routines already). ^V alone is about 170 of those in an unchecked build, because it brings in the stack listing. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
 
+## The Windows builds (`win32/`)
+
+Four programs for the Windows command shell, in 32-bit x86 assembly: `B8SWIN.EXE`, `B8SWINC.EXE` (checked), `B8SWINE.EXE` (with the line editor) and `B8SWINEC.EXE` (editor, checked). A 32-bit program runs on every Windows, the 64-bit and ARM ones included.
+
+```
+B8SWIN PROG.B8S
+B8SWIN PROG.B8S > out.txt
+B8SWINE PROG.B8S
+```
+
+- **They have not been run on Windows yet.** They are tested in an emulator, with the Windows calls they make modelled by hand, and their headers are checked against the documented rules (see How they were tested). Wine would not start in the container they were written in. The first run on a real machine is still to do.
+- **The machine is the spec's:** 64 KB of memory, 16-bit cells and addresses. The memory map is in the spec's Appendix G. The language, the break key, the checked builds' errors and report, and the editor are the Z80's, key for key.
+- **The file.** A runner loads the file named on the command line, runs it and exits. With no file, or one that can't be opened, it exits without a word. An editor build starts with that file as its program, or empty. A file can hold up to 64,765 bytes.
+- **Output** goes to standard output, so it can be redirected. A checked build's report goes to standard error.
+- **Keys** are read from the console raw: no echo, and Ctrl-C arrives as a key, so the interpreter's own break rules apply. The console's mode is put back on every way out. The left and right arrow keys work in the editor (they are turned into ^B and ^F). The Delete key does nothing; Backspace deletes.
+- **Input that is not the console** (a pipe or a file) is read a byte at a time, and only by `?`, `-n?` and the editor: the break check does not read it, so Ctrl-C can't break in, and `n?` waits for a byte however small n is. At the end of the input the program exits.
+- **Time.** `n?` and the break-off cell's 250 ms use the console's own timed wait, with no clock: an event that is not a key press (a key coming up, say) starts the wait again, so a wait can run a little long.
+- **The editor's files.** A name typed before ^R or ^W is a Windows path, as typed, and stays the name until another is typed. Nothing is said if a file can't be read or written: a read then gives no program.
+- **The header** is laid out by hand in the source, by the documented rules and nothing clever: one section, 512-byte file alignment, imports from `kernel32.dll` only (`GetStdHandle`, `GetConsoleMode`, `SetConsoleMode`, `GetCommandLineA`, `CreateFileA`, `ReadFile`, `WriteFile`, `WaitForSingleObject`, `ReadConsoleInputA`, `ExitProcess`, and `CloseHandle` in the editor builds). `testing/chkpe.py` checks every file.
+- **Dispatch.** One byte per punctuation character, as on the Z80, but with a single range: every handler starts within 255 bytes of one address, and the assembler stops if one doesn't.
+
 ## Checked builds
 
 A checked build starts with every variable at 0 and every word undefined. It stops on the errors in the spec's table:
@@ -237,6 +273,8 @@ Every build runs, in an emulator, against a reference interpreter written from t
 - for checked builds, every error in the table, several ways each, with the whole report compared byte for byte against the reference (run with that build's own addresses); the stack overruns are compared against patterns, since stack sizes differ.
 
 The four editor builds are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the cursor keys and arrows, Esc, editing a line in place, new, view, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
+
+The Windows builds run in the Unicorn emulator (`testing/harness_win32.py`): the .EXE is mapped as Windows would map it, and the dozen `kernel32` calls it makes are modelled. They go through the same suite as the others, the break-key tests and the editor sessions included, plus a few tests of their own (the report on standard error, redirected input, the arrow keys, the command line). That tests the interpreter, and the header against the rules; it can't show that Windows itself accepts the file, or that the model of each call is right.
 
 The other eight games are also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`). The test setup is in `testing/` (see its README).
 

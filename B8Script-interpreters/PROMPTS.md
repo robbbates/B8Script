@@ -18,6 +18,9 @@ minimum-size B8Script interpreters:
   zero page.
 - The language is in ../docs/b8script.md, which the builds follow; its
   appendices hold each CPU's memory map and system addresses.
+- win32/ holds a 32-bit x86 interpreter for the Windows command shell,
+  b8s-win32.asm (NASM; switches CHECKED and EDITOR). It writes its own
+  .EXE header. It is tested in an emulator only.
 - README.md covers sizes, what the spec leaves to the builds, the console
   interface (KEY/CONOUT/EXIT), the break key, the line editor, the checked
   builds' errors and report, the machine-code contracts and the layout
@@ -92,6 +95,11 @@ bytes, one CPU at a time. Ideas not yet tried:
   the biggest part of it.
 - Every build: the break-off cell and its 250 ms wait for a second Ctrl-C
   is about 30 bytes.
+- Windows: a file only shrinks in steps of 512 bytes. The four builds are
+  1502, 2032, 2538 and 2968 bytes past their headers, so the next steps
+  down are 478, 496, 490 and 408 bytes away: not in reach by trimming.
+  What matters there is not to grow past the 30, 16, 22 and 104 bytes
+  each has to spare.
 
 Report a table of bytes before and after for every variant, the techniques
 that paid off, and the ones you tried that didn't.

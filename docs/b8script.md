@@ -590,7 +590,9 @@ If anything leaked, the top of the stack at the end isn't the sentinel. Add it w
 - **Double with `:+`, halve with `2/;`.** Both are fast on every implementation; a multiply or divide by any other number runs the full routine.
 - **Spaces and line breaks cost time where they run.** Each one is read and dispatched like a command, every time that spot runs, so keep hot loops tight and comments (a string dropped with `;`) out of them. A stripper can remove comments and whitespace from a finished program, keeping only the spaces that separate (`12 34`, `5- 3`, a grave before a hex letter).
 - **Keep constants that run hot in variables.** A long number literal is read digit by digit every time it runs; `m@` is one fetch.
-- **Use `0?` to wait for a key, `1?` in real-time loops and `-n?` for typed text,** which it echoes and edits for you. `n?` waits about n ms, so a game's frame time can be set with it instead of counting loops.
+- **Use `0?` to wait for a key and `-n?` for typed text,** which it echoes and edits for you.
+- **Time real-time programs with the wait, not with a count of tiny waits.** Make each frame one `n?` with n about the frame you want (`20?` for 50 frames a second), act on the key if one came, and count frames for slower events such as gravity. A frame then lasts about n ms on every machine. A loop of `1?` with a large count to make a second runs at a different speed on every machine: each pass also costs the time its own code takes to run, which differs from machine to machine, and on some hosts the shortest wait is far longer than 1 ms (15.6 ms on Windows without a high-resolution timer). Keep each frame's work short, and remember that a key ends the wait early, so a frame with a key in it is shorter.
+- **`1?` is a quick look for a key**, for checking a break key in a long computation, not a clock. Look every few hundred steps rather than every step, as each look costs up to a millisecond.
 - **Reading addresses.** `#` prints signed, so an address above 7FFFh prints as a negative number: F000h prints as −4096. A decimal literal wraps, so `61440` and `-4096` are the same address. Every appendix lists its addresses in hex, unsigned and signed.
 - **Slashes in strings.** Write `//` for a slash: `"n/s/e/w"` would print `n3%7`.
 - **Keep screen control in words.** Put every escape sequence in a few words such as C, K and Y above, so a program moves to another console by rewriting only them.
@@ -1077,10 +1079,10 @@ Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`,
 
 | Build | File | Bytes | Notes |
 |---|---|---|---|
-| Runner | `B8SWIN.EXE` | 2,048 | `B8SWIN PROG.B8S` |
-| Runner, checked | `B8SWINC.EXE` | 2,560 |  |
-| With the line editor | `B8SWINE.EXE` | 3,072 | `B8SWINE PROG.B8S`, or with no file. The suggested standard under [Environments](#environments) |
-| The same, checked | `B8SWINEC.EXE` | 3,584 |  |
+| Runner | `B8SWIN.EXE` | 2,560 | `B8SWIN PROG.B8S` |
+| Runner, checked | `B8SWINC.EXE` | 3,072 |  |
+| With the line editor | `B8SWINE.EXE` | 3,584 | `B8SWINE PROG.B8S`, or with no file. The suggested standard under [Environments](#environments) |
+| The same, checked | `B8SWINEC.EXE` | 4,096 |  |
 
 **Memory map.** The machine is the 64 KB one of this spec, held in the last 64 KB of the program's image (at 00410000h). A B8Script address is an offset into it.
 
@@ -1100,6 +1102,8 @@ The stacks are outside the 64 KB. The data stack is the program's own Windows st
 **Console.** Output goes to standard output, and a checked build's report to standard error. Keys come from the console unechoed, Ctrl-C among them; when input is redirected, bytes are read from it instead, by `?`, `-n?` and the editor only. `-n?` is the plain line read of the generic builds. At startup the output's console mode is set to 7 (processed output, wrap at the end of a line, and virtual terminal processing), so the console subset and the rest of ANSI work in the Windows 10 and later console as on a terminal. On older Windows, or when the output is redirected, the call fails and the bytes go out unchanged. The mode is left on at the end, which does no harm.
 
 **The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
+
+**Time.** A plain timed wait on Windows ends only on the system's tick, every 15.6 ms. So `n?` uses a high-resolution waitable timer (Windows 10 1803 and later), set once for the whole wait, which ends on a key or when the timer is due, to about a millisecond. On older Windows the waits are plain ones, to the tick. The builds start on Windows Vista and later.
 
 **Machine-code contract.** The code is 32-bit x86, entered by CALL: the return address is on top of the stack, and the data cells are above it, one 32-bit slot each with the cell in the low 16 bits. EBX holds the code's own address (00410000h plus its B8Script address). The code may change EAX, EBX, ECX, EDX and the flags, and may push and pop. It must keep ESI, EDI and EBP, and leave the direction flag clear. It returns with RET (C3h), which the loader writes; the slot then on top of the stack becomes the new TOS. Only the low 16 bits of a slot count: the interpreter sets the rest itself after the call.
 

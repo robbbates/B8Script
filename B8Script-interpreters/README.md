@@ -23,11 +23,11 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 | Windows .EXE | Unchecked | Checked | With the editor | Editor, checked |
 |---|---|---|---|---|
-| The file | 2,048 | 2,560 | 3,072 | 3,584 |
-| Of that: code and table | 1,198 | 1,724 | 2,210 | 2,640 |
+| The file | 2,560 | 3,072 | 3,584 | 4,096 |
+| Of that: code and table | 1,286 | 1,816 | 2,298 | 2,728 |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
-- A Windows file is a 512-byte header and then the code, the table and about 310 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 30, 16, 22 and 104 bytes to spare before their next step up.
+- A Windows file is a 512-byte header and then the code, the table and about 405 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 358, 340, 350 and 432 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
 - Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 60 to 80 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 280 to 470 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
@@ -192,9 +192,9 @@ B8SWINE PROG.B8S
 - **Output** goes to standard output, so it can be redirected. A checked build's report goes to standard error.
 - **Keys** are read from the console raw: no echo, and Ctrl-C arrives as a key, so the interpreter's own break rules apply. The console's mode is put back on every way out. The left and right arrow keys work in the editor (they are turned into ^B and ^F). The Delete key does nothing; Backspace deletes.
 - **Input that is not the console** (a pipe or a file) is read a byte at a time, and only by `?`, `-n?` and the editor: the break check does not read it, so Ctrl-C can't break in, and `n?` waits for a byte however small n is. At the end of the input the program exits.
-- **Time.** `n?` and the break-off cell's 250 ms use the console's own timed wait, with no clock: an event that is not a key press (a key coming up, say) starts the wait again, so a wait can run a little long.
+- **Time.** A plain timed wait on Windows ends only on the system's tick, every 15.6 ms, so `1?` would take about 16 ms and a game timed by it would crawl. So `n?`, the break-off cell's 250 ms and the editor's Esc wait use a high-resolution waitable timer (Windows 10 1803 and later), set once for the whole wait: the wait ends on a key or when the timer is due, to about a millisecond. On older Windows the timer can't be made, and the waits are plain ones, to the tick. The builds import `CreateWaitableTimerExW`, so they start on Windows Vista and later.
 - **The editor's files.** A name typed before ^R or ^W is a Windows path, as typed, and stays the name until another is typed. Nothing is said if a file can't be read or written: a read then gives no program.
-- **The header** is laid out by hand in the source, by the documented rules and nothing clever: one section, 512-byte file alignment, imports from `kernel32.dll` only (`GetStdHandle`, `GetConsoleMode`, `SetConsoleMode`, `GetCommandLineA`, `CreateFileA`, `ReadFile`, `WriteFile`, `WaitForSingleObject`, `ReadConsoleInputA`, `ExitProcess`, and `CloseHandle` in the editor builds). `testing/chkpe.py` checks every file.
+- **The header** is laid out by hand in the source, by the documented rules and nothing clever: one section, 512-byte file alignment, imports from `kernel32.dll` only (`GetStdHandle`, `GetConsoleMode`, `SetConsoleMode`, `GetCommandLineA`, `CreateFileA`, `ReadFile`, `WriteFile`, `WaitForSingleObject`, `WaitForMultipleObjects`, `CreateWaitableTimerExW`, `SetWaitableTimer`, `ReadConsoleInputA`, `ExitProcess`, and `CloseHandle` in the editor builds). `testing/chkpe.py` checks every file.
 - **Dispatch.** One byte per punctuation character, as on the Z80, but with a single range: every handler starts within 255 bytes of one address, and the assembler stops if one doesn't.
 
 ## Checked builds

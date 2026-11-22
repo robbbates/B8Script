@@ -17,12 +17,16 @@ line of sizes. parse() is also used by harness_win32.py.
 """
 import struct, sys
 
-# The kernel32 functions a build may import: every one is a kernel32
-# export on every Windows NT version since 3.51 (and in Windows 95 too).
+# The kernel32 functions a build may import. All are kernel32 exports on
+# every Windows NT version since 3.51 (and in Windows 95 too), except
+# CreateWaitableTimerExW, which needs Windows Vista: the builds import it, so
+# they start on Vista and later (its high-resolution flag needs Windows 10
+# 1803; earlier versions refuse the flag and the builds use plain waits).
 KERNEL32 = {
     'GetStdHandle', 'GetConsoleMode', 'SetConsoleMode', 'GetCommandLineA',
     'CreateFileA', 'ReadFile', 'WriteFile', 'CloseHandle',
     'WaitForSingleObject', 'ReadConsoleInputA', 'PeekConsoleInputA',
+    'WaitForMultipleObjects', 'CreateWaitableTimerExW', 'SetWaitableTimer',
     'GetNumberOfConsoleInputEvents', 'GetTickCount', 'ExitProcess', 'Sleep',
     'FlushFileBuffers', 'GetLastError', 'SetFilePointer', 'GetFileSize',
 }

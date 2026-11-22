@@ -103,8 +103,16 @@ Decided (Nov 22).
 
 ### Combat
 
-- **Decided:** a turn-based duel.
-- **To detail:** the duel's state (range bands? hull and shields?); the actions (fire, missile, close in, pull back, flee, surrender or pay); what the enemy does; what you win (bounty, salvage) and lose (cargo, hull, the game); the kinds of opponent.
+Decided (Nov 22).
+
+- **An encounter** happens on a jump with a chance set by the destination's safety: policed 10%, frontier 25%, lawless 40% (to tune).
+- **Who:** pirates (frontier and lawless; they want your cargo), police (policed systems; they scan you, see Law), debt collectors (anywhere once the debt is at its cap). An enemy's class and levels come from the safety level plus a roll.
+- **The duel** tracks hull, shields and a range, far or close.
+- **Your actions:** fire lasers (close only), launch a missile, close in, pull back, flee (far only), pay (credits or cargo). One key each.
+- **Damage:** a laser hit is level × a roll of 1 to 4, less the target's shield level, at least 1. A missile does 15 and ignores shields. Fleeing works on a 50% roll; on a failure the enemy gets a free shot.
+- **The enemy:** closes in, fires lasers when close and a missile when it has one, and flees below a quarter of its hull.
+- **Winning:** a bounty for a pirate or a collector, and a chance of salvage (a few tonnes of a random good).
+- **Losing:** with an escape pod (2,000, used up), you lose the ship and cargo and wake at home in a new Courier, whose price is added to the loan (up to the cap). Debt and rare items are kept. Without one, the game is over.
 
 ### Law and smuggling
 
@@ -115,7 +123,7 @@ Decided (Nov 22).
 
 Decided (Nov 22).
 
-**Stats:** cargo, fuel tank, hull, laser level, shield level, missiles. (An escape pod is weighed under Combat, a hidden hold under Law.)
+**Stats:** cargo, fuel tank, hull, laser level, shield level, missiles, an escape pod (see Combat). (A hidden hold is weighed under Law.)
 
 **Classes.** Every class can add up to 3 cargo pods (+10 tonnes each) and 2 tank upgrades (+2 each), so cargo never passes 100 and the tank never passes 14 (the economy and the map rely on both).
 

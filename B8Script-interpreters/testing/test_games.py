@@ -284,6 +284,14 @@ TESTS += [
       b'They take it and fine you 600.', b'Docked at Xeva.', b'Cr 260']),
     ('IDOL', 'a police scan: resist', b'xmssssssb5\rc\r\rrf',
      [b'You resist the police!', b'Duel: police ship, level 3', b'Wanted 20']),
+    ('IDOL', 'pay the loan', b'xl500\rl\rl',
+     [b'Pay how much (Return for 1000)? ', b'You pay 500 off the loan.', b'Debt 4500',
+      b'Debt 4000', b'You have no cash.']),
+    # the Heart of the idol lies at Usis, the 14th system out
+    ('IDOL', 'an idol part found, its price, then known', b'x' + b's' * 13 + b'\rtct\rt',
+     [b'Docked at Usis.', b"The Idol's Heart is here: 18 t of Medicine and 19 t of Textiles (t trades).",
+      b"The Idol's Heart wants 18 t of Medicine and 19 t of Textiles.",
+      b"The Idol's Heart lies at Usis: 18 t of Medicine and 19 t of Textiles."]),
 ]
 
 

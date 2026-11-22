@@ -150,8 +150,14 @@ Decided (Nov 22).
 
 ### Contracts and rumours
 
-- **Decided:** both.
-- **To detail:** the contract kinds and how many you can hold (one, to keep the save code short?); pay and penalties; how rumours are made (a true tip about a price, or a rare item, or sometimes false?).
+Decided (Nov 22), apart from selling contract cargo (open).
+
+- **Two kinds of contract.** **Carry:** sealed cargo or passengers (the same rules, other words), taking hold space, to system S by day D. **Bounty:** a tougher pirate waits at system S; winning that duel pays.
+- **One contract at a time,** so the save code holds one.
+- **Offers:** each system offers 0 to 2 when you dock, generated from the seed, the system and the day; nothing is stored until you accept one.
+- **Pay:** 100 per unit of fuel distance plus 20 a tonne (to tune). The deadline is the trip's length plus some slack. Late: half pay. Cargo lost in a fight: the contract ends unpaid. No deposit.
+- **Open:** whether sealed cargo can be sold, and what it costs you.
+- **Rumours:** one free rumour each time you dock, always true, of three kinds: where a good is scarce (a real consumer), where pirates are thick, or where a rare item lies (only ones not yet found).
 
 ### Screen
 

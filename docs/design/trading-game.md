@@ -113,8 +113,26 @@ Decided (Nov 22).
 
 ### Ship and upgrades
 
-- **Decided:** upgrades and 3 or 4 ship classes.
-- **To detail:** the classes (cargo, fuel tank, hull, slots, price); the upgrades (cargo holds, fuel tank, lasers, shields, missiles, scanner, escape pod) and their prices; which systems sell what (by tech level?); repair.
+Decided (Nov 22).
+
+**Stats:** cargo, fuel tank, hull, laser level, shield level, missiles. (An escape pod is weighed under Combat, a hidden hold under Law.)
+
+**Classes.** Every class can add up to 3 cargo pods (+10 tonnes each) and 2 tank upgrades (+2 each), so cargo never passes 100 and the tank never passes 14 (the economy and the map rely on both).
+
+| Class | Cargo | Tank | Hull | Laser max | Shield max | Price |
+|---|---|---|---|---|---|---|
+| Courier (start) | 20 | 7 | 30 | 2 | 2 | — |
+| Freighter | 50 | 8 | 50 | 2 | 3 | 9,000 |
+| Raider | 30 | 10 | 60 | 4 | 4 | 12,000 |
+| Clipper | 70 | 10 | 80 | 4 | 4 | 30,000 |
+
+**Upgrades:** laser and shield levels up to the class's limit, at 1,000, 2,500, 5,000 and 9,000 a level; missiles at 500 each, at most 4; cargo pods at 1,500 each; tank upgrades at 2,000 each.
+
+**Where:** fuel and repairs everywhere; upgrades at industrial and high-tech systems; ships only at high-tech.
+
+**Buying a ship:** the old one is traded in at half its price. Upgrades carry over, cut to the new class's limits; if the cargo doesn't fit, the trade is refused.
+
+**Running costs:** fuel 20 a unit, repairs 50 a hull point, the same everywhere.
 
 ### Contracts and rumours
 

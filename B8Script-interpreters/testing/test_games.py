@@ -87,6 +87,34 @@ TESTS += [
 ]
 
 
+# Minesweeper, seed 1, first cell (7,7): visit every cell row by row from the
+# top left and open each one that has no mine, as laid out by that seed
+MINES_ROWS = [
+    '...*.....*.*..*.', '........*.*..*.*', '.*..............', '..**.......*....',
+    '............*.*.', '.*.....**....*..', '........*....*..', '....*...........',
+    '......*.....*...', '................', '.............**.', '*............*..',
+    '.....*..*...**.*', '.....*....**....', '*...*...........', '..*...*..*......']
+
+
+def sweep():
+    keys, x = b'x ' + b'w' * 7 + b'a' * 7, 0
+    for y, row in enumerate(MINES_ROWS):
+        if y:
+            keys += b's'
+        for xx in (range(16) if y % 2 == 0 else range(15, -1, -1)):
+            keys += b'd' * (xx - x) + b'a' * (x - xx)
+            x = xx
+            keys += b' ' if row[xx] == '.' else b''
+    return keys
+
+
+TESTS += [
+    ('MINES', 'clear the field', sweep() + b'n', [b'You cleared the field!', b'Bye.']),
+    ('MINES', 'flags, then a mine', b'x ' + b'w' * 7 + b'a' * 4 + b'f af' + b'd' * 6 + b'ffd n',
+     [b'Mines 39', b'Mines 38', b'Mines 37', b'BOOM! You hit a mine.', b'\x1b[4;11HF', b'\x1b[4;9HX', b'Bye.']),
+]
+
+
 def play(game, keys, steps=20_000_000):
     prog = open(os.path.join(here, 'games', game + '.B8S'), 'rb').read()
     r = Play(prog, keys, checked=True)

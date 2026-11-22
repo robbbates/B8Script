@@ -78,11 +78,16 @@ T1      EQU     05h
 T2      EQU     06h
 D0      EQU     08h             ; divisor (division, number printing)
 D1      EQU     09h
-; The error report (checked) runs after the program, so it may use the zero
-; page that machine code has ($02, $03, $0A-$0D; but not $0C-$0D and below
-; while the report prints, since a full stack reaches down to them):
-P       EQU     02h             ; 02-03 the place being reported
-Q       EQU     0Ah             ; 0A-0B a pointer for counting lines
+        IF      CHECKED
+PLACE   EQU     D0              ; 08-09 the address of the character being
+                                ;   run, for the error report. No handler
+                                ;   uses D0/D1 before it can stop.
+; The error report runs after the program, so it may use the zero page that
+; machine code has ($02, $03, $0A-$0D; but not $0A-$0D once it prints
+; numbers, since a full stack and '#' reach down to them):
+P       EQU     02h             ; 02-03 the place, copied (D0/D1 go to '#')
+LN      EQU     0Ah             ; 0A-0B the line being reported
+        ENDIF
 
 ; -----------------------------------------------------------------------------
 ;  Memory map
@@ -94,7 +99,7 @@ Q       EQU     0Ah             ; 0A-0B a pointer for counting lines
 ;    0400       LET  letter cells: A..Z at +00..+33, a..z at +40..+73 (a word
 ;               cell is 64 bytes below its variable), heap pointer at +7C,
 ;               the -n? line buffer at +80..+FF. The checked build's cells
-;               are in the gaps: RSV at +35, PLACE at +36, PEND at +38;
+;               are in the gaps: RSV at +35, PEND at +38;
 ;               and every build's: the countdown CDOWN at +79, KEYBUF (the
 ;               held key) at +7A, BRKOFF (the break-off cell) at +7B.
 ;    0500       PROG the program text, NUL-terminated; the heap follows
@@ -122,12 +127,9 @@ BRKOFF  EQU     LET+7Bh         ; the break-off cell: a program that stores a
                                 ;   non-zero byte here gets Ctrl-C as a key
 CDOWN   EQU     LET+79h         ; the break check's countdown (see pnext)
 RSV     EQU     LET+35h         ; checked: S as it was before this character
-PLACE   EQU     LET+36h         ; checked: the address of this character
 PEND    EQU     LET+38h         ; checked: the program's end, where the heap
                                 ;   starts: it may not be released below it
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
-LBM1    EQU     LINEBUF-1       ; (for the error report)
-PROGM1  EQU     PROG-1
 RSLIM   EQU     20h             ; lowest S allowed (checked build)
 MSLOOP  EQU     40              ; n? inner loop count for about 1 ms; tune it
                                 ;   (each pass calls KEY once; the wait for a
@@ -240,9 +242,7 @@ pnext:  DEC     CDOWN
         JSR     KEY
         BEQ     next            ; no key
         STA     KEYBUF          ; held for the next '?'
-        CMP     #3
-        BNE     next
-        JSR     ctlc            ; (it comes back only if the break key is off)
+        JSR     chk3            ; (Ctrl-C: back only if the break key is off)
 next:   JSR     step
         JMP     next
         ENDIF
@@ -272,7 +272,7 @@ pr0:
         CMP     #22h
         BEQ     pdrop
         IF      CHECKED
-        CMP     #0
+        TAY                     ; (Y is free here)
         BEQ     e_qpr
         ENDIF
         CMP     #'/'
@@ -899,9 +899,7 @@ pnext:  DEC     CDOWN
         JSR     KEY
         BEQ     next            ; no key
         STA     KEYBUF          ; held for the next '?'
-        CMP     #3
-        BNE     next
-        JSR     ctlc            ; (it comes back only if the break key is off)
+        JSR     chk3            ; (Ctrl-C: back only if the break key is off)
 next:
         ; Both stacks are checked once per character, after it has run. The
         ; return stack has overrun when S is below RSLIM: an overflow leaves
@@ -1000,24 +998,27 @@ getk:   LDA     KEYBUF
         RTS
 gk1:    JSR     KEY
         BEQ     gk9
-        CMP     #3
-        BEQ     ctlc            ; Ctrl-C: ctlc gives the 03h back, if at all
+; chk3: a key in A (not 0). A Ctrl-C goes on to ctlc, which gives the 03h
+; back if it comes back at all.
+chk3:   CMP     #3
+        BEQ     ctlc
 gk9:    RTS
 
 ; ctlc: Ctrl-C has been read. If the break key is on, that is the end. If
 ; the program has turned it off, wait about 250 ms (about 250 times MSLOOP
-; looks: D0 counts the 256s, D1 runs on from whatever it holds) for one more
+; looks: T1 counts the 256s, T2 runs on from whatever it holds) for one more
 ; key: a second Ctrl-C is the end too; any other key is held (the newest
-; wins). Returns A = 03h with the zero flag clear. Keeps X and Y.
+; wins). Returns A = 03h with the zero flag clear. Keeps X and Y. (Not D0/D1:
+; they hold the place in the checked build.)
 ctlc:   LDA     BRKOFF
         BEQ     cbreak
         LDA     #CWAIT+1
-        STA     D0
+        STA     T1
 ct2:    JSR     KEY
         BNE     ct3
-        DEC     D1
+        DEC     T2
         BNE     ct2
-        DEC     D0
+        DEC     T1
         BNE     ct2
         BEQ     ct9             ; always: none came
 ct3:    CMP     #3
@@ -1265,15 +1266,15 @@ error:  PHA                     ; the letter
         LDA     PLACE
         STA     P
         LDA     PLACE+1
-        STA     P+1
+        STA     P+1             ; (the numbers need D0/D1)
         LDY     #M_ERR-MSG
         JSR     prs             ; CR LF "Err "
         PLA
         JSR     CONOUT
         JSR     prs             ; " @ " (it follows M_ERR)
         JSR     lcol
-        LDA     D0
-        LDY     D1
+        LDA     LN
+        LDY     LN+1
         JSR     prnum           ; the line
         LDA     #','
         JSR     CONOUT
@@ -1301,8 +1302,7 @@ er2:    LDY     #M_STK-MSG
         SBC     #0FFh-DSE
         LSR                     ; the depth, (DSE - X) / 2
         PHA
-        LDY     #0
-        JSR     prnum
+        JSR     prnum8
         PLA
         LDY     #M_C-MSG        ; ":"
         CMP     #9
@@ -1334,13 +1334,14 @@ er5:    LDY     #M_RTN-MSG
         LDA     RSV
         EOR     #0FFh
         LSR                     ; (FFh - S) / 2 entries
-        LDY     #0
-        JSR     prnum
+        JSR     prnum8
         LDY     #M_NL-MSG
         JSR     prs
         JMP     EXIT
 
-; prnum: print the number A (low), Y (high), signed, keeping the data stack
+; prnum: print the number A (low), Y (high), signed, keeping the data stack.
+; prnum8: the same for A alone, 0-255.
+prnum8: LDY     #0
 prnum:  JSR     pushay
         JMP     h_num
 
@@ -1364,49 +1365,41 @@ M_CD:   DB      ': ..','.'+80h
 M_C:    DB      ':'+80h
 M_RTN:  DB      13,10,'Rtn',' '+80h
 
-; lcol: the line (D0/D1) and the column (T1/T2) of the place at P, both from
+; lcol: the line (LN) and the column (T1/T2) of the place at P, both from
 ; 1. A place below the program is in the -n? line buffer: line 0, and the
-; column is the place in the buffer. Otherwise the LFs before the place are
-; counted from PROG; T1/T2 holds the address before the line's first
-; character (the last LF, or PROG - 1), and the column is P minus that.
-lcol:   LDY     #0
-        STY     D1
-        STY     D0
-        LDA     #<LBM1
+; column is the place in the buffer. Otherwise IP (free now: the program has
+; stopped) runs from PROG to the place, counting LFs; T1/T2 keeps where the
+; last line started, and the column is the place minus that, plus 1.
+lcol:   LDA     #0
+        STA     LN+1
+        STA     LN
+        LDA     #<LINEBUF
         STA     T1
-        LDA     #>LBM1
+        LDA     #>LINEBUF
         STA     T2
         LDA     P
         CMP     #<PROG
         LDA     P+1
         SBC     #>PROG
         BCC     lc9             ; below the program: line 0
-        INC     D0
-        LDA     #<PROGM1
-        STA     Q
+        INC     LN
+        JSR     rstip
+lc3:    LDA     IP              ; a line starts here
         STA     T1
-        LDA     #>PROGM1
-        STA     Q+1
+        LDA     IP+1
         STA     T2
-lc1:    INC     Q               ; the next character
-        BNE     lc2
-        INC     Q+1
-lc2:    LDA     Q
+lc1:    LDA     IP
         CMP     P
-        LDA     Q+1
+        LDA     IP+1
         SBC     P+1
         BCS     lc9             ; at the place
-        LDA     (Q),Y
+        JSR     getc
         CMP     #10
         BNE     lc1
-        INC     D0              ; an LF: a new line starts after it
+        INC     LN              ; an LF: a new line starts after it
         BNE     lc3
-        INC     D1
-lc3:    LDA     Q
-        STA     T1
-        LDA     Q+1
-        STA     T2
-        BNE     lc1             ; always: no program is in page zero
+        INC     LN+1
+        BNE     lc3             ; always
 lc9:    LDA     P
         SEC
         SBC     T1
@@ -1414,5 +1407,8 @@ lc9:    LDA     P
         LDA     P+1
         SBC     T2
         STA     T2
-        RTS
+        INC     T1              ; + 1
+        BNE     lc8
+        INC     T2
+lc8:    RTS
         ENDIF

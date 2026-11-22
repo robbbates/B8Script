@@ -47,8 +47,14 @@ Each part says what is decided and what is left to detail.
 
 ### Map and systems
 
-- **Decided:** systems at positions on a 70 × 16 chart, generated from the seed; jump range set by fuel; each system has an economy type and a safety level; names from syllables.
-- **To detail:** how many systems (64 to 100); how far apart, and how to make sure every system can be reached; the fuel tank and fuel price; which system types exist, and how type sets the goods; how the chart marks visited systems, the player and the range.
+Decided (Nov 22).
+
+- **64 systems**, so a system's number fits 6 bits: one save-code character.
+- **The chart is the 56 × 16 main area.** x fits 6 bits and y 4.
+- **Distance** is the real distance with x counted at half, since a screen cell is about twice as tall as it is wide. A jump costs its distance rounded up to a whole number, found by a small square-root loop (at most 16 tries). Fuel is in whole units, and the tank is the range: 7 to start, 14 at best (finished in Ship and upgrades).
+- **Generation grows the map** from the home system at the centre: each new system goes within the starter's range of one already placed, and at least 2 cells from any other. Every system is then reachable by construction, with no search; some far arms need a bigger tank.
+- **Safety by distance from home:** policed near the centre, frontier further out, lawless at the edges. It uses the same distance routine. Types are random.
+- **The chart:** `@` for you; a visited system shows its type letter (A, M, I, H), an unvisited one `*`; capitals in range, lower case out of range (`.` for an unvisited one out of range). Two keys step the terminal's cursor through the systems in range, nearest first; the side panel shows the chosen system's name, type, safety and fuel cost; Return jumps.
 
 ### Economy
 
@@ -118,7 +124,7 @@ A first sketch:
 
 ```
 +------------------------------------------------------------------------------+
-| LAVE  Agri  Policed   Day 12   Cr 4,210   Debt 8,000   Fuel 7.0   Hull 100%   |
+| LAVE  Agri  Policed   Day 12   Cr 4,210   Debt 8,000   Fuel 7     Hull 100%   |
 +------------------------------------------------------+-----------------------+
 |                                                      | Cargo 12/20           |
 |   star chart, or the market table, or the duel       |  Food        5        |
@@ -155,7 +161,7 @@ Events (shortages, booms); colonies and outposts; ranks with titles; more oppone
 
 | Data | Size |
 |---|---|
-| 100 systems × (position 2, type and safety 1, stock of 8 goods 8, rare item 1) | 1.2 KB |
-| Visited systems, one bit each | 13 bytes |
+| 64 systems × (position 2, type and safety 1, stock of 8 goods 8, last-update day 2) | 832 bytes |
+| Visited systems, one bit each | 8 bytes |
 | Goods, ships, upgrades, names: fixed tables | under 1 KB |
 | The player's state | under 100 bytes |

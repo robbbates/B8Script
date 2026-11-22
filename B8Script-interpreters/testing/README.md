@@ -30,6 +30,7 @@ python3 chktab09.py out/6809/*.lst
 python3 chktab6502.py out/6502/*.lst
 python3 chkbr6502.py out/6502/*.lst                # asm80 misses some bad 6502 branches
 python3 gamecheck.py out                           # every game on every build, briefly
+python3 test_games.py                              # scripted games played to an end on ref.py
 python3 sizes.py out/z80                           # bytes per variant
 python3 mkrel.py                                   # copy out/ to the .bin, .COM and .lst files
 ```
@@ -55,6 +56,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `run_win32.py` | Runs every Windows build through `check()`, the editor builds through `test_editor.py`, and all of them through a few Windows-only tests |
 | `chkpe.py` | Checks a Windows .EXE's header against the rules: alignments, sizes, the section, the entry point, the import table |
 | `gamecheck.py` | Runs every game on every build for a short while and compares the output with `ref.py` |
+| `test_games.py` | Types a fixed key sequence at a game on a checked `ref.py` and checks for the messages it should reach: a win, a loss or another known message. `test_games.py NAME` runs one game's tests |
 | `chktab.py`, `chktab09.py`, `chktab6502.py` | Check the dispatch-table layout rules on Z80/8080, 6809 and zero-page 6502 listings |
 | `chkbr6502.py` | Checks every 6502 branch against its target |
 | `games/` | Your programs. `TINYBAS.B8S` is part of the suite |

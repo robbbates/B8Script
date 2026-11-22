@@ -276,7 +276,7 @@ The four editor builds are tested by typing at them (`testing/test_editor.py`), 
 
 The Windows builds run in the Unicorn emulator (`testing/harness_win32.py`): the .EXE is mapped as Windows would map it, and the dozen `kernel32` calls it makes are modelled. They go through the same suite as the others, the break-key tests and the editor sessions included, plus a few tests of their own (the report on standard error, redirected input, the arrow keys, the command line). That tests the interpreter, and the header against the rules; it can't show that Windows itself accepts the file, or that the model of each call is right.
 
-The other eight games are also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`). The test setup is in `testing/` (see its README).
+The other fifteen games are also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`), and the reference plays scripted games of the newest seven (Wumpus, Robots, 2048, Minesweeper, Breakout, Qubic and Klondike) to a win, a loss or a known message (`testing/test_games.py`). The test setup is in `testing/` (see its README).
 
 ## Converting older programs
 

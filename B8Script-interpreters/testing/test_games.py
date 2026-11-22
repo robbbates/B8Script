@@ -230,6 +230,25 @@ TESTS += [
 ]
 
 
+# Battleship, seed 1: firing only at my ships (read from the game), and only
+# at water, which lets it find and sink the whole fleet. And placing, firing
+# twice at a cell, and giving up
+BATTLE_MISS = (b'a0b0c0d0e0f0g0h0i0j0a1b1c1d1e1f1g1h1i1j1a2b2c2f2g2h2i2j2a3b3c3d3e3f3g3h3i3j3'
+               b'a4g4h4i4j4a5b5c5d5e5g5h5i5a6b6c6e6g6h6i6a7b7c7e7g7h7i7a8b8c8e8g8h8i8j8a9b9c9d9e9f9g9h9i9j9')
+
+TESTS += [
+    ('BATTLE', 'you win', b'x     d2e2b4c4d4e4f4f5j5d6f6j6d7f7j7d8f8n',
+     [b'You fire at D2: a hit.', b'You sank my destroyer!', b'I sank your battleship!',
+      b'You sank my whole fleet. You win!', b'Bye.']),
+    ('BATTLE', 'it wins', b'xr' + BATTLE_MISS + b'n',
+     [b'You fire at A0: a miss.', b'I sank your carrier!', b'I sank your destroyer!',
+      b'I sank your whole fleet. I win!', b'Bye.']),
+    ('BATTLE', 'placing, a cell twice, give up', b'x ww ss ra0a0qn',
+     [b'Place your battleship (4 cells).', b"Ships can't overlap.", b'You fire at A0: a miss.',
+      b'You already fired at A0.', b'You give up.', b'Bye.']),
+]
+
+
 def play(path, keys, steps=20_000_000):
     r = Play(open(path, 'rb').read(), keys, checked=True)
     out = r.run(steps)

@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tests
 from run_tests import check
 from harness_6809 import Run
+from harness_z80 import symbols
 
 # machine-code test: double the top data cell. Entered by JSR with U at the
 # top cell (big-endian): PULU D; ASLB; ROLA; PSHU D; RTS (the loader's RTS)
@@ -24,10 +25,16 @@ for hexf in sorted(glob.glob(d + '/*.hex')):
     if only and not any(o in base for o in only):
         continue
     checked = base.endswith('-chk')
-    def runner(p, i, brk=None, base=base):
-        r = Run(base + '.hex', base + '.lst', p, i, brk_at=brk)
+    def runner(p, i, timed=None, base=base):
+        r = Run(base + '.hex', base + '.lst', p, i, timed=timed or ())
         o = r.run()
+        runner.last = r         # check() reads its looks
         return o, r.ended
+    # the build's own addresses, so that ref.py can reproduce a checked
+    # build's error reports exactly (places, the heap limit, addresses)
+    sy = symbols(base + '.lst')
+    plat = dict(prog_at=sy['PROG'], let=sy['LET'], linebuf=sy['LINEBUF'],
+                heaplim=sy['HEAPLIM'] << 8)
     total += check(runner, os.path.basename(base), '6809', False, checked, 0x39,
-                   games=games, verbose=verbose)
+                   games=games, verbose=verbose, plat=plat)
 sys.exit(1 if total else 0)

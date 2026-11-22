@@ -1,23 +1,30 @@
 ; =============================================================================
 ;  B8Script interpreter for the 6502 (NMOS opcodes only)
-;  Spec: docs/b8script.md (2026-10-09) plus the 2026-11-20 changes:
-;        [x stores in a variable, "[ " pushes an anonymous block, any other
-;        character after [ is an error, the heap pointer lives at z10+.
-;        The string escape is '/' (it was '>').
-;        Dividing by zero is not checked. -n? does no more editing than
-;        Backspace.
+;  Spec: docs/b8script.md (2026-11-21). -n? does no more editing than
+;        Backspace. Ctrl-C stops every build (see the console layer); the
+;        break-off cell is BRKOFF, $047B.
 ;  Design follows the Z80 interpreter; see b8s-z80.asm for the common ideas.
 ;
 ;  This interpreter keeps the data stack in pages 2 and 3 (252 cells) and
-;  uses 10 bytes of zero page. b8s-6502-zp.asm is a smaller interpreter that
+;  uses 10 bytes of zero page ($00-$09). b8s-6502-zp.asm is a smaller interpreter that
 ;  keeps the stack in zero page instead (112 cells); its memory map and
 ;  machine-code contract differ.
 ;
 ;  One switch, set in the EQU line below:
-;    CHECKED  0 = no checks (spec: "B8Script checks nothing")
-;             1 = stops on stack overrun, Ctrl-C, heap past the limit, a store
-;                 outside the program's own space, and a bad character after [,
-;                 printing a letter and the place, like  S @ 245
+;    CHECKED  0 = no checks: whatever the spec calls unsafe is not caught
+;             1 = a checked build, as in the spec's "Errors and checked
+;                 builds": at startup every word cell points at 0000h (see
+;                 e_undef) and the variables and the interpreter's cells are
+;                 0. It stops with S s R r (stack over/underflow), H (heap),
+;                 O (a store outside the program's space), U (undefined
+;                 word), Q (no closing quote), W (bad character after [), X
+;                 (a reserved byte), Z (divide by zero), N (brackets) or B
+;                 (Ctrl-C), printing the spec's four-line report:
+;                   Err Z @ 3,4
+;                   0/ "no"$
+;                   Stk 2: 5 0
+;                   Rtn 0
+;                 and then goes to EXIT.
 ;
 ;  Assembler: asm80, C6502 mode.
 ; =============================================================================
@@ -67,6 +74,22 @@ T1      EQU     05h
 T2      EQU     06h
 D0      EQU     08h             ; divisor (division, number printing)
 D1      EQU     09h
+        IF      1-CHECKED
+KEYBUF  EQU     07h             ; a key held back by the break check (0: none)
+        ENDIF
+        IF      CHECKED
+PLACE   EQU     06h             ; 06-07 (T2 and $07) the address of the
+                                ;   character being run, for the error report:
+                                ;   no handler of the checked build uses T2.
+                                ;   (Machine code may change T2: that matters
+                                ;   only if it also leaves a stack overrun,
+                                ;   whose report then shows a wrong place.)
+RSV     EQU     LET+35h         ; S as it was before this character
+KEYBUF  EQU     LET+7Ah         ; a key held back by the break check (0: none)
+; The error report runs after the program, so it may use the zero page that
+; machine code has ($0A-$0F):
+CL      EQU     0Ah             ; 0A-0B the column being reported
+        ENDIF
 
 ; -----------------------------------------------------------------------------
 ;  Memory map
@@ -76,8 +99,11 @@ D1      EQU     09h
 ;    0200       DSL, data stack, low bytes (X = FC when empty: 252 cells)
 ;    0300       DSH, data stack, high bytes
 ;    0400       LET  letter cells: A..Z at +00..+33, a..z at +40..+73 (a word
-;               cell is 64 bytes below its variable), heap pointer at +7C
-;               (= z10+), KEYBUF at +34, the -n? line buffer at +80..+FF
+;               cell is 64 bytes below its variable), heap pointer at +7C,
+;               the -n? line buffer at +80..+FF. The checked build's cells
+;               are in the gaps: RSV at +35, PEND at +38, KEYBUF (the held
+;               key; $07 in the unchecked build) at +7A; and every build's:
+;               CDOWN at +79, BRKOFF (the break-off cell) at +7B.
 ;    0500       PROG the program text, NUL-terminated; the heap follows
 ;    E000       the interpreter (ROM)
 ;
@@ -98,11 +124,18 @@ LET     EQU     LETPAGE*256
 PROG    EQU     0500h           ; where the loader puts the program text
 PROG1   EQU     PROG+1
 HEAPLIM EQU     0E0h            ; the heap must stay below E000h (a page)
-HEAP    EQU     LET+7Ch         ; z10+, the heap pointer
-KEYBUF  EQU     LET+34h         ; a key held back by the break check
+HEAP    EQU     LET+7Ch         ; the heap pointer (the heap top)
+CDOWN   EQU     LET+79h         ; the break check's countdown (see pnext)
+BRKOFF  EQU     LET+7Bh         ; the break-off cell: a program that stores a
+                                ;   non-zero byte here gets Ctrl-C as a key
+PEND    EQU     LET+38h         ; checked: the program's end, where the heap
+                                ;   starts: it may not be released below it
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
 RSLIM   EQU     20h             ; lowest S allowed (checked build)
 MSLOOP  EQU     40              ; n? inner loop count for about 1 ms; tune it
+                                ;   (each pass calls KEY once; the wait for a
+                                ;   second Ctrl-C uses it too: 250 ms)
+CWAIT   EQU     250*MSLOOP/256  ; (that wait, in 256s)
 
         ORG     0E000h
 
@@ -111,38 +144,239 @@ MSLOOP  EQU     40              ; n? inner loop count for about 1 ms; tune it
 ; =============================================================================
 start:  LDX     #0FFh
         TXS                     ; return stack empty
+        IF      CHECKED
+        ; The first half of the letter page is zeroed: every variable, every
+        ; cell of the interpreter's own (no key held back), and every word
+        ; cell, which then points at 0000h: calling an undefined word stops
+        ; with U (see e_undef).
+        INX
+        TXA                     ; A = 0
+        LDY     #7Fh
+stz:    STA     LET,Y
+        DEY
+        BPL     stz
+        ENDIF
         JSR     rstip
 st1:    JSR     getc
         BNE     st1             ; IP ends just past the NUL
-        IF      CHECKED
-        STA     KEYBUF          ; (A = 0) no key held back
+        IF      1-CHECKED
+        STA     KEYBUF          ; (A = 0) no key held, the break key on
+        STA     BRKOFF
         ENDIF
         LDA     IP
         STA     HEAP
+        IF      CHECKED
+        STA     PEND
+        ENDIF
         LDA     IP+1
         STA     HEAP+1
+        IF      CHECKED
+        STA     PEND+1
+        ENDIF
         JSR     rstip
         LDX     #DSE
 
 ; =============================================================================
 ;  The inner loop
 ; =============================================================================
+; -----------------------------------------------------------------------------
+;  The break key. A running program reads the keyboard only through getk
+;  (for '?') and pnext (the break check), which between them give the break
+;  key its rules:
+;    - Ctrl-C (03h) stops the program: silently to EXIT in the unchecked
+;      build, with the report (B) in the checked one;
+;    - any other key that the break check reads is held in KEYBUF for the
+;      next '?', and a newer one takes its place;
+;    - '?' (getk) takes the held key first;
+;    - a program that has stored a non-zero byte at BRKOFF gets Ctrl-C as a
+;      key like any other, but two of them within about 250 ms still stop it.
+;  KEY is the host's: a waiting key in A, or A = 0 with the zero flag set.
+; -----------------------------------------------------------------------------
+; pnext: the break check, then (falling through) next. A word call, a true
+; '(' and a true ')' end here, but the keyboard is looked at only once in 256
+; of them: CDOWN counts them down. A key found is held; a Ctrl-C goes on to ctlc. (Startup
+; falls in here too, which does no harm.)
+pnext:  DEC     CDOWN
+        BNE     next
+        JSR     KEY
+        BEQ     next            ; no key
+        STA     KEYBUF          ; held for the next '?'
+        JSR     chk3            ; (Ctrl-C: back only if the break key is off)
 next:
         IF      CHECKED
-        ; Both stacks are checked once per character. The data stack has
-        ; overrun when X is above DSE (an overflow wraps X to FF, an underflow
-        ; moves it up; no handler moves X by more than 2). The return stack
-        ; has when S is below RSLIM (an underflow wraps S to 00-03).
-        CPX     #DSE+1
-        BCS     e_stack
+        ; Both stacks are checked once per character, after it has run. The
+        ; return stack has overrun when S is below RSLIM: an overflow leaves
+        ; it at 1Eh or 1Fh, an underflow wraps it to 01h (no handler pulls
+        ; more than one entry). The data stack has when X is above DSE: an
+        ; underflow moves X up to FDh or FEh (no handler moves X by more
+        ; than 2), and an overflow wraps it from 00h to FFh.
+        ; S is kept in RSV, for the report's Rtn line (an error found inside
+        ; a handler has its own calls on the hardware stack), and the place
+        ; of the character about to run in PLACE.
         TXA                     ; TSX trashes X: keep it in A
         TSX
+        STX     RSV
         CPX     #RSLIM
         TAX                     ; TAX leaves the carry alone
         BCC     e_rstack
+        CPX     #DSE+1
+        BCS     e_stack
+        LDA     IP
+        STA     PLACE
+        LDA     IP+1
+        STA     PLACE+1
         ENDIF
         JSR     step
         JMP     next
+        IF      CHECKED
+; S/R are overflows, s/r underflows. After an underflow that stack counts as
+; empty.
+e_rstack:LDA    RSV
+        CMP     #10h
+        LDA     #'R'
+        BCS     ejmp            ; S is 1Eh-1Fh: an overflow
+        LDA     #0FFh
+        STA     RSV             ; S wrapped to 01h: Rtn 0
+        LDA     #'r'
+        BNE     ejmp            ; always
+e_stack:CPX     #0FFh
+        LDA     #'S'
+        BCS     ejmp            ; X wrapped from 00h to FFh: an overflow
+        LDX     #DSE            ; an underflow: Stk 0
+        LDA     #'s'
+ejmp:   JMP     error
+        ENDIF
+
+; The handlers that work on the return stack sit here, where short branches
+; reach next and pnext.
+
+; '{' TOS to the return stack, '}' return stack to TOS
+h_tor:  PLA
+        PLA
+        LDA     TH
+        PHA
+        LDA     TL
+        PHA
+        JSR     drop
+        BNE     next            ; always
+
+h_fromr:PLA
+        PLA
+        JSR     push
+        PLA
+        STA     TL
+        PLA
+        STA     TH
+        BCC     next            ; always: the carry is clear on the way in
+
+; ')' ( flag -- ): true jumps back to the block start (and keeps it); false
+; drops it and carries on. It shares ']'s code: with the carry clear, as
+; it is here, the address popped is pushed back.
+h_close:JSR     flag
+        BEQ     rdrop
+        DB      24h             ; (BIT zp: steps over the SEC)
+; ']' returns: pull an address and jump to it.
+h_ret:  SEC
+        PLA
+        PLA                     ; drop the step frame
+        PLA
+        STA     IP
+        PLA
+        STA     IP+1
+        BCS     next
+        PHA                     ; ')': keep the block start
+        LDA     IP
+        PHA
+        BCC     pnext           ; always: a loop-back, with the break check
+
+; '\' ( flag -- ): true skips to the next ')' or ']' at this level; ')'
+; drops the block start, ']' returns.
+h_break:JSR     flag
+        BEQ     gk9             ; (an RTS)
+        IF      CHECKED
+        LDA     #0              ; \ takes either closer
+        ENDIF
+        JSR     skip
+        CMP     #')'
+        BNE     h_ret
+rdrop:  PLA
+        PLA
+        PLA
+        PLA                     ; (the block start's high byte: never 0)
+        BNE     next            ; always
+
+; getk: a key for '?' in A (zero flag clear), or A = 0 with the zero flag
+; set when there is none. Keeps X and Y. The held key goes first, and is
+; taken out of KEYBUF.
+getk:   LDA     KEYBUF
+        BEQ     gk1
+        PHA
+        LDA     #0
+        STA     KEYBUF
+        PLA
+        RTS
+gk1:    JSR     KEY
+        BEQ     gk9
+; chk3: a key in A (not 0). A Ctrl-C goes on to ctlc, which gives the 03h
+; back if it comes back at all.
+chk3:   CMP     #3
+        BEQ     ctlc
+gk9:    RTS
+
+; ctlc: Ctrl-C has been read. If the break key is on, that is the end. If
+; the program has turned it off, wait about 250 ms (about 250 times MSLOOP
+; looks: D0 counts the 256s, D1 runs on from whatever it holds) for one more
+; key: a second Ctrl-C is the end too; any other key is held (the newest
+; wins). Returns A = 03h with the zero flag clear. Keeps X and Y.
+ctlc:   LDA     BRKOFF
+        BEQ     cbreak
+        LDA     #CWAIT+1
+        STA     D0
+ct2:    JSR     KEY
+        BNE     ct3
+        DEC     D1
+        BNE     ct2
+        DEC     D0
+        BNE     ct2
+        BEQ     ct9             ; always: none came
+ct3:    CMP     #3
+        BEQ     cbreak
+        STA     KEYBUF
+ct9:    LDA     #3
+        RTS
+        IF      1-CHECKED
+cbreak  EQU     endprog         ; the unchecked build stops without a word
+        ENDIF
+        IF      CHECKED
+cbreak  EQU     e_break         ; the checked build reports B
+        ENDIF
+
+        IF      CHECKED
+e_break:LDA     #'B'            ; Ctrl-C (the stacks as they stand)
+        DB      2Ch
+e_resv: LDA     #'X'            ; a reserved byte, 80h-FFh
+ejmp3:  JMP     error
+        ENDIF
+        IF      CHECKED
+; e_undef: the word cells of undefined words hold 0000h. A call there reads
+; the byte at 0000h, which is IP's own low byte: 00h while IP is 0000h, so
+; the call reads a NUL with IP in page zero, where no program can be. The
+; call is undone first: the step frame and the return address come off the
+; hardware stack, and the place is the call letter (the return address - 1).
+e_undef:PLA
+        PLA                     ; the step frame
+        PLA
+        SEC
+        SBC     #1
+        STA     PLACE
+        PLA
+        SBC     #0
+        STA     PLACE+1
+        INC     RSV
+        INC     RSV             ; Rtn does not count the call
+        LDA     #'U'
+        BNE     ejmp3           ; always
+        ENDIF
 
 ; step: read one character and sort it by range.
 ;    00h          end of program
@@ -151,7 +385,8 @@ next:
 ;    41h-5Ah      A-Z: call the word in that letter's cell
 ;    61h-7Ah      a-z: push the address of that letter's cell
 ;    the rest     punctuation: jump through PTAB, 32 entries, in code order
-; Every way out of the sort has the carry clear, except "ignored".
+; Every way out of the sort has the carry clear, except "ignored". A checked
+; build stops on 80h-FFh (X) and still ignores DEL.
 step:   JSR     getc            ; flags follow A
         BEQ     endprog
         SEC
@@ -172,7 +407,13 @@ step:   JSR     getc            ; flags follow A
         CMP     #3Ah
         BCC     lower           ; 61h-7Ah: A = 20h-39h
         CMP     #3Eh
+        IF      1-CHECKED
         BCS     ign             ; 7Fh-FFh
+        ENDIF
+        IF      CHECKED
+        BEQ     ign             ; 7Fh
+        BCS     e_resv          ; 80h-FFh: reserved
+        ENDIF
         ; The three adjustments below chain. Each ADC adds the carry the one
         ; before it left, which the constants allow for.
         SBC     #1Ah            ; 7Bh-7Eh: (carry clear: -1Bh) index 28-31
@@ -186,35 +427,60 @@ punct:  ASL                     ; (the index is small: the carry stays clear)
         PHA
 ign:    RTS                     ; RTS trick: goes to the handler. Reached
                                 ; directly, it just ends an ignored character.
-endprog:JMP     EXIT
+endprog:
         IF      CHECKED
-e_stack:LDA     #'S'            ; data stack over or under
-        DB      2Ch             ; (BIT abs: hides the next instruction)
-e_rstack:LDA    #'R'            ; return stack over or under
-        JMP     error
+        LDA     IP+1            ; IP in page zero: an undefined word
+        BEQ     e_undef
         ENDIF
+        JMP     EXIT
+
+; A-Z: call the word. The return address (the IP after the letter) goes on
+; the return stack, and the IP becomes the address in the letter's cell.
+upper:  ASL
+        TAY
+        SEC
+        BCS     pushn           ; always
+
 
 ; Digits: the first one is in A; read the rest of the number.
-digit:  TAY
-        JSR     push
-        STY     TL
-        LDA     #0
-        STA     TH
+digit:  LDY     #0
+        JSR     pushay
         JMP     rdnum
 
 ; a-z: push the cell's address (the cell is the variable)
 lower:  ASL
-        TAY
+        LDY     #>LET
+        BNE     pushay          ; always
+
+puship: LDA     IP              ; push the reading position
+        LDY     IP+1
+; pushay: push a cell: A = its low byte, Y = its high byte
+pushay: PHA
         JSR     push
-        STY     TL
-        LDA     #>LET
-        STA     TH
+        PLA
+        STA     TL
+        STY     TH
         RTS
+
+push:   DEX                     ; ':' and every push (keeps Y)
+        LDA     TL
+        STA     DSL,X
+        LDA     TH
+        STA     DSH,X
+        RTS
+
+
+
 
 ; '(' ( flag -- ): true pushes the block start and enters; false skips to
 ; the matching ')'.
 h_open: JSR     flag            ; (keeps the carry clear)
+        IF      1-CHECKED
         BEQ     skip
+        ENDIF
+        IF      CHECKED
+        BEQ     skpar
+        ENDIF
 ; pushn: take the step frame off, push the reading position on the return
 ; stack, and go on. With the carry set (a word call) the reading position
 ; then becomes the address in the letter cell at LET,Y.
@@ -229,14 +495,8 @@ pushn:  PLA
         STA     IP
         LDA     LET+1,Y
         STA     IP+1
-nxt:    JMP     next
+nxt:    JMP     pnext
 
-; A-Z: call the word. The return address (the IP after the letter) goes on
-; the return stack, and the IP becomes the address in the letter's cell.
-upper:  ASL
-        TAY
-        SEC
-        BCS     pushn           ; always
 
 ; '[' followed by a letter stores the body's address in that letter's cell:
 ; uppercase is a word, lowercase a variable. Followed by a space it pushes
@@ -246,7 +506,16 @@ upper:  ASL
         IF      CHECKED
 def1:   CPY     #' '-'A'+256
         BEQ     def2
-        BNE     e_brack         ; anything but a letter or a space
+; W: anything but a letter or a space after [. The place is that character,
+; one past the [.
+        INC     PLACE
+        BNE     eb1
+        INC     PLACE+1
+eb1:    LDA     #'W'
+        BNE     ejmp2           ; always
+; A false ( skips: the wrong closer for it is ].
+skpar:  LDA     #']'
+        BNE     skip            ; always
         ENDIF
 h_def:  JSR     getc
         SEC
@@ -267,19 +536,41 @@ h_def:  JSR     getc
         STA     LET,Y
         LDA     IP+1
         STA     LET+1,Y
-        BNE     skip            ; always: no program is in page zero
+        BNE     skdef           ; always: no program is in page zero
 def2:   JSR     puship          ; an anonymous block: push its address
+skdef:
+        IF      CHECKED
+        LDA     #')'            ; the wrong closer for [
+        ENDIF
 
 ; skip: read past text to the closer at this level, and return it in A.
 ; Brackets of both kinds count together; strings are stepped over whole. A
 ; NUL first ends the program.
-skip:   LDA     #0
-        STA     T2              ; depth
+; In the checked build A holds, on the way in, the wrong closer for the
+; opener that started the skip, kept in T0: ] for (, ) for [, and 0 for \,
+; which takes either. Meeting the wrong closer at this level, or the end
+; (a NUL, or a string that runs into it), stops with N, except for \,
+; which then ends the program as before.
+skip:
+        IF      CHECKED
+        STA     T0
+        ENDIF
+        LDA     #0
+        STA     D1              ; depth
 sk1:    JSR     getc
+        IF      1-CHECKED
         BEQ     endprog
+        ENDIF
+        IF      CHECKED
+        BEQ     sknul
+        ENDIF
         CMP     #22h
         BNE     sk2
-        JSR     skipstr         ; leaves A = 22h, which matches nothing below
+        JSR     skipstr         ; leaves A = 22h (11h when checked), which
+                                ;   matches nothing below
+        IF      CHECKED
+        BEQ     sknul           ; the string ran into the end
+        ENDIF
 sk2:    CMP     #'('
         BEQ     sk3
         CMP     #'['
@@ -288,20 +579,38 @@ sk2:    CMP     #'('
         BEQ     sk4
         CMP     #']'
         BNE     sk1
-sk4:    DEC     T2
+sk4:    DEC     D1
         BPL     sk1
+        IF      CHECKED
+        CMP     T0
+        BEQ     e_nest          ; the wrong kind
+        ENDIF
         RTS                     ; the closer at this level
-sk3:    INC     T2
+sk3:    INC     D1
         BNE     sk1
         IF      CHECKED
-e_brack:LDA     #'D'            ; bad character after [
-        JMP     error
+sknul:  LDA     T0
+        BNE     e_nest          ; ( and [ stop with N
+        JMP     EXIT            ; \ ends the program
+e_nest: LDA     #'N'            ; a skip from ( or [ found the wrong closer
+        DB      2Ch             ;   or the end: the place is the opener
+e_quote:LDA     #'Q'            ; a string from 22h runs into the end
+ejmp2:  JMP     error
         ENDIF
 
 ; 22h pushes the address of the text after it and skips the string.
 h_str:  JSR     puship
+        IF      CHECKED
+        JSR     skipstr
+        BEQ     e_quote         ; it ran into the end: the place is the 22h
+        RTS
+        ENDIF
 ; skipstr: IP is inside a string; step past its closing quote. '/' escapes
-; the next character, so '/"' does not end it. Returns with Z set, A = 22h.
+; the next character, so '/"' does not end it.
+; Unchecked, it returns with Z set and A = 22h, and it does not look for the
+; end. Checked, it returns with Z clear and A = 11h, or with Z set if the
+; text ended first (a NUL, also one just after '/').
+        IF      1-CHECKED
 skipstr:JSR     getc
         CMP     #'/'
         BEQ     ss0
@@ -310,6 +619,20 @@ skipstr:JSR     getc
         RTS
 ss0:    JSR     incip
         BNE     skipstr         ; A is '/' here
+        ENDIF
+        IF      CHECKED
+skipstr:JSR     getc
+        BEQ     ss9             ; the end
+        CMP     #'/'
+        BNE     ss1
+        JSR     getc            ; the escaped character
+        BNE     skipstr
+ss9:    RTS                     ; the end, just after '/'
+ss1:    CMP     #22h
+        BNE     skipstr
+        LSR                     ; A = 11h, Z clear
+        RTS
+        ENDIF
 
 ; =============================================================================
 ;  Dispatch table: one handler per punctuation character, in code order.
@@ -347,6 +670,8 @@ PTAB:   DW      h_store-1       ; !
         DW      h_or-1          ; |
         DW      h_fromr-1       ; }
         DW      h_not-1         ; ~
+
+
 
 ; rdnum: TOS = TOS*10 + digit for each digit at IP. Wraps at 16 bits. The
 ; test is at the bottom so the loop closes with a branch. Returns with the
@@ -389,6 +714,19 @@ isdig:  JSR     peek
 ;    getc: the same, then IP moves on; flags follow A
 ;    incip: IP moves on; keeps A, the carry and Y
 ; =============================================================================
+; rdhex: if IP is at a hex digit (0-9, A-F, a-f), return its value in A with
+; the carry clear and IP moved on; otherwise the carry is set and IP stays.
+; Y = 0.
+rdhex:  JSR     isdig
+        BCC     rh1
+        AND     #0DFh
+        SBC     #11h            ; (the carry is set)
+        CMP     #6
+        BCS     rh9
+        ADC     #10
+rh1:    BCC     incip           ; always: the carry is clear
+rh9:    RTS
+
 peek:   LDY     #0
         LDA     (IP),Y
         RTS
@@ -409,19 +747,6 @@ rstip:  LDA     #<PROG
 ; =============================================================================
 ;  Stack
 ; =============================================================================
-puship: JSR     push            ; push the reading position
-        LDA     IP
-        STA     TL
-        LDA     IP+1
-        STA     TH
-        RTS
-
-push:   DEX                     ; ':' and every push
-        LDA     TL
-        STA     DSL,X
-        LDA     TH
-        STA     DSH,X
-        RTS
 
 ; flag: pops TOS and returns with Z set if it was 0. Keeps the carry.
 flag:   LDA     TL
@@ -461,60 +786,6 @@ drop:   LDY     DSL,X
         INX
         RTS
 
-; '{' TOS to the return stack, '}' return stack to TOS
-h_tor:  PLA
-        PLA
-        LDA     TH
-        PHA
-        LDA     TL
-        PHA
-        JSR     drop
-        BNE     nxt2            ; always
-
-h_fromr:PLA
-        PLA
-        JSR     push
-        PLA
-        STA     TL
-        PLA
-        STA     TH
-nxt2:   JMP     next
-
-; ')' ( flag -- ): true jumps back to the block start (and keeps it); false
-; drops it and carries on. It shares ']'s code: with the carry clear, as
-; it is here, the address popped is pushed back.
-h_close:JSR     flag
-        BEQ     rdrop
-        DB      24h             ; (BIT zp: steps over the SEC)
-; ']' returns: pull an address and jump to it.
-h_ret:  SEC
-        IF      CHECKED
-        JSR     chkbrk          ; Ctrl-C is checked at every loop-back and
-        ENDIF                   ;   every word return (it keeps the carry)
-        PLA
-        PLA                     ; drop the step frame
-        PLA
-        STA     IP
-        PLA
-        STA     IP+1
-        BCS     nxt2
-        PHA                     ; ')': keep the block start
-        LDA     IP
-        PHA
-        BCC     nxt2            ; always
-
-; '\' ( flag -- ): true skips to the next ')' or ']' at this level; ')'
-; drops the block start, ']' returns.
-h_break:JSR     flag
-        BEQ     ab9
-        JSR     skip
-        CMP     #')'
-        BNE     h_ret
-rdrop:  PLA
-        PLA
-        PLA
-        PLA
-        JMP     next
 
 ; =============================================================================
 ;  Arithmetic and logic. Effects are ( NOS TOS -- result ).
@@ -638,8 +909,15 @@ h_swap: LDY     DSL,X           ; '%'
 
 ; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
-; of a. Dividing by zero is not checked: it returns two cells of no meaning.
-h_div:  LDA     DSH,X
+; of a. Unchecked, dividing by zero returns two cells of no meaning; checked,
+; it stops with Z.
+h_div:
+        IF      CHECKED
+        LDA     TL
+        ORA     TH
+        BEQ     e_zero
+        ENDIF
+        LDA     DSH,X
         PHA                     ; a's sign: for r
         EOR     TH
         PHA                     ; a xor b: for q
@@ -659,6 +937,73 @@ h_div:  LDA     DSH,X
         JSR     h_swap          ; r on top
         PLA
         JMP     negm            ; r's sign
+
+
+; =============================================================================
+;  Storage
+; =============================================================================
+; '_' ( n -- addr ): the heap top moves by n, which is signed: a negative
+; count releases. TOS becomes the old top. (The carry is clear on the way in.)
+        IF      1-CHECKED
+h_alloc:LDA     HEAP
+        TAY
+        ADC     TL
+        STA     HEAP
+        STY     TL
+        LDA     HEAP+1
+        TAY
+        ADC     TH
+        STA     HEAP+1
+        STY     TH
+        RTS
+        ENDIF
+; The checked build works the new top out first, in T0 and Y, and stops with
+; H, the count still on the stack, if it is at or past the limit, below the
+; program's end, or if the 16-bit add wrapped. A wrap is the V flag of the
+; high bytes' add with the old top's sign bit flipped: that makes the old top
+; a signed number from -8000h, so the add overflows exactly when the true
+; sum leaves 0000h-FFFFh.
+        IF      CHECKED
+h_alloc:LDA     HEAP
+        ADC     TL
+        STA     T0
+        LDA     HEAP+1
+        EOR     #80h
+        ADC     TH
+        BVS     e_heap          ; wrapped
+        EOR     #80h            ; the new top's high byte
+        CMP     #HEAPLIM
+        BCS     e_heap          ; at or past the limit
+        TAY
+        LDA     T0
+        CMP     PEND
+        TYA
+        SBC     PEND+1
+        BCC     e_heap          ; below the program's end
+        LDA     HEAP
+        STA     TL
+        LDA     T0
+        STA     HEAP
+        LDA     HEAP+1
+        STA     TH
+        STY     HEAP+1
+        RTS
+; Errors found by handlers. The stacks are as they were before the handler.
+e_zero: LDA     #'Z'            ; divide by zero
+        DB      2Ch             ; (BIT abs: hides the next instruction)
+e_heap: LDA     #'H'            ; heap past the limit or below the program
+        DB      2Ch
+e_store:LDA     #'O'            ; a store outside the program's space
+        JMP     error
+
+; chkst: stop unless the page in A is in the program's own space, from the
+; letter page up to the heap limit. Keeps Y.
+chkst:  CMP     #LETPAGE
+        BCC     e_store
+        CMP     #HEAPLIM
+        BCS     e_store
+        RTS
+        ENDIF
 
 ; udiv: unsigned TOS / D (D <= 8000h). TOS becomes the quotient and the NOS
 ; cell the remainder (whatever was there is lost).
@@ -695,42 +1040,6 @@ ud2:    DEY
 ud9:    RTS
 
 ; =============================================================================
-;  Storage
-; =============================================================================
-; '_' ( n -- addr ): the heap pointer moves up by n; TOS is the old pointer.
-; (The carry is clear on the way in.)
-h_alloc:LDA     HEAP
-        TAY
-        ADC     TL
-        STA     HEAP
-        STY     TL
-        LDA     HEAP+1
-        TAY
-        ADC     TH
-        IF      CHECKED
-        BCS     e_heap          ; a negative count wraps: too big
-        CMP     #HEAPLIM
-        BCS     e_heap          ; the new top must stay below the limit page
-        ENDIF
-        STA     HEAP+1
-        STY     TH
-        RTS
-        IF      CHECKED
-e_heap: LDA     #'H'            ; heap past the limit
-        DB      2Ch             ; (BIT abs: hides the next instruction)
-e_store:LDA     #'W'            ; write outside the program's space
-        JMP     error
-
-; chkst: stop unless the page in A is in the program's own space, from the
-; letter page up to the heap limit. Keeps Y.
-chkst:  CMP     #LETPAGE
-        BCC     e_store
-        CMP     #HEAPLIM
-        BCS     e_store
-        RTS
-        ENDIF
-
-; =============================================================================
 ;  Console
 ; =============================================================================
 
@@ -745,15 +1054,35 @@ tg1:    RTS
 ; '$' prints the string at TOS, decoding escapes: '/' plus a character
 ; clears that character's bit 6 (/M is CR, /` is space; '/' and '"' have no
 ; bit 6, so // and /" give themselves).
-h_print:JSR     tosget
+; The checked build walks a copy of TOS along the string, so that the address
+; is still there if it stops with Q on a NUL.
+h_print:
+        IF      CHECKED
+        JSR     push            ; the copy
+        JSR     pr0
+        BNE     pdrop           ; always (drop leaves Z clear): the address
+pr0:
+        ENDIF
+        JSR     tosget
         CMP     #22h
         BEQ     pdrop
+        IF      CHECKED
+        TAY                     ; (Y is free here)
+        BEQ     e_qpr
+        ENDIF
         CMP     #'/'
         BNE     pr1
         JSR     tosget
         AND     #0BFh
 pr1:    JSR     CONOUT
+        IF      1-CHECKED
         JMP     h_print
+        ENDIF
+        IF      CHECKED
+        JMP     pr0
+e_qpr:  JSR     drop            ; the copy goes: the address is TOS again
+        JMP     e_quote         ; $ ran into the end
+        ENDIF
 
 h_emit: LDA     TL              ; "'"
         JSR     CONOUT
@@ -877,22 +1206,11 @@ hx1:    ASL
         JSR     rdhex
         BCS     hx2             ; odd digit: already consumed, dropped
         ORA     T0
-        IF      CHECKED
-        STA     T0
-        LDA     TH
-        JSR     chkst
-        LDA     T0
-        ENDIF
-        STA     (TL),Y          ; Y is 0 after rdhex
+        STA     (TL),Y          ; Y is 0 after rdhex (never checked)
         JSR     inctos
         JSR     rdhex
         BCC     hx1
-hx2:
-        IF      CHECKED
-        LDA     TH
-        JSR     chkst
-        ENDIF
-        LDA     #60h
+hx2:    LDA     #60h
         STA     (TL),Y
         RTS
 
@@ -903,72 +1221,167 @@ exec:   LDA     TL
         JSR     drop            ; the address is consumed
         JMP     (T0)
 
-; rdhex: if IP is at a hex digit (0-9, A-F, a-f), return its value in A with
-; the carry clear and IP moved on; otherwise the carry is set and IP stays.
-; Y = 0.
-rdhex:  JSR     isdig
-        BCC     rh1
-        AND     #0DFh
-        SBC     #11h            ; (the carry is set)
-        CMP     #6
-        BCS     rh9
-        ADC     #10
-rh1:    JMP     incip
-rh9:    RTS
 
-; =============================================================================
-;  Console layer: getk returns a waiting key in A (zero flag clear), or
-;  A = 0 with the zero flag set when none is waiting. CONOUT prints A.
-;  Both keep X and Y. In the unchecked build getk is the host's KEY itself.
-; =============================================================================
-        IF      1-CHECKED
-getk    EQU     KEY             ; the host's routine does the whole job
-        ENDIF
+
+
         IF      CHECKED
-getk:   LDA     KEYBUF          ; a key held back by the break check
-        BEQ     gk1
-        PHA
-        LDA     #0
-        STA     KEYBUF
+; =============================================================================
+;  Checked build: the error report
+; =============================================================================
+
+; error: the report, then EXIT. A = the letter, PLACE = the place, X = the
+; data stack to show, RSV = S for the Rtn line. Nothing here relies on S: an
+; overflowed or underflowed hardware stack wraps inside its page, and only
+; its depth is shown.
+;   CR LF
+;   Err X @ line,col CR LF
+;   up to 16 characters from the place, raw, up to a CR, LF or NUL  CR LF
+;   Stk n: [...] and the top 8 cells at most, bottom to top  CR LF
+;   Rtn n CR LF
+; The numbers go through '#' (prnum), which pushes them over the data stack
+; and pops them again, so the stack is shown as it was.
+error:  PHA                     ; the letter
+        LDY     #M_ERR-MSG
+        JSR     prs             ; CR LF "Err "
         PLA
-        RTS
-gk1:    JMP     KEY
-        ENDIF
-
-; =============================================================================
-;  Checked build: break key and error reports
-; =============================================================================
-        IF      CHECKED
-; chkbrk: a waiting key is read now; Ctrl-C stops the program, anything
-; else is held for the next '?'. Keeps the flags.
-chkbrk: PHP
-        JSR     getk
-        BEQ     cb9
-        CMP     #3
-        BEQ     e_break
-        STA     KEYBUF
-cb9:    PLP
-        RTS
-e_break:LDA     #'B'            ; Ctrl-C
-; error: print the letter in A, " @ " and the offset in the program of the
-; character just read, then end. For example: S @ 245
-; The hardware stack is left as it is: it wraps inside its page, so the
-; calls below work whatever state it is in.
-error:  LDX     #DSE            ; (the number printer uses a data cell)
         JSR     CONOUT
-        LDA     #' '
+        JSR     prs             ; " @ " (it follows M_ERR)
+        JSR     lcol
+        LDA     D0
+        LDY     D1
+        JSR     prnum           ; the line
+        LDA     #','
         JSR     CONOUT
-        LDA     #'@'
+        LDA     CL
+        LDY     CL+1
+        JSR     prnum           ; the column
+        LDY     #M_NL-MSG
+        JSR     prs
+        LDY     #0              ; the text at the place
+er1:    LDA     (PLACE),Y
+        BEQ     er2
+        CMP     #13
+        BEQ     er2
+        CMP     #10
+        BEQ     er2
         JSR     CONOUT
-        LDA     #' '
-        JSR     CONOUT
-        LDA     IP
+        INY
+        CPY     #16
+        BNE     er1
+er2:    LDY     #M_STK-MSG
+        JSR     prs             ; CR LF "Stk "
+        TXA
+        EOR     #0FFh
         SEC
-        SBC     #<PROG1         ; the character just read
-        STA     TL
+        SBC     #0FFh-DSE       ; the depth, DSE - X (FFh, an overflow: 253)
+        PHA
+        JSR     prnum8
+        PLA
+        LDY     #M_C-MSG        ; ":"
+        CMP     #9
+        BCC     er3
+        LDA     #8              ; more than 8: ": ..." and the top 8
+        LDY     #M_CD-MSG
+er3:    STA     T1              ; T1 = how many cells to show
+        JSR     prs
+        JSR     push            ; TOS into memory with the rest: cell i from
+                                ;   the top is at DSL+X+i now
+er4:    LDA     T1              ; cells T1-1 down to 0, the top last
+        BEQ     er5
+        DEC     T1
+        LDA     #' '
+        JSR     CONOUT
+        TXA
+        CLC
+        ADC     T1
+        TAY
+        LDA     DSL,Y
+        PHA
+        LDA     DSH,Y
+        TAY
+        PLA
+        JSR     prnum
+        JMP     er4
+er5:    LDY     #M_RTN-MSG
+        JSR     prs             ; CR LF "Rtn "
+        LDA     RSV
+        EOR     #0FFh
+        LSR                     ; (FFh - S) / 2 entries
+        JSR     prnum8
+        LDY     #M_NL-MSG
+        JSR     prs
+        JMP     EXIT
+
+; prnum: print the number A (low), Y (high), signed, keeping the data stack.
+; prnum8: the same for A alone, 0-255.
+prnum8: LDY     #0
+prnum:  JSR     pushay
+        JMP     h_num
+
+; prs: print the message at MSG+Y; its last byte has bit 7 set. Y ends just
+; past it, at the next message.
+prs:    LDA     MSG,Y
+        PHA
+        AND     #7Fh
+        JSR     CONOUT
+        INY
+        PLA
+        BPL     prs
+        RTS
+
+MSG:
+M_ERR:  DB      13,10,'Err',' '+80h
+        DB      ' @',' '+80h
+M_NL:   DB      13,10+80h
+M_STK:  DB      13,10,'Stk',' '+80h
+M_CD:   DB      ': ..','.'+80h
+M_C:    DB      ':'+80h
+M_RTN:  DB      13,10,'Rtn',' '+80h
+
+; lcol: the line (D0/D1) and the column (CL) of the place, both from 1. A
+; place below the program is in the -n? line buffer: line 0, and the column
+; is the place in the buffer. Otherwise IP (free now: the program has
+; stopped) runs from PROG to the place, counting LFs; CL keeps where the
+; last line started, and the column is the place minus that, plus 1.
+lcol:   LDA     #0
+        STA     D1
+        STA     D0
+        LDA     #<LINEBUF
+        STA     CL
+        LDA     #>LINEBUF
+        STA     CL+1
+        LDA     PLACE
+        CMP     #<PROG
+        LDA     PLACE+1
+        SBC     #>PROG
+        BCC     lc9             ; below the program: line 0
+        INC     D0
+        JSR     rstip
+lc3:    LDA     IP              ; a line starts here
+        STA     CL
         LDA     IP+1
-        SBC     #>PROG1
-        STA     TH
-        JSR     h_num
-        JMP     endprog
+        STA     CL+1
+lc1:    LDA     IP
+        CMP     PLACE
+        LDA     IP+1
+        SBC     PLACE+1
+        BCS     lc9             ; at the place
+        JSR     getc
+        CMP     #10
+        BNE     lc1
+        INC     D0              ; an LF: a new line starts after it
+        BNE     lc3
+        INC     D1
+        BNE     lc3             ; always
+lc9:    LDA     PLACE
+        SEC
+        SBC     CL
+        STA     CL
+        LDA     PLACE+1
+        SBC     CL+1
+        STA     CL+1
+        INC     CL              ; + 1
+        BNE     lc8
+        INC     CL+1
+lc8:    RTS
         ENDIF

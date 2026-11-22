@@ -1,21 +1,21 @@
 0000                             ; =============================================================================
 0000                             ;  B8Script interpreter for the Intel 8080
-0000                             ;  Spec: docs/b8script.md (2026-10-09) plus the 2026-11-20 changes:
-0000                             ;        [x stores in a variable, "[ " pushes an anonymous block, any other
-0000                             ;        character after [ is an error, the heap pointer lives at z10+.
-0000                             ;        The string escape is "/" (it was ">").
-0000                             ;        Dividing by zero is not checked. -n? does no more editing than
-0000                             ;        Backspace.
+0000                             ;  Spec: docs/b8script.md (2026-11-21).
 0000                             ;  Design follows the Z80 interpreter (z80/b8s-z80.asm), with 8080 opcodes
 0000                             ;  only.
 0000                             ; 
 0000                             ;  Two switches, set in the two EQU lines below:
 0000                             ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 0000                             ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
-0000                             ;    CHECKED  0 = no checks (spec: "B8Script checks nothing")
-0000                             ;             1 = stops on stack overrun, Ctrl-C, heap past the limit, a store
-0000                             ;                 outside the program's own space, and a bad character after [,
-0000                             ;                 printing a letter and the place, like  S @ 245
+0000                             ;    CHECKED  0 = no checks (spec: the programmer is responsible)
+0000                             ;             1 = starts with every variable at 0 and every word undefined,
+0000                             ;                 and stops on every error in the spec's table (and Ctrl-C)
+0000                             ;                 with a four-line report: the letter and the place as line
+0000                             ;                 and column, the text there, and both stacks. See `error`.
+0000                             ; 
+0000                             ;  In every build Ctrl-C stops a running program (an unchecked build stops
+0000                             ;  without a word): see the console layer for the rules, the held key and
+0000                             ;  the break-off cell.
 0000                             ; 
 0000                             ;  Assembler: asm80 (https://maly.github.io/asm80-node/), I8080 mode.
 0000                             ; =============================================================================
@@ -64,19 +64,20 @@
 0000                             ;  Memory map. Everything the interpreter writes is in four RAM pages:
 0000                             ; 
 0000                             ;    RSPAGE   return stack, 112 entries (the pointer stays inside this page)
-0000                             ;    DSPAGE   data stack, 127 cells (SP stays inside this page)
+0000                             ;    DSPAGE   data stack, 127 cells (the top four bytes of the page are spare,
+0000                             ;             so a full stack runs two bytes into the page below)
 0000                             ;    LETPAGE  letter cells: A..Z at +00h..+33h, a..z at +40h..+73h (so a word
 0000                             ;             cell is always 64 bytes below its variable), the heap pointer at
-0000                             ;             +7Ch (= z10+), interpreter variables in the gaps, and the -n?
-0000                             ;             line buffer at +80h..+FFh
+0000                             ;             +7Ch, interpreter variables in the gaps, and the -n? line buffer
+0000                             ;             at +80h..+FFh
 0000                             ;    PROG     the program text, NUL-terminated; the heap starts after the NUL
 0000                             ; 
 0000                             ;  The stacks sit below the letter page, so "the program's own space" (what
 0000                             ;  the checked build lets ! and . write) is the single range from the letter
-0000                             ;  page up to the heap limit. Each stack's page has a guard band: the data
-0000                             ;  stack can overrun by a cell or two (and the calls made while it is full)
-0000                             ;  into the top 32 bytes of the return-stack page, which are never used, and
-0000                             ;  the return stack by one entry into the page below it.
+0000                             ;  page up to the heap limit. Each stack has a guard band: the data stack can
+0000                             ;  overrun by a cell or two (and the calls made while it is full, the error
+0000                             ;  report's included) into the top 32 bytes of the return-stack page, which
+0000                             ;  are never used, and the return stack by one entry into the page below it.
 0000                             ; -----------------------------------------------------------------------------
 0000                          IF   CPM   
                     BDOS:     EQU   0005h   
@@ -98,19 +99,30 @@
 0000                HEAPLIM:   EQU   0F0h   ; the heap must stay below F000h (a page)
 0000                BASE:     EQU   0000h   ; where the image starts
 0000                          ENDIF      
-0000                MSLOOP:   EQU   40   ; n? inner loop count for about 1 ms (1-255):
+0000                MSLOOP:   EQU   40   ; n? inner loop count for about 1 ms (1-255;
+0000                             ; the wait for a second Ctrl-C uses it too):
 0000                             ; each pass calls getk once, so tune it for
 0000                             ; your clock and your KEY routine
 0000                             ; letter-page layout (offsets inside LETPAGE)
 0000                LET:      EQU   LETPAGE*256   
-0000                HEAP:     EQU   LET+7Ch   ; z10+, the heap pointer
+0000                HEAP:     EQU   LET+7Ch   ; the heap pointer
 0000                RSP:      EQU   LET+34h   ; gap after Z: the return stack pointer;
-0000                KEYBUF:   EQU   LET+36h   ;   a held-back key
+0000                BRKCNT:   EQU   LET+36h   ;   the break check's countdown;
+0000                NPEND:    EQU   LET+38h   ;   minus the address of the program's end
+0000                             ;   (the heap"s first byte), for the checked "_'
+0000                KEYBUF:   EQU   LET+7Ah   ; gap after z: a key read by the break check and
+0000                             ;   held for the next "?" (0: none);
+0000                BRKOFF:   EQU   LET+7Bh   ;   the break-off cell: a program that stores a
+0000                             ;   non-zero byte here gets Ctrl-C as a key
 0000                LBHDR:    EQU   LET+7Eh   ; CP/M BDOS 10 header: max, count
 0000                LINEBUF:   EQU   LET+80h   ; -n? text, ending in CR
 0000                RSTOP:    EQU   RSPAGE*256+0E0h   ; empty return stack: the 32 bytes above it
 0000                             ; take calls made while the data stack is full
-0000                DSTOP:    EQU   DSPAGE*256+0FEh   ; empty data stack
+0000                DSTOP:    EQU   DSPAGE*256+0FCh   ; empty data stack. The four bytes above it
+0000                             ; are spare: a character can pop two cells
+0000                             ; too many before the checked build sees it,
+0000                             ; and the next call must not land on the
+0000                             ; letter cells.
 0000                             ; =============================================================================
 0000                             ;  The first 49 bytes: the entry, then the RST routines, with small handlers
 0000                             ;  and routines filling the gaps between them. Generic: this IS page zero.
@@ -118,8 +130,16 @@
 0000                             ;  page zero (see the header).
 0000                             ; =============================================================================
 0000                          .ORG   BASE   
-0000   31 FE 81               LXI   SP,DSTOP   ; 00  reset, or the start of the .COM file
-0003   C3 83 03               JMP   start   
+0000                          IF   1-(1-CPM)*CHECKED   
+                              LXI   SP,DSTOP   ; 00  reset, or the start of the .COM file
+0000                          ENDIF      
+0000   C3 ED 04               JMP   start   ; In the checked generic build this is at 0000h
+0003                             ;   (and `start` sets SP): its first byte, C3h,
+0003                             ;   is what an undefined word runs into, as
+0003                             ;   CP/M's own JMP at 0000h is in a .COM: e_hi.
+0003                          IF   (1-CPM)*CHECKED   
+0003   00 00 00               DB   0,0,0   ; 03  spare
+0006                          ENDIF      
 0006   CF           RDROP:    RST   1   ; 06  drop the top of the return stack, then
 0007   DF                     RST   3   ;     drop TOS (a spent flag) and go on
 0008                VECS:        
@@ -133,7 +153,7 @@
 0012   EB                     XCHG      
 0013   C9                     RET      ; 13  (so RST 2 is not used)
 0014   EB           H_TOR:    XCHG      ; 14  "{" TOS to the return stack; rpushd
-0015   C3 B0 00               JMP   rpushd   ;     brings up the new TOS
+0015   C3 B3 00               JMP   rpushd   ;     brings up the new TOS
 0018                             ; ---- RST 3: drop TOS, then next ---------------------------------------------
 0018   D1           RST18:    POP   D   ; 18  discard the RST's return address
 0019   E1                     POP   H   ;     new TOS = NOS
@@ -181,429 +201,454 @@
 0031                             ; =============================================================================
 0031                NEXT0:       
 0031                          IF   CHECKED   
-0031   CD 1D 03               CALL   chkstk   ; both stacks are checked once per character
+0031   CD C3 03               CALL   chkstk   ; both stacks are checked once per character
 0034                          ENDIF      
 0034   0A                     LDAX   B   
 0035   03                     INX   B   
 0036   D6 21                  SUI   21h   ; A = c - 21h
-0038   DA 77 00               JC   ctl   ; c < 21h: NUL ends, the rest are ignored
+0038   DA 7A 00               JC   ctl   ; c < 21h: NUL ends, the rest are ignored
 003B   FE 0F                  CPI   0Fh   
-003D   DA 68 00               JC   punct   ; 21h-2Fh: PTAB index 0-14
+003D   DA 6B 00               JC   punct   ; 21h-2Fh: PTAB index 0-14
 0040   D6 0F                  SUI   0Fh   ; A = c - 30h
 0042   FE 0A                  CPI   0Ah   
-0044   DA 62 02               JC   digit   ; 30h-39h
+0044   DA 54 02               JC   digit   ; 30h-39h
 0047   FE 11                  CPI   11h   
-0049   DA 66 00               JC   p3a   ; 3Ah-40h
+0049   DA 69 00               JC   p3a   ; 3Ah-40h
 004C   D6 11                  SUI   11h   ; A = c - 41h
 004E   FE 1A                  CPI   1Ah   
-0050   DA A6 00               JC   upper   ; 41h-5Ah: A = letter index 0-25
+0050   DA A9 00               JC   upper   ; 41h-5Ah: A = letter index 0-25
 0053   FE 20                  CPI   20h   
-0055   DA 64 00               JC   p5b   ; 5Bh-60h
+0055   DA 67 00               JC   p5b   ; 5Bh-60h
 0058   FE 3A                  CPI   3Ah   
-005A   DA A0 00               JC   lower   ; 61h-7Ah: A = 20h-39h (cell +64 bytes)
+005A   DA A3 00               JC   lower   ; 61h-7Ah: A = 20h-39h (cell +64 bytes)
 005D   FE 3E                  CPI   3Eh   
-005F   D2 31 00               JNC   next0   ; 7Fh-FFh: ignored
-0062   D6 1A                  SUI   1Ah   ; 7Bh-7Eh: -1Eh in all, index 28-31
-0064   D6 09        P5B:      SUI   9   ; 5Bh-60h: -4 in all, index 22-27
-0066   C6 05        P3A:      ADI   5   ; 3Ah-40h: index 15-21
-0068                             ; Punctuation: A = the PTAB index. The handler starts with HL = TOS,
-0068                             ; untouched, and A, DE free.
-0068   C6 42        PUNCT:    ADI   PTAB & 0FFh   ; PTAB never crosses a page
-006A   5F                     MOV   E,A   
-006B   16 02                  MVI   D,PTAB / 256   
-006D   FE 58                  CPI   (PTAB & 0FFh) + NPG1   ; carry: one of the first NPG1
-006F   1A                     LDAX   D   
-0070   5F                     MOV   E,A   ; the handler's low byte
-0071                          IFN   CPM   
-0071   3E 00                  MVI   A,0   
-0073   17                     RAL      ; its page: 0 + carry
-0074                          ENDIF      
-0074                          IF   CPM   
+005F                          IF   CHECKED   
+005F   CA 31 00               JZ   next0   ; 7Fh, DEL: ignored
+0062   D2 FA 03               JNC   e_hi   ; 80h-FFh: reserved
+0065                          ENDIF      
+0065                          IF   1-CHECKED   
+                              JNC   next0   ; 7Fh-FFh: ignored
+0065                          ENDIF      
+0065   D6 1A                  SUI   1Ah   ; 7Bh-7Eh: -1Eh in all, index 28-31
+0067   D6 09        P5B:      SUI   9   ; 5Bh-60h: -4 in all, index 22-27
+0069   C6 05        P3A:      ADI   5   ; 3Ah-40h: index 15-21
+006B                             ; Punctuation: A = the PTAB index. The handler starts with HL = TOS,
+006B                             ; untouched, and A, DE free.
+006B   C6 34        PUNCT:    ADI   PTAB & 0FFh   ; PTAB never crosses a page
+006D   5F                     MOV   E,A   
+006E   16 02                  MVI   D,PTAB / 256   
+0070   FE 4A                  CPI   (PTAB & 0FFh) + NPG1   ; carry: one of the first NPG1
+0072   1A                     LDAX   D   
+0073   5F                     MOV   E,A   ; the handler's low byte
+0074                          IFN   CPM   
+0074   3E 00                  MVI   A,0   
+0076   17                     RAL      ; its page: 0 + carry
+0077                          ENDIF      
+0077                          IF   CPM   
                               MVI   A,1   
                               ACI   0   ; its page: 1 + carry
-0074                          ENDIF      
-0074   57                     MOV   D,A   
-0075   D5                     PUSH   D   ; jump to it; the stack is balanced again
-0076   C9                     RET      ;   when the handler starts
-0077                             ; ctl: characters below 21h. A = c - 21h.
-0077   C6 21        CTL:      ADI   21h   ; back to c; zero only for NUL
-0079   C2 31 00               JNZ   next0   ; the rest are ignored
-007C   C3 09 FF     ENDPROG:   JMP   EXIT   ; the program has ended
-007F                             ; =============================================================================
-007F                             ;  Handlers that must start in the image's first page: ^ _ ` | ~
-007F                             ;  (00bbIGFuZCA= are up among the RST routines.)
-007F                             ; =============================================================================
-007F   D1           H_XOR:    POP   D   
-0080   7C                     MOV   A,H   
-0081   AA                     XRA   D   
-0082   67                     MOV   H,A   
-0083   7D                     MOV   A,L   
-0084   AB                     XRA   E   
-0085   6F                     MOV   L,A   
-0086   F7                     RST   6   
-0087   D1           H_OR:     POP   D   
-0088   7C                     MOV   A,H   
-0089   B2                     ORA   D   
-008A   67                     MOV   H,A   
-008B   7D                     MOV   A,L   
-008C   B3                     ORA   E   
-008D   6F                     MOV   L,A   
-008E   F7                     RST   6   
-008F   E7           H_NOT:    RST   4   ; ~x = -x - 1
-0090   2B                     DCX   H   
+0077                          ENDIF      
+0077   57                     MOV   D,A   
+0078   D5                     PUSH   D   ; jump to it; the stack is balanced again
+0079   C9                     RET      ;   when the handler starts
+007A                             ; ctl: characters below 21h. A = c - 21h.
+007A   C6 21        CTL:      ADI   21h   ; back to c; zero only for NUL
+007C   C2 31 00               JNZ   next0   ; the rest are ignored
+007F   C3 09 FF     ENDPROG:   JMP   EXIT   ; the program has ended
+0082                             ; =============================================================================
+0082                             ;  Handlers that must start in the image's first page: ^ _ ` | ~
+0082                             ;  (00bbIGFuZCA= are up among the RST routines.)
+0082                             ; =============================================================================
+0082   D1           H_XOR:    POP   D   
+0083   7C                     MOV   A,H   
+0084   AA                     XRA   D   
+0085   67                     MOV   H,A   
+0086   7D                     MOV   A,L   
+0087   AB                     XRA   E   
+0088   6F                     MOV   L,A   
+0089   F7                     RST   6   
+008A   D1           H_OR:     POP   D   
+008B   7C                     MOV   A,H   
+008C   B2                     ORA   D   
+008D   67                     MOV   H,A   
+008E   7D                     MOV   A,L   
+008F   B3                     ORA   E   
+0090   6F                     MOV   L,A   
 0091   F7                     RST   6   
-0092                             ; "_" ( n -- addr ): the heap pointer moves up by n; TOS is the old pointer.
-0092   EB           H_ALLOC:   XCHG      
-0093   2A 7C 82               LHLD   HEAP   
-0096   E5                     PUSH   H   
-0097   19                     DAD   D   ; the new top
-0098                          IF   CHECKED   
-0098   CD 54 03               CALL   chkhp   
-009B                          ENDIF      
-009B   22 7C 82               SHLD   HEAP   
-009E   E1                     POP   H   
-009F   F7                     RST   6   
-00A0                             ; ---- the letters and digits --------------------------------------------------
-00A0                             ; a-z: push the cell's address (the cell is the variable)
-00A0   E5           LOWER:    PUSH   H   
-00A1   87                     ADD   A   
-00A2   6F                     MOV   L,A   
-00A3   26 82                  MVI   H,LETPAGE   
-00A5   F7                     RST   6   
-00A6                             ; A-Z: call the word. The return address (the IP after the letter) goes on
-00A6                             ; the return stack, and the IP becomes the address in the letter's cell.
-00A6   E5           UPPER:    PUSH   H   ; keep TOS: rpushd pops it back
-00A7   87                     ADD   A   
-00A8   6F                     MOV   L,A   
-00A9   26 82                  MVI   H,LETPAGE   ; HL -> cell
-00AB   50                     MOV   D,B   
-00AC   59                     MOV   E,C   ; DE = the return address
-00AD   4E                     MOV   C,M   
-00AE   23                     INX   H   
-00AF   46                     MOV   B,M   ; IP = the word's body, and fall into rpushd
-00B0                             ; rpushd: push DE on the return stack, then pop TOS off the data stack and
-00B0                             ; go on. Every push of the return stack ends here: for a word call the cell
-00B0                             ; popped is the TOS that upper parked; for "(" and "{" it is the cell under
-00B0                             ; the one that was used up.
-00B0                RPUSHD:      
-00B0                          IF   CHECKED   
-00B0   CD 39 03               CALL   chkbrk   ; Ctrl-C is checked at every word call, block
-00B3                          ENDIF      ;   entry, loop-back and "{"
-00B3   2A 34 82               LHLD   RSP   
+0092   E7           H_NOT:    RST   4   ; ~x = -x - 1
+0093   2B                     DCX   H   
+0094   F7                     RST   6   
+0095                             ; "_" ( n -- addr ): the heap pointer moves by n, a signed count (the add is
+0095                             ; the same either way); TOS is the old pointer.
+0095   EB           H_ALLOC:   XCHG      
+0096   2A 7C 82               LHLD   HEAP   
+0099   E5                     PUSH   H   
+009A   19                     DAD   D   ; the new top
+009B                          IF   CHECKED   
+009B   CD 71 03               CALL   chkhp   
+009E                          ENDIF      
+009E   22 7C 82               SHLD   HEAP   
+00A1   E1                     POP   H   
+00A2   F7                     RST   6   
+00A3                             ; ---- the letters and digits --------------------------------------------------
+00A3                             ; a-z: push the cell's address (the cell is the variable)
+00A3   E5           LOWER:    PUSH   H   
+00A4   87                     ADD   A   
+00A5   6F                     MOV   L,A   
+00A6   26 82                  MVI   H,LETPAGE   
+00A8   F7                     RST   6   
+00A9                             ; A-Z: call the word. The return address (the IP after the letter) goes on
+00A9                             ; the return stack, and the IP becomes the address in the letter's cell.
+00A9   E5           UPPER:    PUSH   H   ; keep TOS: rpushd pops it back
+00AA   87                     ADD   A   
+00AB   6F                     MOV   L,A   
+00AC   26 82                  MVI   H,LETPAGE   ; HL -> cell
+00AE   50                     MOV   D,B   
+00AF   59                     MOV   E,C   ; DE = the return address
+00B0   4E                     MOV   C,M   
+00B1   23                     INX   H   
+00B2   46                     MOV   B,M   ; IP = the word's body, and fall into rpushd
+00B3                             ; rpushd: push DE on the return stack, then pop TOS off the data stack and
+00B3                             ; go on. Every push of the return stack ends here: for a word call the cell
+00B3                             ; popped is the TOS that upper parked; for "(" and "{" it is the cell under
+00B3                             ; the one that was used up.
+00B3                             ; 
+00B3                             ; The break key is looked at here, so at every word call and loop-back (and
+00B3                             ; block entry and "{"), but only one time in 256: BRKCNT counts them. Reading
+00B3                             ; the keyboard can be slow (it is a BDOS call under CP/M).
+00B3   2A 34 82     RPUSHD:   LHLD   RSP   
 00B6   2B                     DCX   H   
 00B7   72                     MOV   M,D   
 00B8   2B                     DCX   H   
 00B9   73                     MOV   M,E   
 00BA   22 34 82               SHLD   RSP   
-00BD   E1                     POP   H   
-00BE   F7                     RST   6   
-00BF                             ; ---- machine code: the grave -----------------------------------------------
-00BF                             ; "`" plus a hex digit loads bytes: ( addr -- addr' ). Pairs of hex digits
-00BF                             ; are stored from addr until a non-hex character; then a RET (C9h) is
-00BF                             ; written and its address is left. An odd last digit is consumed and dropped.
-00BF                             ; "`" plus anything else calls the machine code at TOS: ( addr -- ). The
-00BF                             ; code is entered by CALL with the data stack above the return address; it
-00BF                             ; must keep BC, and on return the top cell becomes the new TOS.
-00BF   CD FD 02     H_GRAVE:   CALL   hexc   
-00C2   D2 2B 00               JNC   exec   
-00C5   87           HX1:      ADD   A   
-00C6   87                     ADD   A   
-00C7   87                     ADD   A   
-00C8   87                     ADD   A   
-00C9   57                     MOV   D,A   ; the high digit
-00CA   CD FD 02               CALL   hexc   
-00CD   D2 DC 00               JNC   hx2   ; odd digit: consumed and dropped
-00D0   B2                     ORA   D   
-00D1                          IF   CHECKED   
-00D1   CD 46 03               CALL   chkst   
-00D4                          ENDIF      
-00D4   77                     MOV   M,A   
-00D5   23                     INX   H   
-00D6   CD FD 02               CALL   hexc   
-00D9   DA C5 00               JC   hx1   
-00DC                HX2:         
-00DC                          IF   CHECKED   
-00DC   CD 46 03               CALL   chkst   
-00DF                          ENDIF      
-00DF   36 C9                  MVI   M,0C9h   
-00E1   F7                     RST   6   
-00E2                             ; ---- where the two pages meet ----------------------------------------------
-00E2                             ; The first page ends somewhere among the next four handlers, ] \ [ @ (they
-00E2                             ; are in falling code order for this), and where exactly differs between the
-00E2                             ; builds: NPG1 follows. Every handler below these four must start in the
-00E2                             ; second page, and every one above in the first; chktab.py checks both.
-00E2                             ; "]" returns: pop an address and jump to it. TOS is parked on the stack
-00E2                             ; while rpop uses HL, and the drop at the end brings it back.
-00E2   E5           H_RET:    PUSH   H   
-00E3   CF           RET2:     RST   1   
-00E4   44                     MOV   B,H   
-00E5   4D                     MOV   C,L   
-00E6   DF                     RST   3   
-00E7                             ; "\" ( flag -- ): true skips to the next ")" or "]" at this level; ")"
-00E7                             ; drops the block start, "]" returns. No closer at all ends the program.
-00E7                             ; The flag stays in HL as the spent cell that rdrop and ret2 drop.
-00E7   7C           H_BREAK:   MOV   A,H   
-00E8   B5                     ORA   L   
-00E9   CA DA 01               JZ   h_drop   ; false: just drop the flag
-00EC   CD C9 02               CALL   skip   
-00EF   B7                     ORA   A   ; skip returns 0 for ")"
-00F0   C2 E3 00               JNZ   ret2   
-00F3   C3 06 00               JMP   rdrop   
-00F6                             ; "[" followed by a letter stores the body"s address in that letter"s cell:
-00F6                             ; uppercase is a word, lowercase a variable. Followed by a space it pushes
-00F6                             ; the body"s address instead. Either way it then skips to the matching "]'.
-00F6                             ; (The unchecked build takes anything that is not a letter as the space; the
-00F6                             ; checked build stops on it.)
-00F6   0A           H_DEF:    LDAX   B   
-00F7   03                     INX   B   
-00F8   D6 41                  SUI   "A"   ; a letter gives 0-25 or 32-57: lowercase
-00FA   5F                     MOV   E,A   ;   lands 64 bytes up
-00FB   E6 DF                  ANI   0DFh   ; fold case
-00FD   FE 1A                  CPI   26   
-00FF   D2 0F 01               JNC   def2   ; not a letter
-0102   7B                     MOV   A,E   
-0103   87                     ADD   A   
-0104   5F                     MOV   E,A   
-0105   16 82                  MVI   D,LETPAGE   ; DE -> cell
-0107   79                     MOV   A,C   
-0108   12                     STAX   D   
-0109   1C                     INR   E   
-010A   78                     MOV   A,B   
-010B   12                     STAX   D   
-010C   C3 18 01               JMP   skipnx   
-010F                DEF2:        
-010F                          IF   CHECKED   
-010F   7B                     MOV   A,E   
-0110   FE DF                  CPI   " "-"A"+256   
-0112   C2 6A 03               JNZ   e_brack   ; anything but a letter or a space
-0115                          ENDIF      
-0115   E5                     PUSH   H   ; an anonymous block: push its address
-0116   60                     MOV   H,B   
-0117   69                     MOV   L,C   
-0118   CD C9 02     SKIPNX:   CALL   skip   
-011B   F7                     RST   6   
-011C   5E           H_FETCH:   MOV   E,M   ; "@"
-011D   23                     INX   H   
-011E   56                     MOV   D,M   
-011F   EB                     XCHG      
-0120   F7                     RST   6   
-0121                             ; =============================================================================
-0121                             ;  Handlers that must start in the image's second page.
-0121                             ;  "?" is the last (with "," inside it in the unchecked build), so its long
-0121                             ;  tail may run past that page.
-0121                             ; =============================================================================
-0121                             ; ---- flow control ----------------------------------------------------------
-0121                             ; "(" ( flag -- ): true pushes the block start and enters; false skips to
-0121                             ; the matching ")".
-0121   7C           H_OPEN:   MOV   A,H   
-0122   B5                     ORA   L   
-0123   E1                     POP   H   
-0124   CA 18 01               JZ   skipnx   
-0127   E5                     PUSH   H   ; (rpushd pops it again)
-0128   50                     MOV   D,B   
-0129   59                     MOV   E,C   ; the block starts at the IP
-012A   C3 B0 00               JMP   rpushd   
-012D                             ; ")" ( flag -- ): true jumps back to the block start (and keeps it); false
-012D                             ; drops it and carries on.
-012D   7C           H_CLOSE:   MOV   A,H   
-012E   B5                     ORA   L   
-012F   CA 06 00               JZ   rdrop   
-0132   CF                     RST   1   ; pop the block start ...
-0133   44                     MOV   B,H   
-0134   4D                     MOV   C,L   ; ... jump to it ...
-0135   EB                     XCHG      
-0136   C3 B0 00               JMP   rpushd   ; ... and push it back (which drops the flag)
-0139                             ; ---- arithmetic and logic: ( NOS TOS -- result ) ---------------------------
-0139                             ; "-" has two jobs: directly before a digit it starts a negative number.
-0139   0A           H_SUB:    LDAX   B   
-013A   D6 30                  SUI   "0"   
-013C   FE 0A                  CPI   10   
-013E   DA 68 02               JC   negnum   
-0141   E7                     RST   4   ; a - b = a + (-b): fall into "+"
-0142   D1           H_ADD:    POP   D   
-0143   19                     DAD   D   
-0144   F7                     RST   6   
-0145   D1           H_AND:    POP   D   
-0146   7C                     MOV   A,H   
-0147   A2                     ANA   D   
-0148   67                     MOV   H,A   
-0149   7D                     MOV   A,L   
-014A   A3                     ANA   E   
-014B   6F                     MOV   L,A   
-014C   F7                     RST   6   
-014D                             ; Signed compares. Both are "DE < HL" for the right pair: > swaps the two
-014D                             ; cells first (XTHL), < doesn't. There is no overflow flag, so the signed
-014D                             ; answer is the unsigned borrow of DE - HL, flipped when the signs differ.
-014D                             ; SBB A turns a carry into -1 or 0 with no branch.
-014D   E3           H_GT:     XTHL      ; a > b  is  b < a
-014E   D1           H_LT:     POP   D   ; a < b: DE = a, HL = b
-014F   7B                     MOV   A,E   
-0150   95                     SUB   L   
-0151   7A                     MOV   A,D   
-0152   9C                     SBB   H   
-0153   9F                     SBB   A   ; A = -1 if DE < HL unsigned
-0154   6F                     MOV   L,A   
-0155   7C                     MOV   A,H   
-0156   AA                     XRA   D   
-0157   17                     RAL      ; carry = the signs differ
-0158   9F                     SBB   A   
-0159   AD                     XRA   L   ; flip when they do
-015A   67                     MOV   H,A   
-015B   6F                     MOV   L,A   
-015C   F7                     RST   6   
-015D   D1           H_EQ:     POP   D   
-015E   7D                     MOV   A,L   
-015F   AB                     XRA   E   
-0160   6F                     MOV   L,A   
-0161   7C                     MOV   A,H   
-0162   AA                     XRA   D   
-0163   B5                     ORA   L   ; zero if equal
-0164   D6 01                  SUI   1   ; carry only for zero
-0166   9F                     SBB   A   
-0167   67                     MOV   H,A   
-0168   6F                     MOV   L,A   
-0169   F7                     RST   6   
-016A                             ; "*": shift-and-add on the multiplier's low bit, so it stops as soon as the
-016A                             ; multiplier is used up; only the low 16 bits are kept.
-016A   D1           H_MUL:    POP   D   ; DE = multiplicand
-016B   C5                     PUSH   B   
-016C   44                     MOV   B,H   
-016D   4D                     MOV   C,L   ; BC = multiplier
-016E   21 00 00               LXI   H,0   
-0171   78           MUL1:     MOV   A,B   
-0172   B7                     ORA   A   ; clear carry
-0173   1F                     RAR      
-0174   47                     MOV   B,A   
-0175   79                     MOV   A,C   
-0176   1F                     RAR      
-0177   4F                     MOV   C,A   ; BC >> 1, carry = the bit shifted out
-0178   D2 7C 01               JNC   mul2   
-017B   19                     DAD   D   
-017C   EB           MUL2:     XCHG      
-017D   29                     DAD   H   ; multiplicand << 1
-017E   EB                     XCHG      
-017F   78                     MOV   A,B   
-0180   B1                     ORA   C   
-0181   C2 71 01               JNZ   mul1   
-0184   C1                     POP   B   
-0185   F7                     RST   6   
-0186                             ; "/" ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
-0186                             ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
-0186                             ; of a. Dividing by zero is not checked: it returns two cells of no meaning.
-0186   D1           H_DIV:    POP   D   ; DE = a, HL = b
-0187   C5                     PUSH   B   
-0188   7A                     MOV   A,D   
-0189   B7                     ORA   A   
-018A   F5                     PUSH   PSW   ; S flag = sign of a (for r)
-018B   AC                     XRA   H   
-018C   F5                     PUSH   PSW   ; S flag = sign of q
-018D   7C                     MOV   A,H   
-018E   B7                     ORA   A   
-018F   FC 20 00               CM   neg16   ; HL = |b|
-0192   EB                     XCHG      
-0193   7C                     MOV   A,H   
-0194   B7                     ORA   A   
-0195   FC 20 00               CM   neg16   ; HL = |a|, DE = |b|
-0198   CD 85 02               CALL   udiv   ; HL = q, BC = r
-019B   F1                     POP   PSW   
-019C   FC 20 00               CM   neg16   ; q's sign
-019F   EB                     XCHG      ; DE = q
-01A0   60                     MOV   H,B   
-01A1   69                     MOV   L,C   ; HL = r
+00BD   21 36 82               LXI   H,BRKCNT   
+00C0   35                     DCR   M   
+00C1   E1                     POP   H   ; (keeps the flags)
+00C2   CC 2E 03               CZ   pollk   
+00C5   F7                     RST   6   
+00C6                             ; ---- machine code: the grave -----------------------------------------------
+00C6                             ; "`" plus a hex digit loads bytes: ( addr -- addr' ). Pairs of hex digits
+00C6                             ; are stored from addr until a non-hex character; then a RET (C9h) is
+00C6                             ; written and its address is left. An odd last digit is consumed and dropped.
+00C6                             ; "`" plus anything else calls the machine code at TOS: ( addr -- ). The
+00C6                             ; code is entered by CALL with the data stack above the return address; it
+00C6                             ; must keep BC, and on return the top cell becomes the new TOS.
+00C6   CD 1B 03     H_GRAVE:   CALL   hexc   
+00C9   D2 2B 00               JNC   exec   
+00CC   87           HX1:      ADD   A   
+00CD   87                     ADD   A   
+00CE   87                     ADD   A   
+00CF   87                     ADD   A   
+00D0   57                     MOV   D,A   ; the high digit
+00D1   CD 1B 03               CALL   hexc   
+00D4   D2 E0 00               JNC   hx2   ; odd digit: consumed and dropped
+00D7   B2                     ORA   D   
+00D8   77                     MOV   M,A   
+00D9   23                     INX   H   
+00DA   CD 1B 03               CALL   hexc   
+00DD   DA CC 00               JC   hx1   
+00E0   36 C9        HX2:      MVI   M,0C9h   ; (never range-checked: the spec says so)
+00E2   F7                     RST   6   
+00E3                             ; ---- where the two pages meet ----------------------------------------------
+00E3                             ; The first page ends somewhere among the next four handlers, ] \ [ @ (they
+00E3                             ; are in falling code order for this), and where exactly differs between the
+00E3                             ; builds: NPG1 follows. Every handler below these four must start in the
+00E3                             ; second page, and every one above in the first; chktab.py checks both.
+00E3                             ; "]" returns: pop an address and jump to it. TOS is parked on the stack
+00E3                             ; while rpop uses HL, and the drop at the end brings it back.
+00E3   E5           H_RET:    PUSH   H   
+00E4   CF           RET2:     RST   1   
+00E5   44                     MOV   B,H   
+00E6   4D                     MOV   C,L   
+00E7   DF                     RST   3   
+00E8                             ; "\" ( flag -- ): true skips to the next ")" or "]" at this level; ")"
+00E8                             ; drops the block start, "]" returns. No closer at all ends the program.
+00E8                             ; The flag stays in HL as the spent cell that rdrop and ret2 drop.
+00E8   7C           H_BREAK:   MOV   A,H   
+00E9   B5                     ORA   L   
+00EA   CA D5 01               JZ   h_drop   ; false: just drop the flag
+00ED   CD C4 02               CALL   skip   
+00F0   B7                     ORA   A   ; skip returns 0 for ")"
+00F1   C2 E4 00               JNZ   ret2   
+00F4   C3 06 00               JMP   rdrop   
+00F7                             ; "[" followed by a letter stores the body"s address in that letter"s cell:
+00F7                             ; uppercase is a word, lowercase a variable. Followed by a space it pushes
+00F7                             ; the body"s address instead. Either way it then skips to the matching "]'.
+00F7                             ; (The unchecked build takes anything that is not a letter as the space; the
+00F7                             ; checked build stops on it.)
+00F7   0A           H_DEF:    LDAX   B   
+00F8   03                     INX   B   
+00F9   D6 41                  SUI   "A"   ; a letter gives 0-25 or 32-57: lowercase
+00FB   5F                     MOV   E,A   ;   lands 64 bytes up
+00FC   E6 DF                  ANI   0DFh   ; fold case
+00FE   FE 1A                  CPI   26   
+0100   D2 10 01               JNC   def2   ; not a letter
+0103   7B                     MOV   A,E   
+0104   87                     ADD   A   
+0105   5F                     MOV   E,A   
+0106   16 82                  MVI   D,LETPAGE   ; DE -> cell
+0108   79                     MOV   A,C   
+0109   12                     STAX   D   
+010A   1C                     INR   E   
+010B   78                     MOV   A,B   
+010C   12                     STAX   D   
+010D   C3 19 01               JMP   skipnx   
+0110                DEF2:        
+0110                          IF   CHECKED   
+0110   7B                     MOV   A,E   
+0111   FE DF                  CPI   " "-"A"+256   
+0113   C2 14 04               JNZ   e_brack   ; anything but a letter or a space
+0116                          ENDIF      
+0116   E5                     PUSH   H   ; an anonymous block: push its address
+0117   60                     MOV   H,B   
+0118   69                     MOV   L,C   
+0119                SKIPNX:      
+0119                          IF   CHECKED   
+0119   0B                     DCX   B   ; back onto the letter, so that skip finds its
+011A                          ENDIF      ;   opener, the "[", just before where it starts
+011A   CD C4 02     SKIPO:    CALL   skip   
+011D   F7                     RST   6   
+011E   5E           H_FETCH:   MOV   E,M   ; "@"
+011F   23                     INX   H   
+0120   56                     MOV   D,M   
+0121   EB                     XCHG      
+0122   F7                     RST   6   
+0123                             ; =============================================================================
+0123                             ;  Handlers that must start in the image's second page.
+0123                             ;  "?" is the last (with "," inside it in the unchecked build), so its long
+0123                             ;  tail may run past that page.
+0123                             ; =============================================================================
+0123                             ; ---- flow control ----------------------------------------------------------
+0123                             ; "(" ( flag -- ): true pushes the block start and enters; false skips to
+0123                             ; the matching ")".
+0123   7C           H_OPEN:   MOV   A,H   
+0124   B5                     ORA   L   
+0125   E1                     POP   H   
+0126   CA 1A 01               JZ   skipo   
+0129   E5                     PUSH   H   ; (rpushd pops it again)
+012A   50                     MOV   D,B   
+012B   59                     MOV   E,C   ; the block starts at the IP
+012C   C3 B3 00               JMP   rpushd   
+012F                             ; ")" ( flag -- ): true jumps back to the block start (and keeps it); false
+012F                             ; drops it and carries on.
+012F   7C           H_CLOSE:   MOV   A,H   
+0130   B5                     ORA   L   
+0131   CA 06 00               JZ   rdrop   
+0134   CF                     RST   1   ; pop the block start ...
+0135   44                     MOV   B,H   
+0136   4D                     MOV   C,L   ; ... jump to it ...
+0137   EB                     XCHG      
+0138   C3 B3 00               JMP   rpushd   ; ... and push it back (which drops the flag)
+013B                             ; ---- arithmetic and logic: ( NOS TOS -- result ) ---------------------------
+013B                             ; "-" has two jobs: directly before a digit it starts a negative number.
+013B   0A           H_SUB:    LDAX   B   
+013C   D6 30                  SUI   "0"   
+013E   FE 0A                  CPI   10   
+0140   DA 5A 02               JC   negnum   
+0143   E7                     RST   4   ; a - b = a + (-b): fall into "+"
+0144   D1           H_ADD:    POP   D   
+0145   19                     DAD   D   
+0146   F7                     RST   6   
+0147   D1           H_AND:    POP   D   
+0148   7C                     MOV   A,H   
+0149   A2                     ANA   D   
+014A   67                     MOV   H,A   
+014B   7D                     MOV   A,L   
+014C   A3                     ANA   E   
+014D   6F                     MOV   L,A   
+014E   F7                     RST   6   
+014F                             ; Signed compares. Both are "DE < HL" for the right pair: > swaps the two
+014F                             ; cells first (XTHL), < doesn't. There is no overflow flag, so the signed
+014F                             ; answer is the unsigned borrow of DE - HL, flipped when the signs differ.
+014F                             ; SBB A turns a carry into -1 or 0 with no branch.
+014F   E3           H_GT:     XTHL      ; a > b  is  b < a
+0150   D1           H_LT:     POP   D   ; a < b: DE = a, HL = b
+0151   7B                     MOV   A,E   
+0152   95                     SUB   L   
+0153   7A                     MOV   A,D   
+0154   9C                     SBB   H   
+0155   9F                     SBB   A   ; A = -1 if DE < HL unsigned
+0156   6F                     MOV   L,A   
+0157   7C                     MOV   A,H   
+0158   AA                     XRA   D   
+0159   17                     RAL      ; carry = the signs differ
+015A   9F                     SBB   A   
+015B   AD                     XRA   L   ; flip when they do
+015C   67                     MOV   H,A   
+015D   6F                     MOV   L,A   
+015E   F7                     RST   6   
+015F   D1           H_EQ:     POP   D   
+0160   7D                     MOV   A,L   
+0161   AB                     XRA   E   
+0162   6F                     MOV   L,A   
+0163   7C                     MOV   A,H   
+0164   AA                     XRA   D   
+0165   B5                     ORA   L   ; zero if equal
+0166   D6 01                  SUI   1   ; carry only for zero
+0168   9F                     SBB   A   
+0169   67                     MOV   H,A   
+016A   6F                     MOV   L,A   
+016B   F7                     RST   6   
+016C                             ; "*": shift-and-add on the multiplier's low bit, so it stops as soon as the
+016C                             ; multiplier is used up; only the low 16 bits are kept.
+016C   D1           H_MUL:    POP   D   ; DE = multiplicand
+016D   C5                     PUSH   B   
+016E   44                     MOV   B,H   
+016F   4D                     MOV   C,L   ; BC = multiplier
+0170   21 00 00               LXI   H,0   
+0173   78           MUL1:     MOV   A,B   
+0174   B7                     ORA   A   ; clear carry
+0175   1F                     RAR      
+0176   47                     MOV   B,A   
+0177   79                     MOV   A,C   
+0178   1F                     RAR      
+0179   4F                     MOV   C,A   ; BC >> 1, carry = the bit shifted out
+017A   D2 7E 01               JNC   mul2   
+017D   19                     DAD   D   
+017E   EB           MUL2:     XCHG      
+017F   29                     DAD   H   ; multiplicand << 1
+0180   EB                     XCHG      
+0181   78                     MOV   A,B   
+0182   B1                     ORA   C   
+0183   C2 73 01               JNZ   mul1   
+0186   C1                     POP   B   
+0187   F7                     RST   6   
+0188                             ; "/" ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
+0188                             ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
+0188                             ; of a. Dividing by zero returns two cells of no meaning; the checked build
+0188                             ; stops on it.
+0188                H_DIV:       
+0188                          IF   CHECKED   
+0188   7C                     MOV   A,H   
+0189   B5                     ORA   L   
+018A   CA 11 04               JZ   e_zero   
+018D                          ENDIF      
+018D   D1                     POP   D   ; DE = a, HL = b
+018E   C5                     PUSH   B   
+018F   7A                     MOV   A,D   
+0190   B7                     ORA   A   
+0191   F5                     PUSH   PSW   ; S flag = sign of a (for r)
+0192   AC                     XRA   H   
+0193   F5                     PUSH   PSW   ; S flag = sign of q
+0194   7C                     MOV   A,H   
+0195   B7                     ORA   A   
+0196   FC 20 00               CM   neg16   ; HL = |b|
+0199   EB                     XCHG      
+019A   7C                     MOV   A,H   
+019B   B7                     ORA   A   
+019C   FC 20 00               CM   neg16   ; HL = |a|, DE = |b|
+019F   CD 77 02               CALL   udiv   ; HL = q, BC = r
 01A2   F1                     POP   PSW   
-01A3   FC 20 00               CM   neg16   ; r's sign
-01A6   C1                     POP   B   
-01A7   D5                     PUSH   D   ; q under r
-01A8   F7                     RST   6   
-01A9                             ; ---- stack and storage -----------------------------------------------------
-01A9   E5           H_DUP:    PUSH   H   ; ":"
-01AA   F7                     RST   6   
-01AB   E3           H_SWAP:   XTHL      ; "%"
-01AC   F7                     RST   6   
-01AD   D1           H_STORE:   POP   D   ; "!" ( n addr -- )
-01AE                          IF   CHECKED   
-01AE   23                     INX   H   ; both bytes must be in the program's space
-01AF   CD 46 03               CALL   chkst   
-01B2   2B                     DCX   H   
-01B3                          ENDIF      
-01B3   73                     MOV   M,E   
-01B4   23                     INX   H   
-01B5   72                     MOV   M,D   
-01B6   DF                     RST   3   
-01B7   D1           H_CSTORE:   POP   D   ; "." ( c addr -- )
-01B8                          IF   CHECKED   
-01B8   CD 46 03               CALL   chkst   
-01BB                          ENDIF      
-01BB   73                     MOV   M,E   
-01BC   DF                     RST   3   
-01BD                             ; ---- console ---------------------------------------------------------------
-01BD                             ; 22h pushes the address of the text after it and skips the string.
-01BD   E5           H_STR:    PUSH   H   
-01BE   60                     MOV   H,B   
-01BF   69                     MOV   L,C   
-01C0   CD F0 02               CALL   skipstr   
-01C3   F7                     RST   6   
-01C4                             ; "$" prints the string at TOS, decoding escapes: "/" plus a character
-01C4                             ; clears that character"s bit 6 (/M is CR, /` is space; "/" and ""' have no
-01C4                             ; bit 6, so // and /" give themselves).
-01C4   7E           H_PRINT:   MOV   A,M   
-01C5   23                     INX   H   
-01C6   FE 22                  CPI   22h   
-01C8   CA DA 01               JZ   h_drop   
-01CB   FE 2F                  CPI   "/"   
-01CD   C2 D4 01               JNZ   pr1   
-01D0   7E                     MOV   A,M   
-01D1   23                     INX   H   
-01D2   E6 BF                  ANI   0BFh   
-01D4   EF           PR1:      RST   5   
-01D5   C3 C4 01               JMP   h_print   
-01D8   7D           H_EMIT:   MOV   A,L   ; "'"
-01D9   EF                     RST   5   
-01DA   DF           H_DROP:   RST   3   ; ";" is this one byte
-01DB                             ; "#" prints TOS as a signed decimal number, with no space after it.
-01DB   7C           H_NUM:    MOV   A,H   
-01DC   B7                     ORA   A   
-01DD   F2 E4 01               JP   num1   
-01E0   3E 2D                  MVI   A,"-"   
-01E2   EF                     RST   5   
-01E3   E7                     RST   4   
-01E4   C5           NUM1:     PUSH   B   
-01E5   CD B7 02               CALL   pdec   
-01E8   C1                     POP   B   
-01E9   DF                     RST   3   
-01EA                          IF   CHECKED   ; (the checked build has no room to start ","
-01EA   6E           H_CFETCH:   MOV   L,M   ;   as late as the unchecked one does: see
-01EB   26 00                  MVI   H,0   ;   the end of "?")
-01ED   F7                     RST   6   
-01EE                          ENDIF      
-01EE                             ; "?" ( n -- c ) or ( -n -- addr )
-01EE                             ;   n > 0: wait about n ms for a key; 0 if none came
-01EE                             ;   n = 0: wait for a key
-01EE                             ;   n < 0: read a line of at most -n characters, with echo. The buffer
-01EE                             ;          holds 127 characters and the CR: a bigger count is taken as 127.
-01EE   7C           H_KEY:    MOV   A,H   
-01EF   B7                     ORA   A   
-01F0   FA 0E 02               JM   line   
-01F3   1E 28        KT1:      MVI   E,MSLOOP   ; one millisecond, roughly
-01F5   CD 10 03     KT2:      CALL   getk   
-01F8   C2 0A 02               JNZ   kt3   
-01FB   1D                     DCR   E   
-01FC   C2 F5 01               JNZ   kt2   
-01FF   7C                     MOV   A,H   ; 0? never counts down: it waits
-0200   B5                     ORA   L   
-0201   CA F3 01               JZ   kt1   
-0204   2B                     DCX   H   
-0205   7C                     MOV   A,H   
-0206   B5                     ORA   L   
-0207   C2 F3 01               JNZ   kt1   ; A = 0 if the time ran out
-020A                          IF   1-CHECKED   
+01A3   FC 20 00               CM   neg16   ; q's sign
+01A6   EB                     XCHG      ; DE = q
+01A7   60                     MOV   H,B   
+01A8   69                     MOV   L,C   ; HL = r
+01A9   F1                     POP   PSW   
+01AA   FC 20 00               CM   neg16   ; r's sign
+01AD   C1                     POP   B   
+01AE   D5                     PUSH   D   ; q under r
+01AF   F7                     RST   6   
+01B0                             ; ---- stack and storage -----------------------------------------------------
+01B0   E5           H_DUP:    PUSH   H   ; ":"
+01B1   F7                     RST   6   
+01B2   E3           H_SWAP:   XTHL      ; "%"
+01B3   F7                     RST   6   
+01B4                             ; (The checked build tests the address before it takes the value off the
+01B4                             ; stack, so that an error report shows both.)
+01B4                H_STORE:      ; "!" ( n addr -- )
+01B4                          IF   CHECKED   
+01B4   CD 87 03               CALL   chkst   
+01B7                          ENDIF      
+01B7   D1                     POP   D   
+01B8   73                     MOV   M,E   
+01B9   23                     INX   H   
+01BA   72                     MOV   M,D   
+01BB   DF                     RST   3   
+01BC                H_CSTORE:      ; "." ( c addr -- )
+01BC                          IF   CHECKED   
+01BC   CD 87 03               CALL   chkst   
+01BF                          ENDIF      
+01BF   D1                     POP   D   
+01C0   73                     MOV   M,E   
+01C1   DF                     RST   3   
+01C2                             ; ---- console ---------------------------------------------------------------
+01C2                             ; 22h pushes the address of the text after it and skips the string.
+01C2   E5           H_STR:    PUSH   H   
+01C3   60                     MOV   H,B   
+01C4   69                     MOV   L,C   
+01C5   CD 08 03               CALL   skipstr   
+01C8                          IF   CHECKED   
+01C8   B7                     ORA   A   ; 0: the text ran out before the closing quote
+01C9   CA 09 04               JZ   e_quote   
+01CC                          ENDIF      
+01CC   F7                     RST   6   
+01CD                             ; "$" prints the string at TOS, decoding escapes: "/" plus a character
+01CD                             ; clears that character"s bit 6 (/M is CR, /` is space; "/" and ""' have no
+01CD                             ; bit 6, so // and /" give themselves).
+01CD                          IF   1-CHECKED   
+                    H_PRINT:   MOV   A,M   
+                              INX   H   
+                              CPI   22h   
+                              JZ   h_drop   
+                              CPI   "/"   
+                              JNZ   pr1   
+                              MOV   A,M   
+                              INX   H   
+                              ANI   0BFh   
+                    PR1:      RST   5   
+                              JMP   h_print   
+01CD                          ENDIF      
+01CD                          IF   CHECKED   
+01CD                             ; (The checked build has the loop as a routine, prstr, which the error
+01CD                             ; report uses too. The address is kept on the stack meanwhile: a report
+01CD                             ; shows the stack as it was before the "$".)
+01CD   E5           H_PRINT:   PUSH   H   
+01CE   CD 9A 03               CALL   prstr   
+01D1   D1                     POP   D   
+01D2   DF                     RST   3   
+01D3                          ENDIF      
+01D3   7D           H_EMIT:   MOV   A,L   ; "'"
+01D4   EF                     RST   5   
+01D5   DF           H_DROP:   RST   3   ; ";" is this one byte
+01D6                             ; "#" prints TOS as a signed decimal number, with no space after it.
+01D6   C5           H_NUM:    PUSH   B   
+01D7   CD A9 02               CALL   psgn   
+01DA   C1                     POP   B   
+01DB   DF                     RST   3   
+01DC                          IF   CHECKED   ; (the checked build has no room to start ","
+01DC   6E           H_CFETCH:   MOV   L,M   ;   as late as the unchecked one does: see
+01DD   26 00                  MVI   H,0   ;   the end of "?")
+01DF   F7                     RST   6   
+01E0                          ENDIF      
+01E0                             ; "?" ( n -- c ) or ( -n -- addr )
+01E0                             ;   n > 0: wait about n ms for a key; 0 if none came
+01E0                             ;   n = 0: wait for a key
+01E0                             ;   n < 0: read a line of at most -n characters, with echo. The buffer
+01E0                             ;          holds 127 characters and the CR: a bigger count is taken as 127.
+01E0   7C           H_KEY:    MOV   A,H   
+01E1   B7                     ORA   A   
+01E2   FA 00 02               JM   line   
+01E5   1E 28        KT1:      MVI   E,MSLOOP   ; one millisecond, roughly
+01E7   CD 60 03     KT2:      CALL   getk   
+01EA   C2 FC 01               JNZ   kt3   
+01ED   1D                     DCR   E   
+01EE   C2 E7 01               JNZ   kt2   
+01F1   7C                     MOV   A,H   ; 0? never counts down: it waits
+01F2   B5                     ORA   L   
+01F3   CA E5 01               JZ   kt1   
+01F6   2B                     DCX   H   
+01F7   7C                     MOV   A,H   
+01F8   B5                     ORA   L   
+01F9   C2 E5 01               JNZ   kt1   ; A = 0 if the time ran out
+01FC                          IF   1-CHECKED   
                               DB   0FEh   ; (CPI: steps over the one byte of ",")
                     H_CFETCH:   MOV   A,M   ; "," shares "?"s ending: A becomes TOS
-020A                          ENDIF      
-020A   6F           KT3:      MOV   L,A   
-020B   26 00                  MVI   H,0   
-020D   F7                     RST   6   
-020E                          IF   CPM   
+01FC                          ENDIF      
+01FC   6F           KT3:      MOV   L,A   
+01FD   26 00                  MVI   H,0   
+01FF   F7                     RST   6   
+0200                          IF   CPM   
                                  ; CP/M: BDOS 10 does the editing (the spec allows the platform's
                                  ; own line editor). It doesn't store the CR, so it is added here.
                     LINE:     LXI   D,127   ; TOS is minus the count: adding 127 carries
@@ -625,194 +670,222 @@
                               MVI   M,13   
                               MVI   L,LINEBUF & 0FFh   
                               RST   6   
-020E                          ENDIF      
-020E                          IFN   CPM   
-020E                             ; Generic: Backspace takes the last character back (and is echoed as
-020E                             ; it is), CR ends (stored, not echoed), every other key is stored and
-020E                             ; echoed until the line is full. The line buffer starts at offset 80h
-020E                             ; of its page, so L alone is the place in the line: D holds the L of
-020E                             ; a full line.
-020E   11 7F 00     LINE:     LXI   D,127   ; TOS is minus the count: adding 127 carries
-0211   19                     DAD   D   ;   only for 1 to 127, and leaves 127 - count
-0212   9F                     SBB   A   
-0213   A5                     ANA   L   ; (0 for a count that is too big)
-0214   2F                     CMA      
-0215   57                     MOV   D,A   ; D = the L of a full line: 80h + count, FFh
-0216                             ;   at most
-0216   21 80 82               LXI   H,LINEBUF   
-0219   CD 10 03     LN2:      CALL   getk   
-021C   CA 19 02               JZ   ln2   
-021F   FE 0D                  CPI   13   
-0221   CA 3E 02               JZ   ln5   
-0224   FE 08                  CPI   8   
-0226   CA 36 02               JZ   ln4   
-0229   5F                     MOV   E,A   
-022A   7D                     MOV   A,L   
-022B   BA                     CMP   D   
-022C   CA 19 02               JZ   ln2   ; full
-022F   73                     MOV   M,E   
-0230   2C                     INR   L   
-0231   7B                     MOV   A,E   
-0232   EF           LN3:      RST   5   
-0233   C3 19 02               JMP   ln2   
-0236   2D           LN4:      DCR   L   ; Backspace: one back, and echo it,
-0237   FA 32 02               JM   ln3   ;   unless the line was empty (L left the
-023A   2C                     INR   L   ;   upper half of the page)
-023B   C3 19 02               JMP   ln2   
-023E   77           LN5:      MOV   M,A   ; the CR
-023F   2E 80                  MVI   L,LINEBUF & 0FFh   
-0241   F7                     RST   6   
-0242                          ENDIF      
-0242                             ; =============================================================================
-0242                             ;  Dispatch table: the low byte of each handler's address, in code order.
-0242                             ;  It must not cross a page (the dispatcher only adds to its low byte).
-0242                             ; =============================================================================
-0242                             ; The handlers of the first NPG1 characters start in the image's second page.
-0242                             ; ] \ [ @ sit where the two pages meet, and which side each lands on
-0242                             ; differs between the builds, so the count is worked out here.
-0242                             ; (One division to a line: asm80 only rounds down when it stores a value.)
-0242                PGRET:    EQU   (h_ret-BASE)/256   ; 0 = first page, 1 = second
-0242                PGBRK:    EQU   (h_break-BASE)/256   
-0242                PGDEF:    EQU   (h_def-BASE)/256   
-0242                PGFET:    EQU   (h_fetch-BASE)/256   
-0242                NPG1:     EQU   21 + PGFET + PGDEF + PGBRK + PGRET   
-0242   AD           PTAB:     DB   h_store & 0FFh   ; !
-0243   BD                     DB   h_str & 0FFh   ; "
-0244   DB                     DB   h_num & 0FFh   ; #
-0245   C4                     DB   h_print & 0FFh   ; $
-0246   AB                     DB   h_swap & 0FFh   ; %
-0247   45                     DB   h_and & 0FFh   ; &
-0248   D8                     DB   h_emit & 0FFh   ; '
-0249   21                     DB   h_open & 0FFh   ; (
-024A   2D                     DB   h_close & 0FFh   ; )
-024B   6A                     DB   h_mul & 0FFh   ; *
-024C   42                     DB   h_add & 0FFh   ; +
-024D   EA                     DB   h_cfetch & 0FFh   ; ,
-024E   39                     DB   h_sub & 0FFh   ; -
-024F   B7                     DB   h_cstore & 0FFh   ; .
-0250   86                     DB   h_div & 0FFh   ; /
-0251   A9                     DB   h_dup & 0FFh   ; :
-0252   DA                     DB   h_drop & 0FFh   ; ;
-0253   4E                     DB   h_lt & 0FFh   ; <
-0254   5D                     DB   h_eq & 0FFh   ; =
-0255   4D                     DB   h_gt & 0FFh   ; >
-0256   EE                     DB   h_key & 0FFh   ; ?
-0257   1C                     DB   h_fetch & 0FFh   ; @
-0258   F6                     DB   h_def & 0FFh   ; [
-0259   E7                     DB   h_break & 0FFh   ; \
-025A   E2                     DB   h_ret & 0FFh   ; ]
-025B   7F                     DB   h_xor & 0FFh   ; ^
-025C   92                     DB   h_alloc & 0FFh   ; _
-025D   BF                     DB   h_grave & 0FFh   ; `
-025E   14                     DB   h_tor & 0FFh   ; {
-025F   87                     DB   h_or & 0FFh   ; |
-0260   1D                     DB   h_fromr & 0FFh   ; }
-0261   8F                     DB   h_not & 0FFh   ; ~
-0262                PTABEND:      
-0262                             ; =============================================================================
-0262                             ;  Routines (no handler starts past this point)
-0262                             ; =============================================================================
-0262                             ; Digits: step back onto the first digit and read the whole number.
-0262   E5           DIGIT:    PUSH   H   
-0263   0B                     DCX   B   
-0264   CD 6E 02               CALL   rdnum   
-0267   F7                     RST   6   
-0268                             ; negnum: "-" directly before a digit: read the number, negate it.
-0268   E5           NEGNUM:   PUSH   H   
-0269   CD 6E 02               CALL   rdnum   
-026C   E7                     RST   4   
-026D   F7                     RST   6   
-026E                             ; rdnum: read decimal digits at IP into HL; IP is left on the first
-026E                             ; non-digit. Values wrap at 16 bits, as the spec says.
-026E   21 00 00     RDNUM:    LXI   H,0   
-0271   0A           RDN1:     LDAX   B   
-0272   D6 30                  SUI   "0"   
-0274   FE 0A                  CPI   10   
-0276   D0                     RNC      
-0277   03                     INX   B   
-0278   54                     MOV   D,H   
-0279   5D                     MOV   E,L   
-027A   29                     DAD   H   
-027B   29                     DAD   H   
-027C   19                     DAD   D   
-027D   29                     DAD   H   ; HL * 10
-027E   5F                     MOV   E,A   
-027F   16 00                  MVI   D,0   
-0281   19                     DAD   D   
-0282   C3 71 02               JMP   rdn1   
-0285                             ; udiv: unsigned HL / DE (DE <= 8000h). Returns HL = quotient, BC = remainder.
-0285                             ; Uses A, BC; the caller saves the IP. HL holds the dividend and, as its bits
-0285                             ; leave at the top, the quotient bits arrive at the bottom. The loop counter
-0285                             ; lives on the stack, since A is busy with the shifts.
-0285                             ; Dividing by 2 is one shift (the spec wants that fast).
-0285   01 00 00     UDIV:     LXI   B,0   
-0288   7B                     MOV   A,E   
-0289   EE 02                  XRI   2   
-028B   B2                     ORA   D   
-028C   C2 99 02               JNZ   udv0   
-028F   B4                     ORA   H   ; A was 0, and the carry is clear
-0290   1F                     RAR      
-0291   67                     MOV   H,A   
-0292   7D                     MOV   A,L   
-0293   1F                     RAR      
-0294   6F                     MOV   L,A   ; the quotient
-0295   78                     MOV   A,B   
-0296   17                     RAL      
-0297   4F                     MOV   C,A   ; the remainder: the bit that fell out
-0298   C9                     RET      
-0299   3E 10        UDV0:     MVI   A,16   
-029B   F5                     PUSH   PSW   
-029C   29           UDV1:     DAD   H   ; next dividend bit into the carry
+0200                          ENDIF      
+0200                          IFN   CPM   
+0200                             ; Generic: Backspace takes the last character back (and is echoed as
+0200                             ; it is), CR ends (stored, not echoed), every other key is stored and
+0200                             ; echoed until the line is full. The line buffer starts at offset 80h
+0200                             ; of its page, so L alone is the place in the line: D holds the L of
+0200                             ; a full line.
+0200   11 7F 00     LINE:     LXI   D,127   ; TOS is minus the count: adding 127 carries
+0203   19                     DAD   D   ;   only for 1 to 127, and leaves 127 - count
+0204   9F                     SBB   A   
+0205   A5                     ANA   L   ; (0 for a count that is too big)
+0206   2F                     CMA      
+0207   57                     MOV   D,A   ; D = the L of a full line: 80h + count, FFh
+0208                             ;   at most
+0208   21 80 82               LXI   H,LINEBUF   
+020B   CD 60 03     LN2:      CALL   getk   
+020E   CA 0B 02               JZ   ln2   
+0211   FE 0D                  CPI   13   
+0213   CA 30 02               JZ   ln5   
+0216   FE 08                  CPI   8   
+0218   CA 28 02               JZ   ln4   
+021B   5F                     MOV   E,A   
+021C   7D                     MOV   A,L   
+021D   BA                     CMP   D   
+021E   CA 0B 02               JZ   ln2   ; full
+0221   73                     MOV   M,E   
+0222   2C                     INR   L   
+0223   7B                     MOV   A,E   
+0224   EF           LN3:      RST   5   
+0225   C3 0B 02               JMP   ln2   
+0228   2D           LN4:      DCR   L   ; Backspace: one back, and echo it,
+0229   FA 24 02               JM   ln3   ;   unless the line was empty (L left the
+022C   2C                     INR   L   ;   upper half of the page)
+022D   C3 0B 02               JMP   ln2   
+0230   77           LN5:      MOV   M,A   ; the CR
+0231   2E 80                  MVI   L,LINEBUF & 0FFh   
+0233   F7                     RST   6   
+0234                          ENDIF      
+0234                             ; =============================================================================
+0234                             ;  Dispatch table: the low byte of each handler's address, in code order.
+0234                             ;  It must not cross a page (the dispatcher only adds to its low byte).
+0234                             ; =============================================================================
+0234                             ; The handlers of the first NPG1 characters start in the image's second page.
+0234                             ; ] \ [ @ sit where the two pages meet, and which side each lands on
+0234                             ; differs between the builds, so the count is worked out here.
+0234                             ; (One division to a line: asm80 only rounds down when it stores a value.)
+0234                PGRET:    EQU   (h_ret-BASE)/256   ; 0 = first page, 1 = second
+0234                PGBRK:    EQU   (h_break-BASE)/256   
+0234                PGDEF:    EQU   (h_def-BASE)/256   
+0234                PGFET:    EQU   (h_fetch-BASE)/256   
+0234                NPG1:     EQU   21 + PGFET + PGDEF + PGBRK + PGRET   
+0234   B4           PTAB:     DB   h_store & 0FFh   ; !
+0235   C2                     DB   h_str & 0FFh   ; "
+0236   D6                     DB   h_num & 0FFh   ; #
+0237   CD                     DB   h_print & 0FFh   ; $
+0238   B2                     DB   h_swap & 0FFh   ; %
+0239   47                     DB   h_and & 0FFh   ; &
+023A   D3                     DB   h_emit & 0FFh   ; '
+023B   23                     DB   h_open & 0FFh   ; (
+023C   2F                     DB   h_close & 0FFh   ; )
+023D   6C                     DB   h_mul & 0FFh   ; *
+023E   44                     DB   h_add & 0FFh   ; +
+023F   DC                     DB   h_cfetch & 0FFh   ; ,
+0240   3B                     DB   h_sub & 0FFh   ; -
+0241   BC                     DB   h_cstore & 0FFh   ; .
+0242   88                     DB   h_div & 0FFh   ; /
+0243   B0                     DB   h_dup & 0FFh   ; :
+0244   D5                     DB   h_drop & 0FFh   ; ;
+0245   50                     DB   h_lt & 0FFh   ; <
+0246   5F                     DB   h_eq & 0FFh   ; =
+0247   4F                     DB   h_gt & 0FFh   ; >
+0248   E0                     DB   h_key & 0FFh   ; ?
+0249   1E                     DB   h_fetch & 0FFh   ; @
+024A   F7                     DB   h_def & 0FFh   ; [
+024B   E8                     DB   h_break & 0FFh   ; \
+024C   E3                     DB   h_ret & 0FFh   ; ]
+024D   82                     DB   h_xor & 0FFh   ; ^
+024E   95                     DB   h_alloc & 0FFh   ; _
+024F   C6                     DB   h_grave & 0FFh   ; `
+0250   14                     DB   h_tor & 0FFh   ; {
+0251   8A                     DB   h_or & 0FFh   ; |
+0252   1D                     DB   h_fromr & 0FFh   ; }
+0253   92                     DB   h_not & 0FFh   ; ~
+0254                PTABEND:      
+0254                             ; =============================================================================
+0254                             ;  Routines (no handler starts past this point)
+0254                             ; =============================================================================
+0254                             ; Digits: step back onto the first digit and read the whole number.
+0254   E5           DIGIT:    PUSH   H   
+0255   0B                     DCX   B   
+0256   CD 60 02               CALL   rdnum   
+0259   F7                     RST   6   
+025A                             ; negnum: "-" directly before a digit: read the number, negate it.
+025A   E5           NEGNUM:   PUSH   H   
+025B   CD 60 02               CALL   rdnum   
+025E   E7                     RST   4   
+025F   F7                     RST   6   
+0260                             ; rdnum: read decimal digits at IP into HL; IP is left on the first
+0260                             ; non-digit. Values wrap at 16 bits, as the spec says.
+0260   21 00 00     RDNUM:    LXI   H,0   
+0263   0A           RDN1:     LDAX   B   
+0264   D6 30                  SUI   "0"   
+0266   FE 0A                  CPI   10   
+0268   D0                     RNC      
+0269   03                     INX   B   
+026A   54                     MOV   D,H   
+026B   5D                     MOV   E,L   
+026C   29                     DAD   H   
+026D   29                     DAD   H   
+026E   19                     DAD   D   
+026F   29                     DAD   H   ; HL * 10
+0270   5F                     MOV   E,A   
+0271   16 00                  MVI   D,0   
+0273   19                     DAD   D   
+0274   C3 63 02               JMP   rdn1   
+0277                             ; udiv: unsigned HL / DE (DE <= 8000h). Returns HL = quotient, BC = remainder.
+0277                             ; Uses A, BC; the caller saves the IP. HL holds the dividend and, as its bits
+0277                             ; leave at the top, the quotient bits arrive at the bottom. The loop counter
+0277                             ; lives on the stack, since A is busy with the shifts.
+0277                             ; Dividing by 2 is one shift (the spec wants that fast).
+0277   01 00 00     UDIV:     LXI   B,0   
+027A   7B                     MOV   A,E   
+027B   EE 02                  XRI   2   
+027D   B2                     ORA   D   
+027E   C2 8B 02               JNZ   udv0   
+0281   B4                     ORA   H   ; A was 0, and the carry is clear
+0282   1F                     RAR      
+0283   67                     MOV   H,A   
+0284   7D                     MOV   A,L   
+0285   1F                     RAR      
+0286   6F                     MOV   L,A   ; the quotient
+0287   78                     MOV   A,B   
+0288   17                     RAL      
+0289   4F                     MOV   C,A   ; the remainder: the bit that fell out
+028A   C9                     RET      
+028B   3E 10        UDV0:     MVI   A,16   
+028D   F5                     PUSH   PSW   
+028E   29           UDV1:     DAD   H   ; next dividend bit into the carry
+028F   79                     MOV   A,C   
+0290   17                     RAL      
+0291   4F                     MOV   C,A   
+0292   78                     MOV   A,B   
+0293   17                     RAL      
+0294   47                     MOV   B,A   ; BC = BC*2 + bit
+0295   79                     MOV   A,C   
+0296   93                     SUB   E   
+0297   78                     MOV   A,B   
+0298   9A                     SBB   D   ; carry if BC < DE
+0299   DA A1 02               JC   udv2   
+029C   47                     MOV   B,A   ; BC - DE (high byte; A holds it)
 029D   79                     MOV   A,C   
-029E   17                     RAL      
+029E   93                     SUB   E   
 029F   4F                     MOV   C,A   
-02A0   78                     MOV   A,B   
-02A1   17                     RAL      
-02A2   47                     MOV   B,A   ; BC = BC*2 + bit
-02A3   79                     MOV   A,C   
-02A4   93                     SUB   E   
-02A5   78                     MOV   A,B   
-02A6   9A                     SBB   D   ; carry if BC < DE
-02A7   DA AF 02               JC   udv2   
-02AA   47                     MOV   B,A   ; BC - DE (high byte; A holds it)
-02AB   79                     MOV   A,C   
-02AC   93                     SUB   E   
-02AD   4F                     MOV   C,A   
-02AE   2C                     INR   L   ; quotient bit
-02AF   F1           UDV2:     POP   PSW   
-02B0   3D                     DCR   A   
-02B1   F5                     PUSH   PSW   
-02B2   C2 9C 02               JNZ   udv1   
-02B5   F1                     POP   PSW   
-02B6   C9                     RET      
-02B7                             ; pdec: print HL unsigned, by recursion on HL / 10 (the stack holds digits).
-02B7                             ; Uses BC.
-02B7   11 0A 00     PDEC:     LXI   D,10   
-02BA   CD 85 02               CALL   udiv   ; HL = HL / 10, C = the last digit
-02BD   79                     MOV   A,C   
-02BE   F5                     PUSH   PSW   
-02BF   7C                     MOV   A,H   
-02C0   B5                     ORA   L   
-02C1   C4 B7 02               CNZ   pdec   
-02C4   F1                     POP   PSW   
-02C5   C6 30                  ADI   "0"   
-02C7   EF                     RST   5   
-02C8   C9                     RET      
-02C9                             ; skip: read past text to the closer at this level, and return A = 0 if it
-02C9                             ; was ")" and 2 if it was "]". Brackets of both kinds count together;
-02C9                             ; strings are stepped over whole. A NUL first ends the program (for "\" with
-02C9                             ; no closer; anything else that runs into the NUL had unbalanced brackets
-02C9                             ; anyway). D counts the open levels, starting at 1 for the one we are in:
-02C9                             ; skip sets it to 0 and falls through the INR that an opener comes back to.
-02C9   16 00        SKIP:     MVI   D,0   
+02A0   2C                     INR   L   ; quotient bit
+02A1   F1           UDV2:     POP   PSW   
+02A2   3D                     DCR   A   
+02A3   F5                     PUSH   PSW   
+02A4   C2 8E 02               JNZ   udv1   
+02A7   F1                     POP   PSW   
+02A8   C9                     RET      
+02A9                             ; psgn: print HL as a signed number. Uses BC.
+02A9   7C           PSGN:     MOV   A,H   
+02AA   B7                     ORA   A   
+02AB   F2 B2 02               JP   pdec   
+02AE   3E 2D                  MVI   A,"-"   
+02B0   EF                     RST   5   
+02B1   E7                     RST   4   
+02B2                             ; pdec: print HL unsigned, by recursion on HL / 10 (the stack holds digits).
+02B2                             ; Uses BC.
+02B2   11 0A 00     PDEC:     LXI   D,10   
+02B5   CD 77 02               CALL   udiv   ; HL = HL / 10, C = the last digit
+02B8   79                     MOV   A,C   
+02B9   F5                     PUSH   PSW   
+02BA   7C                     MOV   A,H   
+02BB   B5                     ORA   L   
+02BC   C4 B2 02               CNZ   pdec   
+02BF   F1                     POP   PSW   
+02C0   C6 30                  ADI   "0"   
+02C2   EF                     RST   5   
+02C3   C9                     RET      
+02C4                             ; skip: read past text to the closer at this level, and return A = 0 if it
+02C4                             ; was ")" and 2 if it was "]". Brackets of both kinds count together;
+02C4                             ; strings are stepped over whole. A NUL first ends the program (for "\" with
+02C4                             ; no closer; anything else that runs into the NUL had unbalanced brackets
+02C4                             ; anyway). D counts the open levels, starting at 1 for the one we are in:
+02C4                             ; skip sets it to 0 and falls through the INR that an opener comes back to.
+02C4                             ; 
+02C4                             ; The checked build also looks at the character the skip was started by,
+02C4                             ; which is always the one just before where it starts: "(" must end at ")",
+02C4                             ; "[" at "]", and neither may run into the NUL (N); a string with no closing
+02C4                             ; quote counts as running into it. "\" takes either closer. The place where
+02C4                             ; the skip started is kept on the stack, for the report.
+02C4                SKIP:        
+02C4                          IF   CHECKED   
+02C4   C5                     PUSH   B   
+02C5   0B                     DCX   B   
+02C6   0A                     LDAX   B   
+02C7   03                     INX   B   
+02C8   5F                     MOV   E,A   ; E = the opener: ( [ or \
+02C9                          ENDIF      
+02C9   16 00                  MVI   D,0   
 02CB   14           SK3:      INR   D   ; an opener: one deeper
 02CC   0A           SK1:      LDAX   B   
-02CD   03                     INX   B   
-02CE   B7                     ORA   A   
-02CF   CA 7C 00               JZ   endprog   
+02CD                          IF   1-CHECKED   
+                              INX   B   
+                              ORA   A   
+                              JZ   endprog   
+02CD                          ENDIF      
+02CD                          IF   CHECKED   
+02CD   B7                     ORA   A   
+02CE   CA FC 02               JZ   sk6   ; (the IP stays on the NUL)
+02D1   03                     INX   B   
+02D2                          ENDIF      
 02D2   FE 22                  CPI   22h   
-02D4   CC F0 02               CZ   skipstr   ; leaves A = 22h, which matches nothing below
-02D7   D6 28                  SUI   "("   
+02D4   CC 08 03               CZ   skipstr   ; leaves A = 22h, which matches nothing below
+02D7   D6 28                  SUI   "("   ;   (or 0, and then the NUL is read next)
 02D9   CA CB 02               JZ   sk3   
 02DC   3D                     DCR   A   ; ")"
 02DD   CA EA 02               JZ   sk4   
@@ -821,58 +894,142 @@
 02E5   FE 02                  CPI   "]"-"["   
 02E7   C2 CC 02               JNZ   sk1   
 02EA   15           SK4:      DCR   D   
-02EB   C8                     RZ      ; the closer at this level
-02EC   C3 CC 02               JMP   sk1   
-02EF                             ; skipstr: IP is inside a string; step past its closing quote. "/" escapes
-02EF                             ; the next character, so "/"" does not end it. Leaves A = 22h.
-02EF   03           SS0:      INX   B   
-02F0   0A           SKIPSTR:   LDAX   B   
-02F1   03                     INX   B   
-02F2   FE 2F                  CPI   "/"   
-02F4   CA EF 02               JZ   ss0   
-02F7   FE 22                  CPI   22h   
-02F9   C2 F0 02               JNZ   skipstr   
-02FC   C9                     RET      
-02FD                             ; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
-02FD                             ; and return its value in A with the carry set; otherwise leave the IP and
-02FD                             ; return with the carry clear.
-02FD   0A           HEXC:     LDAX   B   
-02FE   D6 30                  SUI   "0"   
-0300   FE 0A                  CPI   10   
-0302   DA 0E 03               JC   hc1   
-0305   E6 DF                  ANI   0DFh   
-0307   D6 11                  SUI   11h   
-0309   FE 06                  CPI   6   
-030B   D0                     RNC      
-030C   D6 F6                  SUI   0F6h   ; + 10, and sets the carry
-030E   03           HC1:      INX   B   
-030F   C9                     RET      
-0310                             ; =============================================================================
-0310                             ;  Console layer: getk returns a waiting key in A (zero flag clear), or
-0310                             ;  A = 0 with the zero flag set when none is waiting. putc (RST 5) prints A.
-0310                             ;  Both keep BC, DE and HL. In the generic build they are the host's KEY and
-0310                             ;  CONOUT routines themselves.
-0310                             ; =============================================================================
-0310                          IF   (1-CPM)*(1-CHECKED)   
-                    GETK:     EQU   KEY   ; the host's routine does the whole job
-0310                          ENDIF      
-0310                          IF   CHECKED   
-0310   E5           GETK:     PUSH   H   ; a key held back by the break check goes
-0311   21 36 82               LXI   H,KEYBUF   ;   first, and is taken out of the buffer
-0314   7E                     MOV   A,M   
-0315   36 00                  MVI   M,0   
-0317   E1                     POP   H   
-0318   B7                     ORA   A   
-0319   C0                     RNZ      
-031A                          ENDIF      
-031A                          IF   (1-CPM)*CHECKED   
-031A   C3 06 FF               JMP   KEY   
-031D                          ENDIF      
-031D                          IF   CPM*(1-CHECKED)   
-                    GETK:        
-031D                          ENDIF      
-031D                          IF   CPM   
-                              MVI   A,0FFh   ; BDOS 6 with E = FFh: a key, or 0
+02EB                          IF   1-CHECKED   
+                              RZ      ; the closer at this level
+                              JMP   sk1   
+02EB                          ENDIF      
+02EB                          IF   CHECKED   
+02EB   C2 CC 02               JNZ   sk1   
+02EE   57                     MOV   D,A   ; the closer at this level: 0 or 2. Bit 1 of the
+02EF   AB                     XRA   E   ;   opener is 0 for "(" and 1 for "[", and only
+02F0   E6 06                  ANI   6   ;   "\" has bit 2: so this is 2 for the wrong
+02F2   FE 02                  CPI   2   ;   closer, and only then
+02F4   7A                     MOV   A,D   
+02F5   D1                     POP   D   ; (where the skip started)
+02F6   C0                     RNZ      
+02F7   42                     MOV   B,D   ; N. The place is the opener
+02F8   4B                     MOV   C,E   
+02F9   C3 03 03               JMP   sk7   
+02FC   7B           SK6:      MOV   A,E   ; the text ran out:
+02FD   E6 04                  ANI   4   
+02FF   C2 7F 00               JNZ   endprog   ;   "\" with no closer ends the program
+0302   C1                     POP   B   
+0303   3E 4E        SK7:      MVI   A,"N"   
+0305   C3 17 04               JMP   errp   ; (errp drops skip's return address)
+0308                          ENDIF      
+0308                             ; skipstr: IP is inside a string; step past its closing quote. "/" escapes
+0308                             ; the next character, so "/"" does not end it. Leaves A = 22h.
+0308                          IF   1-CHECKED   
+                    SS0:      INX   B   
+                    SKIPSTR:   LDAX   B   
+                              INX   B   
+                              CPI   "/"   
+                              JZ   ss0   
+                              CPI   22h   
+                              JNZ   skipstr   
+                              RET      
+0308                          ENDIF      
+0308                          IF   CHECKED   
+0308                             ; The checked build never steps over a NUL: if the text runs out first it
+0308                             ; returns A = 0 with the IP on the NUL.
+0308   0A           SKIPSTR:   LDAX   B   
+0309   B7                     ORA   A   
+030A   C8                     RZ      
+030B   03                     INX   B   
+030C   FE 22                  CPI   22h   
+030E   C8                     RZ      
+030F   FE 2F                  CPI   "/"   
+0311   C2 08 03               JNZ   skipstr   
+0314   0A                     LDAX   B   ; the escaped character
+0315   B7                     ORA   A   
+0316   C8                     RZ      
+0317   03                     INX   B   
+0318   C3 08 03               JMP   skipstr   
+031B                          ENDIF      
+031B                             ; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
+031B                             ; and return its value in A with the carry set; otherwise leave the IP and
+031B                             ; return with the carry clear.
+031B   0A           HEXC:     LDAX   B   
+031C   D6 30                  SUI   "0"   
+031E   FE 0A                  CPI   10   
+0320   DA 2C 03               JC   hc1   
+0323   E6 DF                  ANI   0DFh   
+0325   D6 11                  SUI   11h   
+0327   FE 06                  CPI   6   
+0329   D0                     RNC      
+032A   D6 F6                  SUI   0F6h   ; + 10, and sets the carry
+032C   03           HC1:      INX   B   
+032D   C9                     RET      
+032E                             ; =============================================================================
+032E                             ;  Console layer. rawk is the host's key routine: a waiting key in A (zero
+032E                             ;  flag clear), or A = 0 with the zero flag set when none is waiting. putc
+032E                             ;  (RST 5) prints A. Both keep BC, DE and HL. In the generic build they are
+032E                             ;  the host's KEY and CONOUT routines themselves.
+032E                             ; 
+032E                             ;  A running program reads the keyboard only through getk and pollk, which
+032E                             ;  between them give the break key its rules:
+032E                             ;    - Ctrl-C stops the program;
+032E                             ;    - any other key that the break check reads is held in KEYBUF for the
+032E                             ;      next "?", and a newer one takes its place;
+032E                             ;    - "?" (getk) takes the held key first;
+032E                             ;    - a program that has stored a non-zero byte at BRKOFF gets Ctrl-C as a
+032E                             ;      key like any other, but two of them within about 250 ms still stop it.
+032E                             ;  Both are called straight from a handler, never from a routine under one:
+032E                             ;  the checked build's report counts on finding one return address above the
+032E                             ;  data stack, and TOS in HL.
+032E                             ; =============================================================================
+032E                          IFN   CPM   
+032E                RAWK:     EQU   KEY   
+032E                          ENDIF      
+032E                             ; pollk: the break check (see rpushd).
+032E   CD 06 FF     POLLK:    CALL   rawk   
+0331   C8                     RZ      ; no key
+0332   32 7A 82               STA   KEYBUF   ; held for the next "?"
+0335   FE 03        PK1:      CPI   3   ; (getk joins here)
+0337   C0                     RNZ      
+0338                             ; ctlc: Ctrl-C has been read. If the break key is on, that is the end. If
+0338                             ; the program has turned it off, wait about 250 ms for one more key: a
+0338                             ; second Ctrl-C is the end too; any other key is held (the newest wins),
+0338                             ; and the Ctrl-C goes to the program: returns A = 3, zero flag clear.
+0338   3A 7B 82     CTLC:     LDA   BRKOFF   
+033B   B7                     ORA   A   
+033C   CA 95 03               JZ   brk   
+033F   D5                     PUSH   D   
+0340   11 10 27               LXI   D,250*MSLOOP   
+0343   CD 06 FF     CT1:      CALL   rawk   
+0346   C2 4F 03               JNZ   ct2   
+0349   1B                     DCX   D   
+034A   7A                     MOV   A,D   
+034B   B3                     ORA   E   
+034C   C2 43 03               JNZ   ct1   
+034F   D1           CT2:      POP   D   ; A = the second key, or 0 if none came
+0350   FE 03                  CPI   3   
+0352   CA 95 03               JZ   brk   
+0355   B7                     ORA   A   
+0356   CA 5C 03               JZ   ct3   
+0359   32 7A 82               STA   KEYBUF   
+035C   3E 03        CT3:      MVI   A,3   
+035E   B7                     ORA   A   
+035F   C9                     RET      
+0360                             ; getk: a key for "?", or A = 0 and the zero flag if there is none.
+0360   E5           GETK:     PUSH   H   ; a held key goes first, and is taken out of
+0361   21 7A 82               LXI   H,KEYBUF   ;   the buffer
+0364   7E                     MOV   A,M   
+0365   36 00                  MVI   M,0   
+0367   E1                     POP   H   
+0368   B7                     ORA   A   
+0369   C0                     RNZ      
+036A   CD 06 FF               CALL   rawk   
+036D   C8                     RZ      
+036E   C3 35 03               JMP   pk1   ; Ctrl-C? If not, that is the key
+0371                          IF   1-CHECKED   
+                    BRK:      EQU   endprog   ; the unchecked build stops without a word;
+0371                          ENDIF      
+0371                          IF   CHECKED   
+0371                BRK:      EQU   e_break   ;   the checked build reports B
+0371                          ENDIF      
+0371                          IF   CPM   
+                    RAWK:     MVI   A,0FFh   ; BDOS 6 with E = FFh: a key, or 0
                                  ; putc: BDOS 6 for every character. BDOS 2 would check for ^S while
                                  ; printing and could swallow a key that BDOS 6 then never sees.
                     PUTC:     PUSH   B   
@@ -886,111 +1043,327 @@
                               POP   B   
                               ORA   A   ; (for getk)
                               RET      
-031D                          ENDIF      
-031D                             ; =============================================================================
-031D                             ;  Checked build: the checks and the error report
-031D                             ; =============================================================================
-031D                          IF   CHECKED   
-031D                             ; chkstk: both stacks are checked once per character, not in every handler.
-031D                             ; Each stack lives in one page, so it has overrun exactly when the pointer's
-031D                             ; high byte has left that page. Errors are caught one cell late at most; the
-031D                             ; page below each stack is a guard band. (The call itself is on the data
-031D                             ; stack, but in the same page whenever the stack is in range.)
-031D   EB           CHKSTK:   XCHG      ; DE = TOS (HL is needed for the pointers)
-031E   21 00 00               LXI   H,0   
-0321   39                     DAD   SP   
-0322   7C                     MOV   A,H   
-0323   FE 81                  CPI   DSPAGE   
-0325   C2 61 03               JNZ   e_stack   
-0328   2A 34 82               LHLD   RSP   ; the return stack: in its page, and not
-032B   7D                     MOV   A,L   ;   above its empty position (an underflow
-032C   FE E1                  CPI   RSTOP&0FFh+1   ;   would stay inside the page, in the
-032E   D2 64 03               JNC   e_rstack   ;   guard band)
-0331   7C                     MOV   A,H   
-0332   FE 80                  CPI   RSPAGE   
-0334   C2 64 03               JNZ   e_rstack   
-0337   EB                     XCHG      ; TOS back
-0338   C9                     RET      
-0339                             ; chkbrk: a waiting key is read now; Ctrl-C stops the program, anything
-0339                             ; else is held for the next "?". Keeps BC, DE, HL.
-0339   CD 10 03     CHKBRK:   CALL   getk   
-033C   C8                     RZ      
-033D   FE 03                  CPI   3   
-033F   CA 67 03               JZ   e_break   
-0342   32 36 82               STA   KEYBUF   
-0345   C9                     RET      
-0346                             ; chkst: stop unless HL is in the program's own space: from the letter page
-0346                             ; up to the heap limit (the OS, or HEAPLIM), so the interpreter's stacks and
-0346                             ; whatever lies above the limit are safe. Memory above the heap top but
-0346                             ; below the limit is the program's own: Tiny BASIC keeps its lines there.
-0346                             ; Keeps every register.
-0346   F5           CHKST:    PUSH   PSW   
-0347   7C                     MOV   A,H   
-0348   FE 82                  CPI   LETPAGE   
-034A   DA 5E 03               JC   e_store   
-034D                          ENDIF      
-034D                          IF   CHECKED*(1-CPM)   
-034D   FE F0                  CPI   HEAPLIM   
-034F   D2 5E 03               JNC   e_store   
-0352                          ENDIF      
-0352                          IF   CHECKED*CPM   
-                              LDA   0007h   ; the BDOS page is the heap limit
-                              DCR   A   
-                              CMP   H   
-                              JC   e_store   
-0352                          ENDIF      
-0352                          IF   CHECKED   
-0352   F1                     POP   PSW   
-0353   C9                     RET      
-0354                             ; chkhp: stop if working out the new heap top carried (a negative count
-0354                             ; wraps: too big), or if the new top in HL is not below the limit page.
-0354   DA 5B 03     CHKHP:    JC   e_heap   
-0357                          ENDIF      
-0357                          IF   CHECKED*(1-CPM)   
-0357   7C                     MOV   A,H   
-0358   FE F0                  CPI   HEAPLIM   
-035A   D8                     RC      
-035B                          ENDIF      
-035B                          IF   CHECKED*CPM   
+0371                          ENDIF      
+0371                             ; =============================================================================
+0371                             ;  Checked build: the checks and the error report
+0371                             ; =============================================================================
+0371                          IF   CHECKED   
+0371                             ; chkhp: HL = the new heap top, DE = the count, the carry is from adding
+0371                             ; it, and the old top is on the stack under the return address. Stop if the
+0371                             ; new top is not below the limit page, or is below the program's end.
+0371                CHKHP:       
+0371                          ENDIF      
+0371                          IF   CHECKED*CPM   
+                                 ; With this much room a top that wrapped round can land back in
+                                 ; range, so the add is tested too: growing must not carry, and
+                                 ; releasing must.
+                              MOV   A,D   
+                              RAR      ; the carry comes in above the count's sign:
+                              ADI   40h   ;   bit 7 = carry XOR sign
+                              ADD   A   
+                              JC   e_heap   
                               LDA   0007h   
                               DCR   A   
                               CMP   H   
+                              JC   e_heap   
+0371                          ENDIF      
+0371                          IF   CHECKED*(1-CPM)   
+0371                             ; (Here the program's space is under 32K, so a top that wrapped
+0371                             ; round always falls outside it.)
+0371   7C                     MOV   A,H   
+0372   FE F0                  CPI   HEAPLIM   
+0374   D2 80 03               JNC   e_heap   
+0377                          ENDIF      
+0377                          IF   CHECKED   
+0377   EB                     XCHG      
+0378   E5                     PUSH   H   ; the count
+0379   2A 38 82               LHLD   NPEND   
+037C   19                     DAD   D   ; carry: at or above the program's end
+037D   E1                     POP   H   
+037E   EB                     XCHG      
+037F   D8                     RC      
+0380   EB           E_HEAP:   XCHG      ; put the count back in TOS for the report,
+0381   D1                     POP   D   ;   and drop the return address (errp drops
+0382   3E 48                  MVI   A,"H"   ;   the old top)
+0384   C3 17 04               JMP   errp   
+0387                             ; chkst: stop unless HL is in the program's own space: from the letter page
+0387                             ; up to the heap limit (the OS, or HEAPLIM), so the interpreter's stacks and
+0387                             ; whatever lies above the limit are safe. Memory above the heap top but
+0387                             ; below the limit is the program's own: Tiny BASIC keeps its lines there.
+0387                             ; It is the page of HL + 1 that is tested, so that one test serves both
+0387                             ; bytes of a cell: the last byte below the limit can"t be stored to with ".'.
+0387                             ; Keeps HL and BC. It runs on into its own error entry.
+0387   23           CHKST:    INX   H   
+0388   7C                     MOV   A,H   
+0389   2B                     DCX   H   
+038A   FE 82                  CPI   LETPAGE   
+038C   DA 92 03               JC   e_store   
+038F                          ENDIF      
+038F                          IF   CHECKED*(1-CPM)   
+038F   FE F0                  CPI   HEAPLIM   
+0391   D8                     RC      
+0392                          ENDIF      
+0392                          IF   CHECKED*CPM   
+                              MOV   E,A   
+                              LDA   0007h   ; the BDOS page is the heap limit
+                              DCR   A   
+                              CMP   E   
                               RNC      
-035B                          ENDIF      
-035B                          IF   CHECKED   
-035B                             ; Error entries. Each loads its letter and then hides the next entry inside
-035B                             ; a 3-byte LXI H (the 21h), so they all fall through to `error`.
-035B   3E 48        E_HEAP:   MVI   A,"H"   ; heap past the limit
-035D   21                     DB   21h   
-035E   3E 57        E_STORE:   MVI   A,"W"   ; write outside the program's space
-0360   21                     DB   21h   
-0361   3E 53        E_STACK:   MVI   A,"S"   ; data stack over or under
-0363   21                     DB   21h   
-0364   3E 52        E_RSTACK:   MVI   A,"R"   ; return stack over or under
-0366   21                     DB   21h   
-0367   3E 42        E_BREAK:   MVI   A,"B"   ; Ctrl-C
-0369   21                     DB   21h   
-036A   3E 44        E_BRACK:   MVI   A,"D"   ; bad character after [
-036C                             ; error: print the letter in A, " @ " and the offset in the program of the
-036C                             ; character just read, then end. For example: S @ 245
-036C   31 FE 81     ERROR:    LXI   SP,DSTOP   ; the stacks may be wrecked: start clean
-036F   EF                     RST   5   
-0370   3E 20                  MVI   A," "   
-0372   EF                     RST   5   
-0373   3E 40                  MVI   A,"@"   
-0375   EF                     RST   5   
-0376   3E 20                  MVI   A," "   
-0378   EF                     RST   5   
-0379   21 FF 7C               LXI   H,(0-PROG-1)&0FFFFh   ; minus the address of the character
-037C   09                     DAD   B   ;   just read: HL = its offset
-037D   CD B7 02               CALL   pdec   
-0380   C3 7C 00               JMP   endprog   
-0383                          ENDIF      
-0383                             ; =============================================================================
-0383                             ;  Startup
-0383                             ; =============================================================================
-0383                START:       
-0383                          IF   CPM   
+0392                          ENDIF      
+0392                          IF   CHECKED   
+0392                             ; Two error entries for errors found inside a routine: the first hides the
+0392                             ; second inside a 3-byte LXI D (the 11h); errp then drops the routine's
+0392                             ; return address.
+0392   3E 4F        E_STORE:   MVI   A,"O"   ; a store outside the program's space
+0394   11                     DB   11h   
+0395   3E 42        E_BREAK:   MVI   A,"B"   ; Ctrl-C (found inside pollk or getk)
+0397   C3 17 04               JMP   errp   
+039A                             ; prstr: print the string at HL, to its closing quote, decoding "/" (this is
+039A                             ; "$", and the error report's texts). A NUL first is an error: Q.
+039A   7E           PRSTR:    MOV   A,M   
+039B   23                     INX   H   
+039C   FE 22                  CPI   22h   
+039E   C8                     RZ      
+039F   B7                     ORA   A   
+03A0   CA B0 03               JZ   e_dollar   
+03A3   FE 2F                  CPI   "/"   
+03A5   C2 AC 03               JNZ   prs1   
+03A8   7E                     MOV   A,M   
+03A9   23                     INX   H   
+03AA   E6 BF                  ANI   0BFh   
+03AC   EF           PRS1:     RST   5   
+03AD   C3 9A 03               JMP   prstr   
+03B0   D1           E_DOLLAR:   POP   D   ; "$" ran into a NUL: drop the return address,
+03B1   E1                     POP   H   ;   and put the string's address back in TOS
+03B2   3E 51                  MVI   A,"Q"   
+03B4   C3 18 04               JMP   error   
+03B7                             ; pmsg: print the text that follows the CALL, to its closing quote. Keeps HL.
+03B7                             ; pnl: the same, on a new line.
+03B7   3E 0D        PNL:      MVI   A,13   
+03B9   EF                     RST   5   
+03BA   3E 0A                  MVI   A,10   
+03BC   EF                     RST   5   
+03BD   E3           PMSG:     XTHL      
+03BE   CD 9A 03               CALL   prstr   
+03C1   E3                     XTHL      
+03C2   C9                     RET      
+03C3                             ; chkstk: both stacks are checked once per character, not in every handler.
+03C3                             ; The data stack is right when SP lies in the 256 bytes below DSTOP: adding
+03C3                             ; the constant carries if it is above (cells were popped that were never
+03C3                             ; pushed), and leaves a high byte of FFh if it is in range. Errors are found
+03C3                             ; a character late at most: the bytes above DSTOP and the guard band below
+03C3                             ; the page take what happens meanwhile.
+03C3   EB           CHKSTK:   XCHG      ; DE = TOS (HL is needed for the pointers)
+03C4   21 05 7E               LXI   H,(1-DSTOP)&0FFFFh   ; (SP is 2 lower here: the call)
+03C7   39                     DAD   SP   
+03C8   DA F2 03               JC   e_under   
+03CB   24                     INR   H   
+03CC   C2 EC 03               JNZ   e_over   
+03CF   2A 34 82               LHLD   RSP   ; the return stack: in its page (or it has
+03D2   7C                     MOV   A,H   ;   overflowed), and not above its empty
+03D3   FE 80                  CPI   RSPAGE   ;   position (an underflow stays inside the
+03D5   C2 E9 03               JNZ   e_rover   ;   page, in the guard band)
+03D8   7D                     MOV   A,L   
+03D9   FE E1                  CPI   RSTOP&0FFh+1   
+03DB   D2 E0 03               JNC   e_runder   
+03DE   EB                     XCHG      ; TOS back
+03DF   C9                     RET      
+03E0   21 E0 80     E_RUNDER:   LXI   H,RSTOP   ; return stack underflow: it counts as empty
+03E3   22 34 82               SHLD   RSP   
+03E6   3E 72                  MVI   A,"r"   
+03E8   21                     DB   21h   ; (LXI H hides the next entry; HL is free)
+03E9   3E 52        E_ROVER:   MVI   A,"R"   ; return stack overflow
+03EB   21                     DB   21h   
+03EC   3E 53        E_OVER:   MVI   A,"S"   ; data stack overflow
+03EE   EB                     XCHG      ; TOS back
+03EF   C3 17 04               JMP   errp   
+03F2   31 FC 81     E_UNDER:   LXI   SP,DSTOP   ; data stack underflow: it counts as empty
+03F5   3E 73                  MVI   A,"s"   
+03F7   C3 18 04               JMP   error   
+03FA                             ; e_hi: the inner loop read a reserved byte, 80h-FFh: X. But a word cell that
+03FA                             ; was never defined still holds 0000h, and the byte there is a JMP, C3h, in
+03FA                             ; every build: if the IP is in page zero, this was a call of an undefined
+03FA                             ; word. The call is undone, so the place is the call itself.
+03FA   04           E_HI:     INR   B   
+03FB   05                     DCR   B   
+03FC   C2 0E 04               JNZ   e_resv   
+03FF   E5                     PUSH   H   
+0400   CF                     RST   1   
+0401   44                     MOV   B,H   
+0402   4D                     MOV   C,L   
+0403   E1                     POP   H   
+0404   3E 55                  MVI   A,"U"   
+0406   C3 18 04               JMP   error   
+0409                             ; Error entries. Each loads its letter and then hides the next entry inside
+0409                             ; a 3-byte LXI D (the 11h), so they all fall through to `error`.
+0409   44           E_QUOTE:   MOV   B,H   ; an unclosed string: HL is its address, one
+040A   4D                     MOV   C,L   ;   past the opening quote, which is the place
+040B   3E 51                  MVI   A,"Q"   
+040D   11                     DB   11h   
+040E   3E 58        E_RESV:   MVI   A,"X"   ; a reserved byte outside a string
+0410   11                     DB   11h   
+0411   3E 5A        E_ZERO:   MVI   A,"Z"   ; dividing by zero
+0413   11                     DB   11h   
+0414   3E 57        E_BRACK:   MVI   A,"W"   ; bad character after [
+0416   FE                     DB   0FEh   ; (CPI hides the one byte of errp)
+0417                             ; errp: an error found inside a routine: drop its return address first.
+0417   D1           ERRP:     POP   D   
+0418                             ; error: the report, then the end. A = the letter, BC = one past the place,
+0418                             ; HL = TOS, and both stacks as the report is to show them:
+0418                             ; 
+0418                             ;   Err X @ line,col
+0418                             ;   up to 16 characters of the text from the place
+0418                             ;   Stk n: the top 8 cells at most, bottom to top
+0418                             ;   Rtn n
+0418   E5           ERROR:    PUSH   H   ; now the whole data stack is in memory
+0419   5F                     MOV   E,A   
+041A   CD B7 03               CALL   pnl   
+041D   45 72 72 20 22         DB   "Err ",22h   
+0422   7B                     MOV   A,E   
+0423   EF                     RST   5   
+0424   CD BD 03               CALL   pmsg   
+0427   20 40 20 22            DB   " @ ",22h   
+042B   0B                     DCX   B   ; BC = the place
+042C                             ; The line and column. A place below the program is in the line
+042C                             ; buffer: line 0. Otherwise count the LFs from the program's start;
+042C                             ; DE = the line's number, HL = where it starts.
+042C   21 80 82               LXI   H,LINEBUF   
+042F   11 00 00               LXI   D,0   
+0432   78                     MOV   A,B   
+0433   FE 83                  CPI   PROG/256   
+0435   DA 4F 04               JC   er3   
+0438   24                     INR   H   
+0439   6B                     MOV   L,E   ; HL = PROG
+043A   13           ER1:      INX   D   ; a new line starts at HL
+043B   E5                     PUSH   H   
+043C   7D           ER2:      MOV   A,L   
+043D   91                     SUB   C   
+043E   7C                     MOV   A,H   
+043F   98                     SBB   B   
+0440   D2 4E 04               JNC   er2x   ; reached the place
+0443   7E                     MOV   A,M   
+0444   23                     INX   H   
+0445   FE 0A                  CPI   10   
+0447   C2 3C 04               JNZ   er2   
+044A   F1                     POP   PSW   
+044B   C3 3A 04               JMP   er1   
+044E   E1           ER2X:     POP   H   
+044F   C5           ER3:      PUSH   B   
+0450   E5                     PUSH   H   
+0451   EB                     XCHG      
+0452   CD B2 02               CALL   pdec   ; the line
+0455   3E 2C                  MVI   A,","   
+0457   EF                     RST   5   
+0458   D1                     POP   D   
+0459   E1                     POP   H   
+045A   E5                     PUSH   H   
+045B   CD E6 04               CALL   sub16   
+045E   23                     INX   H   
+045F   CD B2 02               CALL   pdec   ; the column
+0462   CD B7 03               CALL   pnl   
+0465   22                     DB   22h   
+0466   E1                     POP   H   ; the text, as it is: 16 characters, or fewer
+0467   06 10                  MVI   B,16   ;   if the line or the program ends first
+0469   7E           ER4:      MOV   A,M   
+046A   23                     INX   H   
+046B   B7                     ORA   A   
+046C   CA 7E 04               JZ   er5   
+046F   FE 0D                  CPI   13   
+0471   CA 7E 04               JZ   er5   
+0474   FE 0A                  CPI   10   
+0476   CA 7E 04               JZ   er5   
+0479                          ENDIF      
+0479                          IF   CHECKED*CPM   
+                              CPI   1Ah   ; (the ^Z that pads a file's last record ends
+                              JZ   er5   ;   the text too: some terminals clear the
+0479                          ENDIF      ;   screen on it)
+0479                          IF   CHECKED   
+0479   EF                     RST   5   
+047A   05                     DCR   B   
+047B   C2 69 04               JNZ   er4   
+047E   CD B7 03     ER5:      CALL   pnl   
+0481   53 74 6B 20 22         DB   "Stk ",22h   
+0486   21 06 7E               LXI   H,(2-DSTOP)&0FFFFh   ; SP - (DSTOP-2) is minus twice the depth
+0489   39                     DAD   SP   ;   (the cell at DSTOP-2 was pushed with the
+048A   E7                     RST   4   ;   first value and holds nothing)
+048B   7C                     MOV   A,H   
+048C   CD DA 04               CALL   phal2   ; the depth
+048F   3E 3A                  MVI   A,":"   
+0491   EF                     RST   5   
+0492   79                     MOV   A,C   
+0493   FE 09                  CPI   9   
+0495   DA A2 04               JC   er6   
+0498   CD BD 03               CALL   pmsg   
+049B   20 2E 2E 2E 22         DB   " ...",22h   
+04A0   0E 08                  MVI   C,8   
+04A2   26 00        ER6:      MVI   H,0   ; C = the number of cells to show
+04A4   69                     MOV   L,C   
+04A5   29                     DAD   H   
+04A6   39                     DAD   SP   ; HL -> just above the deepest of them
+04A7   0C                     INR   C   
+04A8   0D           ER7:      DCR   C   
+04A9   CA BE 04               JZ   er8   
+04AC   2B                     DCX   H   
+04AD   56                     MOV   D,M   
+04AE   2B                     DCX   H   
+04AF   5E                     MOV   E,M   
+04B0   E5                     PUSH   H   
+04B1   C5                     PUSH   B   
+04B2   3E 20                  MVI   A," "   
+04B4   EF                     RST   5   
+04B5   EB                     XCHG      
+04B6   CD A9 02               CALL   psgn   
+04B9   C1                     POP   B   
+04BA   E1                     POP   H   
+04BB   C3 A8 04               JMP   er7   
+04BE   CD B7 03     ER8:      CALL   pnl   
+04C1   52 74 6E 20 22         DB   "Rtn ",22h   
+04C6   2A 34 82               LHLD   RSP   
+04C9   EB                     XCHG      
+04CA   21 E0 80               LXI   H,RSTOP   
+04CD   CD D7 04               CALL   phalf   
+04D0   CD B7 03               CALL   pnl   
+04D3   22                     DB   22h   
+04D4   C3 7F 00               JMP   endprog   
+04D7                             ; phalf: print half of HL - DE, and leave it in BC
+04D7   CD E6 04     PHALF:    CALL   sub16   
+04DA   B7           PHAL2:    ORA   A   ; (A = H; this clears the carry)
+04DB   1F                     RAR      
+04DC   67                     MOV   H,A   
+04DD   7D                     MOV   A,L   
+04DE   1F                     RAR      
+04DF   6F                     MOV   L,A   
+04E0   E5                     PUSH   H   
+04E1   CD B2 02               CALL   pdec   
+04E4   C1                     POP   B   
+04E5   C9                     RET      
+04E6                             ; sub16: HL = HL - DE. Leaves A = H.
+04E6   7D           SUB16:    MOV   A,L   
+04E7   93                     SUB   E   
+04E8   6F                     MOV   L,A   
+04E9   7C                     MOV   A,H   
+04EA   9A                     SBB   D   
+04EB   67                     MOV   H,A   
+04EC   C9                     RET      
+04ED                          ENDIF      
+04ED                             ; =============================================================================
+04ED                             ;  Startup
+04ED                             ; =============================================================================
+04ED                START:       
+04ED                          IF   (1-CPM)*CHECKED   
+04ED   31 FC 81               LXI   SP,DSTOP   
+04F0                          ENDIF      
+04F0                          IF   CHECKED   
+04F0                             ; Clear the lower half of the letter page: every variable starts at
+04F0                             ; 0, every word cell holds 0000h, the address an undefined word is
+04F0                             ; caught at (see e_hi), and no key is held back.
+04F0   21 00 82               LXI   H,LET   
+04F3   AF                     XRA   A   
+04F4   77           INI1:     MOV   M,A   
+04F5   2C                     INR   L   
+04F6   F2 F4 04               JP   ini1   ; +00h to +7Fh
+04F9                          ENDIF      
+04F9                          IF   CPM   
                                  ; CP/M: the RAM pages follow the image; the heap may grow to the BDOS
                               LXI   H,vecs   ; the RST routines go down into page zero
                               LXI   D,0008h   
@@ -1020,343 +1393,451 @@
                               JMP   ld1   
                     LD2:      MVI   M,0   ; the end of the file counts as NUL
                               INX   H   ; the heap starts after it
-0383                          ENDIF      
-0383                          IFN   CPM   
-0383   21 00 83               LXI   H,PROG   ; the heap starts after the program's NUL
-0386   7E           FNUL:     MOV   A,M   
-0387   23                     INX   H   
-0388   B7                     ORA   A   
-0389   C2 86 03               JNZ   fnul   
-038C                          ENDIF      
-038C   22 7C 82               SHLD   HEAP   
-038F   21 E0 80               LXI   H,RSTOP   ; the return stack is empty
-0392   22 34 82               SHLD   RSP   
-0395                          IF   CHECKED   
-0395   AF                     XRA   A   
-0396   32 36 82               STA   KEYBUF   ; no key held back
-0399                          ENDIF      
-0399   01 00 83               LXI   B,PROG   ; the IP
-039C   F7                     RST   6   ; (its return address is thrown away)
-039D                          IF   CPM   
+04F9                          ENDIF      
+04F9                          IFN   CPM   
+04F9   21 00 83               LXI   H,PROG   ; the heap starts after the program's NUL
+04FC   7E           FNUL:     MOV   A,M   
+04FD   23                     INX   H   
+04FE   B7                     ORA   A   
+04FF   C2 FC 04               JNZ   fnul   
+0502                          ENDIF      
+0502   22 7C 82               SHLD   HEAP   
+0505                          IF   CHECKED   
+0505   E7                     RST   4   ; minus the heap"s first address: "_' may not
+0506   22 38 82               SHLD   NPEND   ;   release below it
+0509                          ENDIF      
+0509   21 E0 80               LXI   H,RSTOP   ; the return stack is empty
+050C   22 34 82               SHLD   RSP   
+050F                          IF   (1-CHECKED)*(1-CPM)   
+                              MOV   H,A   ; (A = 0, from the search for the NUL) no key
+                              MOV   L,A   ;   is held, and the break key is on (the
+050F                          ENDIF      ;   checked build has cleared these)
+050F                          IF   (1-CHECKED)*CPM   
+                              LXI   H,0   
+050F                          ENDIF      
+050F                          IF   1-CHECKED   
+                              SHLD   KEYBUF   
+050F                          ENDIF      
+050F   01 00 83               LXI   B,PROG   ; the IP
+0512   F7                     RST   6   ; (its return address is thrown away)
+0513                          IF   CPM   
                                  ; RAM pages, after the image
                     RSPAGE:   EQU   (imgend + 255) / 256   
                     DSPAGE:   EQU   RSPAGE + 1   
                     LETPAGE:   EQU   RSPAGE + 2   
                     PROG:     EQU   LETPAGE*256 + 256   
-039D                          ENDIF      
-039D                IMGEND:      
+0513                          ENDIF      
+0513                IMGEND:      
 
 
 CPM:                0000 DEFINED AT LINE 23
 CHECKED:            0001 DEFINED AT LINE 24
-KEY:                FF06 DEFINED AT LINE 92
-                    > USED AT LINE 928
-CONOUT:             FF03 DEFINED AT LINE 95
-                    > USED AT LINE 163
-EXIT:               FF09 DEFINED AT LINE 96
-                    > USED AT LINE 241
-RSPAGE:             0080 DEFINED AT LINE 98
-                    > USED AT LINE 117
-                    > USED AT LINE 970
-DSPAGE:             0081 DEFINED AT LINE 99
-                    > USED AT LINE 119
-                    > USED AT LINE 963
-LETPAGE:            0082 DEFINED AT LINE 100
-                    > USED AT LINE 111
-                    > USED AT LINE 287
-                    > USED AT LINE 295
-                    > USED AT LINE 390
-                    > USED AT LINE 991
-PROG:               8300 DEFINED AT LINE 101
-                    > USED AT LINE 1047
-                    > USED AT LINE 1089
-                    > USED AT LINE 1102
-HEAPLIM:            00F0 DEFINED AT LINE 102
-                    > USED AT LINE 995
-                    > USED AT LINE 1014
-BASE:               0000 DEFINED AT LINE 103
+KEY:                FF06 DEFINED AT LINE 93
+                    > USED AT LINE 1041
+CONOUT:             FF03 DEFINED AT LINE 96
+                    > USED AT LINE 183
+EXIT:               FF09 DEFINED AT LINE 97
+                    > USED AT LINE 267
+RSPAGE:             0080 DEFINED AT LINE 99
+                    > USED AT LINE 125
+                    > USED AT LINE 1228
+DSPAGE:             0081 DEFINED AT LINE 100
                     > USED AT LINE 127
-                    > USED AT LINE 723
-                    > USED AT LINE 724
-                    > USED AT LINE 725
-                    > USED AT LINE 726
-MSLOOP:             0028 DEFINED AT LINE 106
-                    > USED AT LINE 634
-LET:                8200 DEFINED AT LINE 111
-                    > USED AT LINE 112
+LETPAGE:            0082 DEFINED AT LINE 101
                     > USED AT LINE 113
+                    > USED AT LINE 314
+                    > USED AT LINE 322
+                    > USED AT LINE 413
+                    > USED AT LINE 1160
+PROG:               8300 DEFINED AT LINE 102
+                    > USED AT LINE 1299
+                    > USED AT LINE 1465
+                    > USED AT LINE 1488
+HEAPLIM:            00F0 DEFINED AT LINE 103
+                    > USED AT LINE 1134
+                    > USED AT LINE 1164
+BASE:               0000 DEFINED AT LINE 104
+                    > USED AT LINE 139
+                    > USED AT LINE 768
+                    > USED AT LINE 769
+                    > USED AT LINE 770
+                    > USED AT LINE 771
+MSLOOP:             0028 DEFINED AT LINE 107
+                    > USED AT LINE 679
+                    > USED AT LINE 1057
+LET:                8200 DEFINED AT LINE 113
                     > USED AT LINE 114
                     > USED AT LINE 115
                     > USED AT LINE 116
-HEAP:               827C DEFINED AT LINE 112
-                    > USED AT LINE 271
-                    > USED AT LINE 277
-                    > USED AT LINE 1095
-RSP:                8234 DEFINED AT LINE 113
-                    > USED AT LINE 134
-                    > USED AT LINE 139
-                    > USED AT LINE 310
-                    > USED AT LINE 315
-                    > USED AT LINE 965
-                    > USED AT LINE 1097
-KEYBUF:             8236 DEFINED AT LINE 114
-                    > USED AT LINE 920
-                    > USED AT LINE 981
-                    > USED AT LINE 1100
-LBHDR:              827E DEFINED AT LINE 115
-LINEBUF:            8280 DEFINED AT LINE 116
-                    > USED AT LINE 690
-                    > USED AT LINE 711
-RSTOP:              80E0 DEFINED AT LINE 117
-                    > USED AT LINE 967
-                    > USED AT LINE 1096
-DSTOP:              81FE DEFINED AT LINE 119
-                    > USED AT LINE 128
-                    > USED AT LINE 1039
-RDROP:              0006 DEFINED AT LINE 130
-                    > USED AT LINE 373
-                    > USED AT LINE 438
-VECS:               0008 DEFINED AT LINE 132
-RPOP:               0008 DEFINED AT LINE 134
-H_TOR:              0014 DEFINED AT LINE 142
-                    > USED AT LINE 756
-RST18:              0018 DEFINED AT LINE 145
-H_FROMR:            001D DEFINED AT LINE 148
-                    > USED AT LINE 758
-NEG16:              0020 DEFINED AT LINE 152
-                    > USED AT LINE 537
-                    > USED AT LINE 541
-                    > USED AT LINE 544
-                    > USED AT LINE 549
-JPHL:               0027 DEFINED AT LINE 159
-                    > USED AT LINE 170
-RST28:              0028 DEFINED AT LINE 161
-PUTC:               0028 DEFINED AT LINE 163
-EXEC:               002B DEFINED AT LINE 170
-                    > USED AT LINE 327
-RST30:              0030 DEFINED AT LINE 174
-VECEND:             0031 DEFINED AT LINE 178
-NEXT0:              0031 DEFINED AT LINE 190
-                    > USED AT LINE 147
-                    > USED AT LINE 213
-                    > USED AT LINE 240
-P5B:                0064 DEFINED AT LINE 215
-                    > USED AT LINE 209
-P3A:                0066 DEFINED AT LINE 216
-                    > USED AT LINE 204
-PUNCT:              0068 DEFINED AT LINE 220
-                    > USED AT LINE 199
-CTL:                0077 DEFINED AT LINE 239
-                    > USED AT LINE 197
-ENDPROG:            007C DEFINED AT LINE 241
-                    > USED AT LINE 868
-                    > USED AT LINE 1050
-H_XOR:              007F DEFINED AT LINE 247
-                    > USED AT LINE 753
-H_OR:               0087 DEFINED AT LINE 256
-                    > USED AT LINE 757
-H_NOT:              008F DEFINED AT LINE 265
-                    > USED AT LINE 759
-H_ALLOC:            0092 DEFINED AT LINE 270
-                    > USED AT LINE 754
-LOWER:              00A0 DEFINED AT LINE 284
-                    > USED AT LINE 211
-UPPER:              00A6 DEFINED AT LINE 292
-                    > USED AT LINE 207
-RPUSHD:             00B0 DEFINED AT LINE 306
-                    > USED AT LINE 143
-                    > USED AT LINE 432
-                    > USED AT LINE 443
-H_GRAVE:            00BF DEFINED AT LINE 326
-                    > USED AT LINE 755
-HX1:                00C5 DEFINED AT LINE 328
-                    > USED AT LINE 342
-HX2:                00DC DEFINED AT LINE 343
-                    > USED AT LINE 334
-H_RET:              00E2 DEFINED AT LINE 358
-                    > USED AT LINE 723
-                    > USED AT LINE 752
-RET2:               00E3 DEFINED AT LINE 359
-                    > USED AT LINE 372
-H_BREAK:            00E7 DEFINED AT LINE 367
-                    > USED AT LINE 724
-                    > USED AT LINE 751
-H_DEF:              00F6 DEFINED AT LINE 380
-                    > USED AT LINE 725
-                    > USED AT LINE 750
-DEF2:               010F DEFINED AT LINE 397
-                    > USED AT LINE 386
-SKIPNX:             0118 DEFINED AT LINE 406
-                    > USED AT LINE 396
-                    > USED AT LINE 428
-H_FETCH:            011C DEFINED AT LINE 409
-                    > USED AT LINE 726
-                    > USED AT LINE 749
-H_OPEN:             0121 DEFINED AT LINE 425
-                    > USED AT LINE 735
-H_CLOSE:            012D DEFINED AT LINE 436
-                    > USED AT LINE 736
-H_SUB:              0139 DEFINED AT LINE 448
-                    > USED AT LINE 740
-H_ADD:              0142 DEFINED AT LINE 453
-                    > USED AT LINE 738
-H_AND:              0145 DEFINED AT LINE 457
-                    > USED AT LINE 733
-H_GT:               014D DEFINED AT LINE 470
-                    > USED AT LINE 747
-H_LT:               014E DEFINED AT LINE 471
-                    > USED AT LINE 745
-H_EQ:               015D DEFINED AT LINE 487
-                    > USED AT LINE 746
-H_MUL:              016A DEFINED AT LINE 502
-                    > USED AT LINE 737
-MUL1:               0171 DEFINED AT LINE 507
-                    > USED AT LINE 521
-MUL2:               017C DEFINED AT LINE 516
-                    > USED AT LINE 514
-H_DIV:              0186 DEFINED AT LINE 528
-                    > USED AT LINE 742
-H_DUP:              01A9 DEFINED AT LINE 556
-                    > USED AT LINE 743
-H_SWAP:             01AB DEFINED AT LINE 559
-                    > USED AT LINE 732
-H_STORE:            01AD DEFINED AT LINE 562
-                    > USED AT LINE 728
-H_CSTORE:           01B7 DEFINED AT LINE 573
-                    > USED AT LINE 741
-H_STR:              01BD DEFINED AT LINE 583
-                    > USED AT LINE 729
-H_PRINT:            01C4 DEFINED AT LINE 592
-                    > USED AT LINE 602
-                    > USED AT LINE 731
-PR1:                01D4 DEFINED AT LINE 601
-                    > USED AT LINE 597
-H_EMIT:             01D8 DEFINED AT LINE 604
-                    > USED AT LINE 734
-H_DROP:             01DA DEFINED AT LINE 606
-                    > USED AT LINE 369
-                    > USED AT LINE 595
-                    > USED AT LINE 744
-H_NUM:              01DB DEFINED AT LINE 609
-                    > USED AT LINE 730
-NUM1:               01E4 DEFINED AT LINE 615
-                    > USED AT LINE 611
-H_CFETCH:           01EA DEFINED AT LINE 621
-                    > USED AT LINE 739
-H_KEY:              01EE DEFINED AT LINE 631
-                    > USED AT LINE 748
-KT1:                01F3 DEFINED AT LINE 634
-                    > USED AT LINE 641
-                    > USED AT LINE 645
-KT2:                01F5 DEFINED AT LINE 635
-                    > USED AT LINE 638
-KT3:                020A DEFINED AT LINE 650
-                    > USED AT LINE 636
-LINE:               020E DEFINED AT LINE 683
-                    > USED AT LINE 633
-LN2:                0219 DEFINED AT LINE 691
-                    > USED AT LINE 692
-                    > USED AT LINE 700
-                    > USED AT LINE 705
-                    > USED AT LINE 709
-LN3:                0232 DEFINED AT LINE 704
-                    > USED AT LINE 707
-LN4:                0236 DEFINED AT LINE 706
-                    > USED AT LINE 696
-LN5:                023E DEFINED AT LINE 710
-                    > USED AT LINE 694
-PGRET:              0000 DEFINED AT LINE 723
-                    > USED AT LINE 727
-PGBRK:              0000 DEFINED AT LINE 724
-                    > USED AT LINE 727
-PGDEF:              0000 DEFINED AT LINE 725
-                    > USED AT LINE 727
-PGFET:              0001 DEFINED AT LINE 726
-                    > USED AT LINE 727
-NPG1:               0016 DEFINED AT LINE 727
-                    > USED AT LINE 223
-PTAB:               0242 DEFINED AT LINE 728
-                    > USED AT LINE 220
-                    > USED AT LINE 222
-                    > USED AT LINE 223
-PTABEND:            0262 DEFINED AT LINE 760
-DIGIT:              0262 DEFINED AT LINE 767
-                    > USED AT LINE 202
-NEGNUM:             0268 DEFINED AT LINE 773
-                    > USED AT LINE 451
-RDNUM:              026E DEFINED AT LINE 780
-                    > USED AT LINE 769
-                    > USED AT LINE 774
-RDN1:               0271 DEFINED AT LINE 781
-                    > USED AT LINE 795
-UDIV:               0285 DEFINED AT LINE 802
-                    > USED AT LINE 542
-                    > USED AT LINE 846
-UDV0:               0299 DEFINED AT LINE 817
-                    > USED AT LINE 806
-UDV1:               029C DEFINED AT LINE 819
-                    > USED AT LINE 839
-UDV2:               02AF DEFINED AT LINE 836
-                    > USED AT LINE 830
-PDEC:               02B7 DEFINED AT LINE 845
-                    > USED AT LINE 616
-                    > USED AT LINE 851
-                    > USED AT LINE 1049
-SKIP:               02C9 DEFINED AT LINE 863
-                    > USED AT LINE 370
-                    > USED AT LINE 406
-SK3:                02CB DEFINED AT LINE 864
-                    > USED AT LINE 872
-                    > USED AT LINE 876
-SK1:                02CC DEFINED AT LINE 865
-                    > USED AT LINE 878
-                    > USED AT LINE 881
-SK4:                02EA DEFINED AT LINE 879
-                    > USED AT LINE 874
-SS0:                02EF DEFINED AT LINE 885
-                    > USED AT LINE 889
-SKIPSTR:            02F0 DEFINED AT LINE 886
-                    > USED AT LINE 586
-                    > USED AT LINE 870
-                    > USED AT LINE 891
-HEXC:               02FD DEFINED AT LINE 897
-                    > USED AT LINE 326
-                    > USED AT LINE 333
-                    > USED AT LINE 341
-HC1:                030E DEFINED AT LINE 906
-                    > USED AT LINE 900
-GETK:               0310 DEFINED AT LINE 919
-                    > USED AT LINE 635
-                    > USED AT LINE 691
-                    > USED AT LINE 977
-CHKSTK:             031D DEFINED AT LINE 959
-                    > USED AT LINE 192
-CHKBRK:             0339 DEFINED AT LINE 977
-                    > USED AT LINE 308
-CHKST:              0346 DEFINED AT LINE 989
+                    > USED AT LINE 117
+                    > USED AT LINE 119
+                    > USED AT LINE 121
+                    > USED AT LINE 123
+                    > USED AT LINE 124
+                    > USED AT LINE 1427
+HEAP:               827C DEFINED AT LINE 114
+                    > USED AT LINE 298
+                    > USED AT LINE 304
+                    > USED AT LINE 1471
+RSP:                8234 DEFINED AT LINE 115
+                    > USED AT LINE 154
+                    > USED AT LINE 159
                     > USED AT LINE 337
-                    > USED AT LINE 345
-                    > USED AT LINE 565
+                    > USED AT LINE 342
+                    > USED AT LINE 1226
+                    > USED AT LINE 1236
+                    > USED AT LINE 1387
+                    > USED AT LINE 1477
+BRKCNT:             8236 DEFINED AT LINE 116
+                    > USED AT LINE 343
+NPEND:              8238 DEFINED AT LINE 117
+                    > USED AT LINE 1140
+                    > USED AT LINE 1474
+KEYBUF:             827A DEFINED AT LINE 119
+                    > USED AT LINE 1046
+                    > USED AT LINE 1069
+                    > USED AT LINE 1075
+BRKOFF:             827B DEFINED AT LINE 121
+                    > USED AT LINE 1053
+LBHDR:              827E DEFINED AT LINE 123
+LINEBUF:            8280 DEFINED AT LINE 124
+                    > USED AT LINE 735
+                    > USED AT LINE 756
+                    > USED AT LINE 1296
+RSTOP:              80E0 DEFINED AT LINE 125
+                    > USED AT LINE 1231
+                    > USED AT LINE 1235
+                    > USED AT LINE 1389
+                    > USED AT LINE 1476
+DSTOP:              81FC DEFINED AT LINE 127
+                    > USED AT LINE 1221
+                    > USED AT LINE 1244
+                    > USED AT LINE 1352
+                    > USED AT LINE 1421
+RDROP:              0006 DEFINED AT LINE 150
+                    > USED AT LINE 396
+                    > USED AT LINE 465
+VECS:               0008 DEFINED AT LINE 152
+RPOP:               0008 DEFINED AT LINE 154
+H_TOR:              0014 DEFINED AT LINE 162
+                    > USED AT LINE 801
+RST18:              0018 DEFINED AT LINE 165
+H_FROMR:            001D DEFINED AT LINE 168
+                    > USED AT LINE 803
+NEG16:              0020 DEFINED AT LINE 172
+                    > USED AT LINE 571
                     > USED AT LINE 575
-CHKHP:              0354 DEFINED AT LINE 1010
-                    > USED AT LINE 275
-E_HEAP:             035B DEFINED AT LINE 1026
-                    > USED AT LINE 1010
-E_STORE:            035E DEFINED AT LINE 1028
-                    > USED AT LINE 992
-                    > USED AT LINE 996
-E_STACK:            0361 DEFINED AT LINE 1030
-                    > USED AT LINE 964
-E_RSTACK:           0364 DEFINED AT LINE 1032
-                    > USED AT LINE 968
+                    > USED AT LINE 578
+                    > USED AT LINE 583
+JPHL:               0027 DEFINED AT LINE 179
+                    > USED AT LINE 190
+RST28:              0028 DEFINED AT LINE 181
+PUTC:               0028 DEFINED AT LINE 183
+EXEC:               002B DEFINED AT LINE 190
+                    > USED AT LINE 357
+RST30:              0030 DEFINED AT LINE 194
+VECEND:             0031 DEFINED AT LINE 198
+NEXT0:              0031 DEFINED AT LINE 210
+                    > USED AT LINE 167
+                    > USED AT LINE 234
+                    > USED AT LINE 266
+P5B:                0067 DEFINED AT LINE 241
+                    > USED AT LINE 229
+P3A:                0069 DEFINED AT LINE 242
+                    > USED AT LINE 224
+PUNCT:              006B DEFINED AT LINE 246
+                    > USED AT LINE 219
+CTL:                007A DEFINED AT LINE 265
+                    > USED AT LINE 217
+ENDPROG:            007F DEFINED AT LINE 267
                     > USED AT LINE 971
-E_BREAK:            0367 DEFINED AT LINE 1034
-                    > USED AT LINE 980
-E_BRACK:            036A DEFINED AT LINE 1036
-                    > USED AT LINE 401
-ERROR:              036C DEFINED AT LINE 1039
-START:              0383 DEFINED AT LINE 1056
-                    > USED AT LINE 129
-FNUL:               0386 DEFINED AT LINE 1090
-                    > USED AT LINE 1093
-IMGEND:             039D DEFINED AT LINE 1112
+                    > USED AT LINE 1393
+H_XOR:              0082 DEFINED AT LINE 273
+                    > USED AT LINE 798
+H_OR:               008A DEFINED AT LINE 282
+                    > USED AT LINE 802
+H_NOT:              0092 DEFINED AT LINE 291
+                    > USED AT LINE 804
+H_ALLOC:            0095 DEFINED AT LINE 297
+                    > USED AT LINE 799
+LOWER:              00A3 DEFINED AT LINE 311
+                    > USED AT LINE 231
+UPPER:              00A9 DEFINED AT LINE 319
+                    > USED AT LINE 227
+RPUSHD:             00B3 DEFINED AT LINE 337
+                    > USED AT LINE 163
+                    > USED AT LINE 459
+                    > USED AT LINE 470
+H_GRAVE:            00C6 DEFINED AT LINE 356
+                    > USED AT LINE 800
+HX1:                00CC DEFINED AT LINE 358
+                    > USED AT LINE 369
+HX2:                00E0 DEFINED AT LINE 370
+                    > USED AT LINE 364
+H_RET:              00E3 DEFINED AT LINE 381
+                    > USED AT LINE 768
+                    > USED AT LINE 797
+RET2:               00E4 DEFINED AT LINE 382
+                    > USED AT LINE 395
+H_BREAK:            00E8 DEFINED AT LINE 390
+                    > USED AT LINE 769
+                    > USED AT LINE 796
+H_DEF:              00F7 DEFINED AT LINE 403
+                    > USED AT LINE 770
+                    > USED AT LINE 795
+DEF2:               0110 DEFINED AT LINE 420
+                    > USED AT LINE 409
+SKIPNX:             0119 DEFINED AT LINE 429
+                    > USED AT LINE 419
+SKIPO:              011A DEFINED AT LINE 433
+                    > USED AT LINE 455
+H_FETCH:            011E DEFINED AT LINE 436
+                    > USED AT LINE 771
+                    > USED AT LINE 794
+H_OPEN:             0123 DEFINED AT LINE 452
+                    > USED AT LINE 780
+H_CLOSE:            012F DEFINED AT LINE 463
+                    > USED AT LINE 781
+H_SUB:              013B DEFINED AT LINE 475
+                    > USED AT LINE 785
+H_ADD:              0144 DEFINED AT LINE 480
+                    > USED AT LINE 783
+H_AND:              0147 DEFINED AT LINE 484
+                    > USED AT LINE 778
+H_GT:               014F DEFINED AT LINE 497
+                    > USED AT LINE 792
+H_LT:               0150 DEFINED AT LINE 498
+                    > USED AT LINE 790
+H_EQ:               015F DEFINED AT LINE 514
+                    > USED AT LINE 791
+H_MUL:              016C DEFINED AT LINE 529
+                    > USED AT LINE 782
+MUL1:               0173 DEFINED AT LINE 534
+                    > USED AT LINE 548
+MUL2:               017E DEFINED AT LINE 543
+                    > USED AT LINE 541
+H_DIV:              0188 DEFINED AT LINE 556
+                    > USED AT LINE 787
+H_DUP:              01B0 DEFINED AT LINE 590
+                    > USED AT LINE 788
+H_SWAP:             01B2 DEFINED AT LINE 593
+                    > USED AT LINE 777
+H_STORE:            01B4 DEFINED AT LINE 598
+                    > USED AT LINE 773
+H_CSTORE:           01BC DEFINED AT LINE 608
+                    > USED AT LINE 786
+H_STR:              01C2 DEFINED AT LINE 619
+                    > USED AT LINE 774
+H_PRINT:            01CD DEFINED AT LINE 649
+                    > USED AT LINE 776
+H_EMIT:             01D3 DEFINED AT LINE 655
+                    > USED AT LINE 779
+H_DROP:             01D5 DEFINED AT LINE 657
+                    > USED AT LINE 392
+                    > USED AT LINE 789
+H_NUM:              01D6 DEFINED AT LINE 660
+                    > USED AT LINE 775
+H_CFETCH:           01DC DEFINED AT LINE 666
+                    > USED AT LINE 784
+H_KEY:              01E0 DEFINED AT LINE 676
+                    > USED AT LINE 793
+KT1:                01E5 DEFINED AT LINE 679
+                    > USED AT LINE 686
+                    > USED AT LINE 690
+KT2:                01E7 DEFINED AT LINE 680
+                    > USED AT LINE 683
+KT3:                01FC DEFINED AT LINE 695
+                    > USED AT LINE 681
+LINE:               0200 DEFINED AT LINE 728
+                    > USED AT LINE 678
+LN2:                020B DEFINED AT LINE 736
+                    > USED AT LINE 737
+                    > USED AT LINE 745
+                    > USED AT LINE 750
+                    > USED AT LINE 754
+LN3:                0224 DEFINED AT LINE 749
+                    > USED AT LINE 752
+LN4:                0228 DEFINED AT LINE 751
+                    > USED AT LINE 741
+LN5:                0230 DEFINED AT LINE 755
+                    > USED AT LINE 739
+PGRET:              0000 DEFINED AT LINE 768
+                    > USED AT LINE 772
+PGBRK:              0000 DEFINED AT LINE 769
+                    > USED AT LINE 772
+PGDEF:              0000 DEFINED AT LINE 770
+                    > USED AT LINE 772
+PGFET:              0001 DEFINED AT LINE 771
+                    > USED AT LINE 772
+NPG1:               0016 DEFINED AT LINE 772
+                    > USED AT LINE 249
+PTAB:               0234 DEFINED AT LINE 773
+                    > USED AT LINE 246
+                    > USED AT LINE 248
+                    > USED AT LINE 249
+PTABEND:            0254 DEFINED AT LINE 805
+DIGIT:              0254 DEFINED AT LINE 812
+                    > USED AT LINE 222
+NEGNUM:             025A DEFINED AT LINE 818
+                    > USED AT LINE 478
+RDNUM:              0260 DEFINED AT LINE 825
+                    > USED AT LINE 814
+                    > USED AT LINE 819
+RDN1:               0263 DEFINED AT LINE 826
+                    > USED AT LINE 840
+UDIV:               0277 DEFINED AT LINE 847
+                    > USED AT LINE 576
+                    > USED AT LINE 898
+UDV0:               028B DEFINED AT LINE 862
+                    > USED AT LINE 851
+UDV1:               028E DEFINED AT LINE 864
+                    > USED AT LINE 884
+UDV2:               02A1 DEFINED AT LINE 881
+                    > USED AT LINE 875
+PSGN:               02A9 DEFINED AT LINE 889
+                    > USED AT LINE 661
+                    > USED AT LINE 1381
+PDEC:               02B2 DEFINED AT LINE 897
+                    > USED AT LINE 891
+                    > USED AT LINE 903
+                    > USED AT LINE 1320
+                    > USED AT LINE 1328
+                    > USED AT LINE 1403
+SKIP:               02C4 DEFINED AT LINE 921
+                    > USED AT LINE 393
+                    > USED AT LINE 433
+SK3:                02CB DEFINED AT LINE 930
+                    > USED AT LINE 945
+                    > USED AT LINE 949
+SK1:                02CC DEFINED AT LINE 931
+                    > USED AT LINE 951
+                    > USED AT LINE 958
+SK4:                02EA DEFINED AT LINE 952
+                    > USED AT LINE 947
+SK6:                02FC DEFINED AT LINE 969
+                    > USED AT LINE 939
+SK7:                0303 DEFINED AT LINE 973
+                    > USED AT LINE 968
+SKIPSTR:            0308 DEFINED AT LINE 992
+                    > USED AT LINE 622
+                    > USED AT LINE 943
+                    > USED AT LINE 999
+                    > USED AT LINE 1004
+HEXC:               031B DEFINED AT LINE 1010
+                    > USED AT LINE 356
+                    > USED AT LINE 363
+                    > USED AT LINE 368
+HC1:                032C DEFINED AT LINE 1019
+                    > USED AT LINE 1013
+RAWK:               FF06 DEFINED AT LINE 1041
+                    > USED AT LINE 1044
+                    > USED AT LINE 1058
+                    > USED AT LINE 1081
+POLLK:              032E DEFINED AT LINE 1044
+                    > USED AT LINE 346
+PK1:                0335 DEFINED AT LINE 1047
+                    > USED AT LINE 1083
+CTLC:               0338 DEFINED AT LINE 1053
+CT1:                0343 DEFINED AT LINE 1058
+                    > USED AT LINE 1063
+CT2:                034F DEFINED AT LINE 1064
+                    > USED AT LINE 1059
+CT3:                035C DEFINED AT LINE 1070
+                    > USED AT LINE 1068
+GETK:               0360 DEFINED AT LINE 1074
+                    > USED AT LINE 680
+                    > USED AT LINE 736
+BRK:                0395 DEFINED AT LINE 1088
+                    > USED AT LINE 1055
+                    > USED AT LINE 1066
+CHKHP:              0371 DEFINED AT LINE 1114
+                    > USED AT LINE 302
+E_HEAP:             0380 DEFINED AT LINE 1145
+                    > USED AT LINE 1135
+CHKST:              0387 DEFINED AT LINE 1157
+                    > USED AT LINE 600
+                    > USED AT LINE 610
+E_STORE:            0392 DEFINED AT LINE 1178
+                    > USED AT LINE 1161
+E_BREAK:            0395 DEFINED AT LINE 1180
+                    > USED AT LINE 1088
+PRSTR:              039A DEFINED AT LINE 1185
+                    > USED AT LINE 650
+                    > USED AT LINE 1197
+                    > USED AT LINE 1210
+PRS1:               03AC DEFINED AT LINE 1196
+                    > USED AT LINE 1192
+E_DOLLAR:           03B0 DEFINED AT LINE 1198
+                    > USED AT LINE 1190
+PNL:                03B7 DEFINED AT LINE 1205
+                    > USED AT LINE 1286
+                    > USED AT LINE 1329
+                    > USED AT LINE 1350
+                    > USED AT LINE 1385
+                    > USED AT LINE 1391
+PMSG:               03BD DEFINED AT LINE 1209
+                    > USED AT LINE 1290
+                    > USED AT LINE 1362
+CHKSTK:             03C3 DEFINED AT LINE 1220
+                    > USED AT LINE 212
+E_RUNDER:           03E0 DEFINED AT LINE 1235
+                    > USED AT LINE 1232
+E_ROVER:            03E9 DEFINED AT LINE 1239
+                    > USED AT LINE 1229
+E_OVER:             03EC DEFINED AT LINE 1241
+                    > USED AT LINE 1225
+E_UNDER:            03F2 DEFINED AT LINE 1244
+                    > USED AT LINE 1223
+E_HI:               03FA DEFINED AT LINE 1252
+                    > USED AT LINE 235
+E_QUOTE:            0409 DEFINED AT LINE 1264
+                    > USED AT LINE 625
+E_RESV:             040E DEFINED AT LINE 1268
+                    > USED AT LINE 1254
+E_ZERO:             0411 DEFINED AT LINE 1270
+                    > USED AT LINE 560
+E_BRACK:            0414 DEFINED AT LINE 1272
+                    > USED AT LINE 424
+ERRP:               0417 DEFINED AT LINE 1275
+                    > USED AT LINE 974
+                    > USED AT LINE 1148
+                    > USED AT LINE 1181
+                    > USED AT LINE 1243
+ERROR:              0418 DEFINED AT LINE 1284
+                    > USED AT LINE 1201
+                    > USED AT LINE 1246
+                    > USED AT LINE 1261
+ER1:                043A DEFINED AT LINE 1303
+                    > USED AT LINE 1315
+ER2:                043C DEFINED AT LINE 1305
+                    > USED AT LINE 1313
+ER2X:               044E DEFINED AT LINE 1316
+                    > USED AT LINE 1309
+ER3:                044F DEFINED AT LINE 1317
+                    > USED AT LINE 1300
+ER4:                0469 DEFINED AT LINE 1333
+                    > USED AT LINE 1349
+ER5:                047E DEFINED AT LINE 1350
+                    > USED AT LINE 1336
+                    > USED AT LINE 1338
+                    > USED AT LINE 1340
+ER6:                04A2 DEFINED AT LINE 1365
+                    > USED AT LINE 1361
+ER7:                04A8 DEFINED AT LINE 1370
+                    > USED AT LINE 1384
+ER8:                04BE DEFINED AT LINE 1385
+                    > USED AT LINE 1371
+PHALF:              04D7 DEFINED AT LINE 1395
+                    > USED AT LINE 1390
+PHAL2:              04DA DEFINED AT LINE 1396
+                    > USED AT LINE 1356
+SUB16:              04E6 DEFINED AT LINE 1407
+                    > USED AT LINE 1326
+                    > USED AT LINE 1395
+START:              04ED DEFINED AT LINE 1419
+                    > USED AT LINE 143
+INI1:               04F4 DEFINED AT LINE 1429
+                    > USED AT LINE 1431
+FNUL:               04FC DEFINED AT LINE 1466
+                    > USED AT LINE 1469
+IMGEND:             0513 DEFINED AT LINE 1498

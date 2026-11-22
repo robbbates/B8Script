@@ -25,6 +25,7 @@ B8Script is a postfix stack language for 64 KB 8-bit computers. Every instructio
 - [Appendix D: 6809](#appendix-d-6809)
 - [Appendix E: B8SIC](#appendix-e-b8sic)
 - [Appendix F: the B8Script TTL computer](#appendix-f-the-b8script-ttl-computer)
+- [Appendix G: Windows (32-bit x86)](#appendix-g-windows-32-bit-x86)
 
 ## Execution model
 
@@ -919,17 +920,20 @@ q@0=)
 
 ## Appendix A: Z80
 
-Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`. Values marked *TBD* are assigned when the interpreters are brought up to this spec.
+Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`.
 
 **Builds**
 
-| Build | File | Notes |
-|---|---|---|
-| Generic ROM | `b8s-z80-rom-0000.bin` | Starts at 0000h (reset); owns page zero |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` |  |
-| CP/M runner | `B8SZ80.COM` | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` |  |
-| With the line editor | `-editor-` images, `B8SZ80E.COM`, `B8SZ80EC.COM` | See the interpreters README |
+| Build | File | Bytes | Notes |
+|---|---|---|---|
+| Generic ROM | `b8s-z80-rom-0000.bin` | 765 | Starts at 0000h (reset); owns page zero |
+| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,163 |  |
+| CP/M runner | `B8SZ80.COM` | 831 | `B8SZ80 PROG.B8S` |
+| CP/M runner, checked | `B8SZ80C.COM` | 1,243 |  |
+| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,488 | The suggested standard under [Environments](#environments); see the interpreters README |
+| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,796 |  |
+| CP/M with the line editor | `B8SZ80E.COM` | 1,663 | `B8SZ80E PROG.B8S`, or with no file |
+| The same, checked | `B8SZ80EC.COM` | 1,987 |  |
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), HL' is the return-stack pointer. A and DE are scratch.
 
@@ -944,19 +948,22 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 | Program text (`PROG`) | 8300h | 33536 | −32000 |
 | Heap limit (default `HEAPLIM`) | F000h | 61440 | −4096 |
 | Heap pointer cell | 827Ch | 33404 | −32132 |
-| Break-off cell | *TBD* |  |  |
+| Break-off cell | 827Bh | 33403 | −32133 |
+| Held key | 827Ah | 33402 | −32134 |
 
-Under CP/M the pages sit after the image and the heap limit is the BDOS.
+Under CP/M the pages sit after the image and the heap limit is the BDOS. The break-off cell is still at offset 7Bh of the letter page, which is the page below the program text: 077Bh (1915) in `B8SZ80.COM`, 087Bh (2171) in `B8SZ80C.COM`, 0A7Bh (2683) in `B8SZ80E.COM` and 0B7Bh (2939) in `B8SZ80EC.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
 
-**Console interface (generic build).** `KEY` returns a waiting key in A, or A = 0 if none is waiting, with the zero flag matching A. `CONOUT` prints A. Both must keep BC, DE, HL and HL'. `EXIT` is jumped to when the program ends. `MSLOOP` sets the loop passes per millisecond for `n?`.
+**The break key.** The keyboard is looked at on every word call, block entry, true `)` and `{`, one time in 256. A program that stores a non-zero byte in the break-off cell gets Ctrl-C as key 3; two within about 250 ms still stop it. An unchecked build prints nothing when it is stopped.
+
+**Console interface (generic build).** `KEY` returns a waiting key in A, or A = 0 if none is waiting, with the zero flag matching A. `CONOUT` prints A. Both must keep BC, DE, HL and HL'. `EXIT` is jumped to when the program ends; in a build with the editor a program that ends goes back to the editor, and `LEAVE` is where ^X goes. `MSLOOP` sets the loop passes per millisecond for `n?`. `KEY` is also called while a program runs, for the break key, so it must not wait.
 
 **Machine-code contract.** Entered by CALL, with the return address on top of the stack and the data cells above it. The code must keep BC and must leave 0008h–0033h intact (all of page zero on a generic build). A, DE, HL, IX, IY and the alternate registers may change; the interpreter saves HL' itself. It returns with RET (C9h), which the loader writes. On return, the cell on top of the stack becomes the new TOS. `RST 28h` prints the character in A and keeps BC, DE, HL and HL', on every Z80 build.
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`. Builds: `b8s-8080-rom-0000.bin`, `b8s-8080-rom-checked-0000.bin`, `B8S8080.COM`, `B8S8080C.COM`.
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`. Builds: `b8s-8080-rom-0000.bin` (854 bytes), `b8s-8080-rom-checked-0000.bin` (1,299), `B8S8080.COM` (904), `B8S8080C.COM` (1,364).
 
-The memory map, console interface and contract are the Z80's, with these differences: there are no alternate registers, and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
+The memory map, the break key, the console interface and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 077Bh in `B8S8080.COM` and 097Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
 
 ## Appendix C: 6502
 
@@ -964,13 +971,17 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
+| Bytes (unchecked, checked) | 1,175 and 1,706 | 1,095 and 1,628 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
-| Return stack | Page 1 (the hardware stack), about 100 entries | Same |
+| Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |
 | Program text | $0500 | $0500 |
 | Heap limit (default) | E000h (57344, −8192) | Same |
 | Heap pointer cell | $047C | $047C |
-| Break-off cell | *TBD* | *TBD* |
+| Break-off cell | $047B (1147, the same signed) | Same |
+| Held key | $07 in zero page (unchecked), $047A (1146) (checked) | $047A (1146) |
+
+**The break key.** The keyboard is looked at on every word call, block entry and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
 
 **Machine-code contract.** Entered as a subroutine (`JMP (T0)`, with a return address on the stack), ending in RTS (60h, written by the loader). The address has been dropped. The code must keep the reading position at $00/$01 and leave the hardware stack balanced.
 
@@ -979,16 +990,20 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 ## Appendix D: 6809
 
-Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switch: `CHECKED`. The image starts at F000h; point the reset vector at label `start` (F003h unchecked, F037h checked).
+Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switch: `CHECKED`. Builds: `b8s-6809-rom-F000.bin` (825 bytes), `b8s-6809-rom-checked-F000.bin` (1,220). The image starts at F000h, with label `start`: point the reset vector at it.
 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|
-| Return stack (S, 127 entries) | 8000h page | 32768 | −32768 |
-| Data stack (U, 127 cells) | 8100h page | 33024 | −32512 |
+| Return stack (S, 127 entries; 112 in the checked build) | 8000h page | 32768 | −32768 |
+| Data stack (U, 127 cells; 126 in the checked build) | 8100h page | 33024 | −32512 |
 | Letter page (DP) | 8200h | 33280 | −32256 |
 | Program text | 8300h | 33536 | −32000 |
 | Heap limit (default) | F000h | 61440 | −4096 |
-| Break-off cell | *TBD* |  |  |
+| Heap pointer cell (little-endian) | 827Ch | 33404 | −32132 |
+| Break-off cell | 827Bh | 33403 | −32133 |
+| Held key | 8234h | 33332 | −32204 |
+
+**The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. The unchecked build prints nothing when it is stopped.
 
 **Machine-code contract.** Entered by a jump, with the dispatcher's return address on S, so the code ends in RTS (39h, written by the loader). U points at the top data cell, which becomes TOS on return. Cells on the data stack are big-endian (6809 order); cells in memory stay little-endian, as the spec says. The code may change A, B, X, CC and U (consistently). It must keep Y (the reading position) and DP, and leave S balanced.
 
@@ -999,5 +1014,39 @@ B8SIC was built with B8Script in mind: its microcode reads, sorts and dispatches
 ## Appendix F: the B8Script TTL computer
 
 Also built with B8Script in mind. On this machine the hex loader's RET byte is `]`. This appendix is to come.
+
+## Appendix G: Windows (32-bit x86)
+
+Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`, `EDITOR`. These programs run in the Windows command shell; a program is a file named on the command line. They are tested in an emulator and have not yet been run on Windows itself.
+
+**Builds**
+
+| Build | File | Bytes | Notes |
+|---|---|---|---|
+| Runner | `B8SWIN.EXE` | 2,048 | `B8SWIN PROG.B8S` |
+| Runner, checked | `B8SWINC.EXE` | 2,560 |  |
+| With the line editor | `B8SWINE.EXE` | 3,072 | `B8SWINE PROG.B8S`, or with no file. The suggested standard under [Environments](#environments) |
+| The same, checked | `B8SWINEC.EXE` | 3,584 |  |
+
+**Memory map.** The machine is the 64 KB one of this spec, held in the last 64 KB of the program's image (at 00410000h). A B8Script address is an offset into it.
+
+| Item | Hex | Unsigned | Signed |
+|---|---|---|---|
+| Unused, all zero (undefined words point here) | 0000h | 0 | 0 |
+| Letter page: A–Z at +00h, a–z at +40h | 0100h | 256 | 256 |
+| Held key | 017Ah | 378 | 378 |
+| Break-off cell | 017Bh | 379 | 379 |
+| Heap pointer cell | 017Ch | 380 | 380 |
+| -n? line buffer (127 characters and CR) | 0180h | 384 | 384 |
+| Program text | 0200h | 512 | 512 |
+| Heap limit | FF00h | 65280 | −256 |
+
+The stacks are outside the 64 KB. The data stack is the program's own Windows stack, one 32-bit slot per cell: 127 cells in a checked build, as much as Windows gives (1 MB) in an unchecked one. The return stack holds 112 entries in a checked build. Memory starts as zeros in every build.
+
+**Console.** Output goes to standard output, and a checked build's report to standard error. Keys come from the console unechoed, Ctrl-C among them; when input is redirected, bytes are read from it instead, by `?`, `-n?` and the editor only. `-n?` is the plain line read of the generic builds.
+
+**The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
+
+**Machine-code contract.** The code is 32-bit x86, entered by CALL: the return address is on top of the stack, and the data cells are above it, one 32-bit slot each with the cell in the low 16 bits. EBX holds the code's own address (00410000h plus its B8Script address). The code may change EAX, EBX, ECX, EDX and the flags, and may push and pop. It must keep ESI, EDI and EBP, and leave the direction flag clear. It returns with RET (C3h), which the loader writes; the slot then on top of the stack becomes the new TOS. Only the low 16 bits of a slot count: the interpreter sets the rest itself after the call.
 
 [↑ Back to top](#b8script-spec)

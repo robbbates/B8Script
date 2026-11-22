@@ -16,14 +16,28 @@ minimum-size B8Script interpreters:
   (all), EDITOR EQU 0/1 (Z80: a built-in line editor). 6502/ holds a
   second, smaller interpreter, b8s-6502-zp.asm, with its data stack in
   zero page.
-- README.md covers sizes, the language where it differs from the old spec,
-  memory maps, the console interface (KEY/CONOUT/EXIT), the checked builds'
-  error letters, the machine-code contracts and the layout rules.
+- The language is in ../docs/b8script.md, which the builds follow; its
+  appendices hold each CPU's memory map and system addresses.
+- win32/ holds a 32-bit x86 interpreter for the Windows command shell,
+  b8s-win32.asm (NASM; switches CHECKED and EDITOR). It writes its own
+  .EXE header. It is tested in an emulator only.
+- README.md covers sizes, what the spec leaves to the builds, the console
+  interface (KEY/CONOUT/EXIT), the break key, the line editor, the checked
+  builds' errors and report, the machine-code contracts and the layout
+  rules.
 - testing/ holds the build script, the reference interpreter, the test
   suite, emulator harnesses for every CPU and the layout checkers;
   testing/README.md shows how to run them.
 
 Read README.md and testing/README.md first. Things that are easy to break:
+- A checked build's report is compared byte for byte with testing/ref.py,
+  stack lines included. Most errors must show the stacks as they were
+  before the failing character, so test before you pop.
+- The break key: getk and the poll must be called straight from a handler
+  (the checked report counts on the stack depth), and the Z80 and 8080
+  need TOS in HL there.
+- The Z80 editor tests model the editor key for key, echo included: change
+  testing/test_editor.py together with the editor.
 - Z80, 8080, the unchecked 6809 and the zero-page 6502 use a one-byte
   dispatch table, which puts rules on where handlers sit. Run
   testing/chktab.py, chktab09.py and chktab6502.py on the listings after
@@ -59,16 +73,33 @@ bytes, one CPU at a time. Ideas not yet tried:
   but this interpreter's handlers lean on each other more (falling into
   each other, sharing `fin`), and the jumps needed to split them into
   three groups leave only about 11 bytes of the 32.
-- 6502, b8s-6502-zp.asm: 1015 bytes. Its page layout has 32 and 31 bytes
-  to spare in the second and third pages (16 in the checked build).
+- 6502, b8s-6502-zp.asm: 1095 bytes. Its page layout has 68, 66 and 41
+  bytes to spare in its three pages (46, 69 and 25 in the checked build,
+  whose inner loop and skipper live after the third page).
 - 6809, checked: it keeps a whole-address table because its code is bigger
-  than the two ranges of the one-byte scheme. A third range, or moving the
-  checked-only routines, might get it back.
+  than the two ranges of the one-byte scheme (its handlers need about 550
+  bytes). A three-range split was worked out on paper: it would save 13
+  to 20 bytes, but needs a handler order the unchecked build can't share.
 - Z80/8080: the first 256 bytes are packed by hand around the RST vectors.
-- Z80 with EDITOR = 1: 877 bytes, 183 of them the editor (four builds:
-  with or without CPM and CHECKED). It has no prompt and prints nothing
-  after a program ends; the CP/M builds load a file but can't save one;
-  a checked build's error gives a byte offset, not a line number.
+- Z80 with EDITOR = 1: 1488 bytes, 723 of them the editor (four builds:
+  with or without CPM and CHECKED). It was written for the spec's
+  suggested standard and has had one light size pass. What is left needs
+  a decision or a redesign: the key dispatch (seven compares and a
+  27-byte table: a chain of SUB and JR would be about 10 bytes smaller if
+  every unknown control key may drop the line), ^V (about 170 bytes in an
+  unchecked build, since it brings in the stack listing), the paste's
+  care with LF-only text (about 14 bytes), the CP/M file code (about
+  135 bytes).
+- Every checked build: the report (about 200 bytes on the Z80, 300 on the
+  6502) was written once and not squeezed. The line and column count is
+  the biggest part of it.
+- Every build: the break-off cell and its 250 ms wait for a second Ctrl-C
+  is about 30 bytes.
+- Windows: a file only shrinks in steps of 512 bytes. The four builds are
+  1506, 2032, 2538 and 2968 bytes past their headers, so the next steps
+  down are 482, 496, 490 and 408 bytes away: not in reach by trimming.
+  What matters there is not to grow past the 30, 16, 22 and 104 bytes
+  each has to spare.
 
 Report a table of bytes before and after for every variant, the techniques
 that paid off, and the ones you tried that didn't.

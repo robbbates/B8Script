@@ -1,6 +1,7 @@
 import sys, os, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness_6502 import Run
+from harness_z80 import symbols
 import tests
 from run_tests import check
 
@@ -29,10 +30,16 @@ for hexf in sorted(glob.glob(d + '/*.hex')):
     base = hexf[:-4]
     checked = base.endswith('-chk')
     tests.MC['6502'] = MC['-zp' in os.path.basename(base)]
-    def runner(p, i, brk=None, base=base):
-        r = Run(base + '.hex', base + '.lst', p, i, brk_at=brk)
+    def runner(p, i, timed=None, base=base):
+        r = Run(base + '.hex', base + '.lst', p, i, timed=timed or ())
         o = r.run()
+        runner.last = r
         return o, r.ended
+    # the build's own addresses, so that ref.py can reproduce a checked
+    # build's report exactly (places, the heap limit, addresses on the stack)
+    sy = symbols(base + '.lst')
+    plat = dict(prog_at=sy['PROG'], let=sy['LET'], linebuf=sy['LINEBUF'],
+                heaplim=sy['HEAPLIM'] << 8)
     total += check(runner, os.path.basename(base), '6502', False, checked, 0x60,
-                   games=games, verbose=verbose)
+                   games=games, verbose=verbose, plat=plat)
 sys.exit(1 if total else 0)

@@ -1,9 +1,13 @@
-"""Reference B8Script interpreter (spec of 2026-10-09 plus the 2026-11-20 changes,
-including '/' as the string escape).
+"""Reference B8Script interpreter, written from docs/b8script.md (2026-11-21).
 
 Used only to produce expected output for the test suite. It models memory, the
-letter cells (packed layout: A at LET, a at LET+64, heap pointer at z+10), the
-line buffer, and console input as a byte queue.
+letter cells (packed layout: A at LET, a at LET+64), the heap pointer (a cell
+of the interpreter's own, in the letter page), the line buffer, and console
+input as a byte queue.
+
+With checked=True it behaves as a checked build: variables start at 0, words
+start undefined, and every error in the spec's table stops the program with
+the four-line report (see report() for what the stack lines show).
 """
 import sys
 
@@ -14,10 +18,26 @@ class NeedKey(Exception):
     """0? (or a line read) found no more scripted input: the test ends here."""
 
 
+class Err(Exception):
+    """A checked build's error: the letter and the address of the place."""
+    def __init__(self, code, place):
+        self.code, self.place = code, place
+
+
+DS_MAX, RS_MAX = 250, 120      # only so that a runaway test ends: the real
+                               # sizes differ from build to build
+
+
 class Ref:
     def __init__(self, prog, inp=b'', prog_at=0x9000, let=0x8000, linebuf=0x8100,
-                 heaplim=0xE000, retbyte=0xC9, cpm=False):
+                 heaplim=0xE000, retbyte=0xC9, cpm=False, checked=False, filepad=None):
         self.m = bytearray(65536)
+        if cpm if filepad is None else filepad:
+            # the program is a CP/M file: its last record is padded with ^Z,
+            # and the NUL goes after the last record (control characters are
+            # ignored, so only the heap's first address and a report's text
+            # line can show it)
+            prog = prog + b'\x1a' * (-len(prog) % 128)
         self.m[prog_at:prog_at + len(prog)] = prog
         self.m[prog_at + len(prog)] = 0
         self.ip = prog_at
@@ -27,8 +47,12 @@ class Ref:
         self.heaplim = heaplim
         self.retbyte = retbyte
         self.cpm = cpm
-        self.heapcell = let + 2 * (ord('z') - 0x41) + 10
-        self.w(self.heapcell, prog_at + len(prog) + 1)
+        self.checked = checked
+        self.heapcell = let + 0x7C
+        self.progend = prog_at + len(prog) + 1      # the first byte after the NUL
+        self.w(self.heapcell, self.progend)
+        self.undef = set(range(0x41, 0x5B)) if checked else set()
+        self.at = prog_at                           # where the character being run is
         self.ds = []
         self.rs = []
         self.inp = list(inp)
@@ -65,29 +89,40 @@ class Ref:
         self.out.append(c & 0xFF)
 
     def skip_string(self):
+        """Step past the closing quote. False if the text ran out first."""
         while True:
             c = self.ch()
-            if c == 0:
-                raise StopIteration
             if c == ord('/'):
-                self.ch()
-            elif c == ord('"'):
-                return
+                c = self.ch()
+                if c:
+                    continue
+            if c == 0:
+                return False
+            if c == ord('"'):
+                return True
 
-    def skip(self):
+    def skip(self, opener):
         """Skip to the closer at this level; return it. Brackets of both kinds
-        count together; strings are stepped over whole."""
+        count together; strings are stepped over whole. opener is the
+        character that started the skip: a ( must end at ) and a [ at ], and
+        neither may run into the NUL (N, reported at the opener). A \\ takes
+        either closer, and with none the program ends."""
         d = 0
+        at = self.at
         while True:
             c = self.ch()
+            if c == ord('"') and not self.skip_string():
+                c = 0
             if c == 0:
-                raise StopIteration
-            if c == ord('"'):
-                self.skip_string()
+                if opener == ord('\\') or not self.checked:
+                    raise StopIteration
+                raise Err('N', at)
             elif c in b'([':
                 d += 1
             elif c in b')]':
                 if d == 0:
+                    if self.checked and chr(opener) + chr(c) in ('(]', '[)'):
+                        raise Err('N', at)
                     return c
                 d -= 1
 
@@ -135,18 +170,82 @@ class Ref:
     def pnum(self, v):
         self.out += str(self.s(v)).encode()
 
+    def linecol(self, place):
+        """The line and column of an address, both from 1. Anything below the
+        program text is taken to be in the line buffer: line 0."""
+        if place < self.prog_at:
+            return 0, ((place - self.lb) & 0xFFFF) + 1
+        start = self.prog_at
+        line = 1
+        for a in range(self.prog_at, place):
+            if self.m[a] == 10:
+                line += 1
+                start = a + 1
+        return line, place - start + 1
+
+    def report(self, code, place):
+        """The error report. The stack lines show the stacks as they were
+        before the failing character ran. Three kinds of error can't do that:
+        a stack overrun (S s R r) is found after the character has run; an N
+        or a Q from an unclosed string is found after the opener took its
+        flag or pushed its address; and a break comes when it comes."""
+        o = self.out
+        line, col = self.linecol(place)
+        o += b'\r\nErr %c @ %d,%d\r\n' % (ord(code), line, col)
+        for a in range(place, place + 16):
+            if self.m[a & 0xFFFF] in (0, 10, 13) or (self.cpm and self.m[a & 0xFFFF] == 26):
+                break
+            o.append(self.m[a & 0xFFFF])
+        o += b'\r\nStk %d:' % len(self.ds)
+        if len(self.ds) > 8:
+            o += b' ...'
+        for v in self.ds[-8:]:
+            o += b' %d' % self.s(v)
+        o += b'\r\nRtn %d\r\n' % len(self.rs)
+
     def run(self, maxsteps=5_000_000):
+        self.error = None
         try:
             for _ in range(maxsteps):
-                self.step()
+                self.at = self.ip
+                try:
+                    self.step()
+                    if self.checked and len(self.ds) > DS_MAX:
+                        raise Err('S', self.at)
+                    if self.checked and len(self.rs) > RS_MAX:
+                        raise Err('R', self.at)
+                except IndexError:          # a pop from an empty stack
+                    if not self.checked:
+                        raise
+                    if self.under == 's':
+                        self.ds = []
+                    else:
+                        self.rs = []
+                    raise Err(self.under, self.at)
         except (StopIteration, NeedKey):
             pass
+        except Err as e:
+            self.error = e.code
+            self.report(e.code, e.place)
         return bytes(self.out)
 
+    def rpop(self):
+        self.under = 'r'
+        v = self.rs.pop()
+        self.under = 's'
+        return v
+
+    def store_ok(self, a, n):
+        """May ! or . write n bytes at a? Only inside the program's space."""
+        return not self.checked or (self.let <= a and a + n <= self.heaplim)
+
     def step(self):
+        self.under = 's'
         c = self.ch()
         if c == 0:
             raise StopIteration
+        if c >= 128 and self.checked:
+            raise Err('X', self.at)
         if c <= 32 or c >= 127:
             return
         C = chr(c)
@@ -163,6 +262,8 @@ class Ref:
             self.push(-v if neg else v)
             return
         if 'A' <= C <= 'Z':
+            if c in self.undef:
+                raise Err('U', self.at)
             self.rs.append(self.ip)
             self.ip = self.r(self.cell(c))
             return
@@ -177,6 +278,8 @@ class Ref:
         elif C == '*':
             b = p(); a = p(); P(a * b)
         elif C == '/':
+            if self.checked and len(self.ds) > 1 and self.ds[-1] == 0:
+                raise Err('Z', self.at)
             b = self.s(p()); a = self.s(p())
             if b == 0:
                 q, r = 0, a     # undefined in the interpreters: tests must not rely on it
@@ -206,58 +309,75 @@ class Ref:
         elif C == '{':
             self.rs.append(p())
         elif C == '}':
-            P(self.rs.pop())
+            P(self.rpop())
         elif C == '@':
             P(self.r(p()))
         elif C == '!':
+            if len(self.ds) > 1 and not self.store_ok(self.ds[-1], 2):
+                raise Err('O', self.at)
             a = p(); v = p(); self.w(a, v)
         elif C == ',':
             P(self.m[p()])
         elif C == '.':
+            if len(self.ds) > 1 and not self.store_ok(self.ds[-1], 1):
+                raise Err('O', self.at)
             a = p(); v = p(); self.m[a] = v & 0xFF
         elif C == '_':
-            n = p(); h = self.r(self.heapcell)
+            # the count is signed: a negative one releases
+            h = self.r(self.heapcell)
+            if self.checked and self.ds and not self.progend <= h + self.s(self.ds[-1]) < self.heaplim:
+                raise Err('H', self.at)
+            n = p()
             P(h); self.w(self.heapcell, h + n)
         elif C == '(':
             if p():
                 self.rs.append(self.ip)
             else:
-                self.skip()
+                self.skip(c)
         elif C == ')':
             if p():
+                self.under = 'r'
                 self.ip = self.rs[-1]
             else:
-                self.rs.pop()
+                self.rpop()
         elif C == '\\':
             if p():
-                k = self.skip()
+                k = self.skip(c)
                 if k == ord(')'):
-                    self.rs.pop()
+                    self.rpop()
                 else:
-                    self.ip = self.rs.pop()
+                    self.ip = self.rpop()
         elif C == '[':
             n = self.ch()
             if (n | 0x20) in range(0x61, 0x7B):     # an ASCII letter
                 self.w(self.cell(n), self.ip)
+                self.undef.discard(n)
+            elif n != 32 and self.checked:
+                raise Err('W', self.ip - 1)         # the place is the bad character
             else:
                 P(self.ip)
-            self.skip()
+            self.skip(c)
         elif C == ']':
-            self.ip = self.rs.pop()
+            self.ip = self.rpop()
         elif C == '"':
             P(self.ip)
-            self.skip_string()
+            if not self.skip_string():
+                if self.checked:
+                    raise Err('Q', self.at)
+                raise StopIteration
         elif C == '$':
-            a = p()
+            a = self.ds[-1]
             while True:
                 c = self.m[a]; a += 1
                 if c == ord('"'):
                     break
                 if c == ord('/'):
                     c = self.m[a]; a += 1
-                    if c >= 0x40:
-                        c &= 0xBF
+                    c &= 0xBF                       # the escape: clear bit 6
+                elif c == 0 and self.checked:
+                    raise Err('Q', self.at)
                 self.emit(c)
+            p()
         elif C == "'":
             self.emit(p())
         elif C == '#':

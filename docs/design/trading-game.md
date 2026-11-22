@@ -10,6 +10,7 @@ The game has to stay easy to write, read and test. These rules are part of the d
 
 - **A feature earns its place in the loop.** If it doesn't change what the player decides to do next, it waits for a later version.
 - **One screen layout.** Every view fits the same panels; no special screens beyond the market, the chart and combat.
+- **Easy numbers.** Pick quantities and methods that keep the maths simple in 16-bit cells (no multiply past 32,767, halving rather than odd divisions where it can be) and that pack neatly into the save code's printable characters (a value that fits 6 bits fits one character).
 - **Generate, don't store.** The galaxy, its names and its prices come from the seed and the day. Only the player's own state is kept and saved.
 - **Budgets.** The stripped `.B8S` at most 12 KB, and heap data at most 4 KB. If a feature doesn't fit, something else goes, or it waits.
 - **Version 1 is the list under [Version 1](#version-1).** Everything under [Later](#later) stays out until version 1 plays well.
@@ -51,8 +52,37 @@ Each part says what is decided and what is left to detail.
 
 ### Economy
 
-- **Decided:** a base price for each good, adjusted by the system's type; each system holds a stock of each good that trading drains and each day refills.
-- **To detail:** the goods list (about 8, two of them contraband); how far price moves with stock; how fast stock recovers; how much randomness; buy and sell prices (the spread); money beyond 32,767, kept in two cells as `G2048.TXT` keeps its score.
+Decided (Nov 22).
+
+**Goods.** Eight, one bit each where a set of goods is kept. Base prices in credits per tonne:
+
+| Good | Base | | Good | Base |
+|---|---|---|---|---|
+| Food | 10 | | Medicine | 80 |
+| Textiles | 20 | | Luxuries | 150 |
+| Ore | 30 | | Narcotics (contraband) | 120 |
+| Machinery | 60 | | Weapons (contraband) | 140 |
+
+**System types.** Four. A type produces some goods (plentiful, so cheap) and consumes others (scarce, so dear); the rest are neither. Contraband goes by the system's safety level instead (see Law).
+
+| | Food | Textiles | Ore | Machinery | Medicine | Luxuries |
+|---|---|---|---|---|---|---|
+| Agricultural | P | P | – | C | C | – |
+| Mining | C | – | P | C | – | – |
+| Industrial | C | – | C | P | – | – |
+| High-tech | C | C | – | – | P | P |
+
+**Price.** Each good in each system has a normal stock N: 50 where it is produced, 10 where it is consumed, 30 otherwise. The buy price is base × (3N − stock) ÷ 2N: 1.5 × base when the stock is empty, base at N, 0.5 × base at 2N. The type needs no price factor of its own: the stock does the work. Base at most 200 and N at most 50 keep base × 3N under 32,767.
+
+**Wobble.** Up to ±10% a day, worked out from the seed, the system, the good and the day, so nothing is stored.
+
+**Selling.** At 7⁄8 of the buy price, so buying and selling in one place loses money.
+
+**Large trades.** Every tonne of one trade goes at the price the stock would give halfway through the trade.
+
+**Stock.** A table of every system's stock (64 × 8 bytes), and each system's last-update day. On arrival the stock recovers by an eighth of its gap to N for each day since, for at most 8 days; only that one system is worked on. Trading moves the stock.
+
+**Money.** Two cells, high × 10,000 + low, printed as the high part then the low part padded to four digits: up to 327 million. Adding and subtracting carry at 10,000. One transaction never passes 32,767: prices stay at most 300 and holds at most 100 tonnes, so every multiply fits one cell.
 
 ### Loan and rare items
 

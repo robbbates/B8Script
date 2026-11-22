@@ -792,6 +792,9 @@ Two longer programs, written as files with comments. Comments are strings droppe
 "Each grid has a border of dead cells (34 x 18 bytes), so the eight";
 "neighbours of a cell are always at fixed offsets from its address.";
 
+"Hide the cursor while it runs: delete the next line for a terminal without ESC [?25l.";
+"/[[?25l"$
+
 "Variables";
 "  g h  addresses of the current and next grids (one byte per cell, 0 or 1)";
 "  a    address of the cell being worked on, in grid g";
@@ -837,6 +840,9 @@ Two longer programs, written as files with comments. Comments are strings droppe
 "Clear the screen, then run until a key is pressed or 200 generations pass";
 "/[[2J"$ 0k!
 1( P G k@1+k! 1?0= k@200<&)
+
+"Show the cursor again: delete the next line too if the one at the start was deleted.";
+"/[[?25h"$
 ```
 
 **Star Trek** (`TREK.B8S`). A short version of the classic: one quadrant of 8 × 8 sectors, Klingons to destroy, a starbase to dock at.

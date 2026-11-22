@@ -128,65 +128,6 @@ DSLIM   EQU     DSPAGE*256      ; checked: U may go no lower between characters
 
         ORG     0F000h
 
-; =============================================================================
-;  Console layer: the break key. A running program reads the keyboard only
-;  through pollk and getk, which between them give the break key its rules:
-;    - Ctrl-C (03h) stops the program;
-;    - any other key that the break check reads is held in KEYBUF for the
-;      next '?', and a newer one takes its place;
-;    - '?' (getk) takes the held key first;
-;    - a program that has stored a non-zero byte at BRKOFF gets Ctrl-C as a
-;      key like any other, but two of them within about 250 ms still stop it.
-;  On a break the unchecked build ends without a word (EXIT); the checked
-;  one reports B. All three keep B, X, Y and U.
-; =============================================================================
-; pollk: the break check, at every word call and every true ')' loop-back.
-; It looks at the keyboard only once in 256 calls.
-pollk:  DEC     <COUNT
-        BNE     cc9
-        JSR     KEY
-        BEQ     cc9             ; no key
-        STA     <KEYBUF         ; held for the next '?'
-        BRA     ctlc
-
-; getk: a key for '?', or A = 0 with the zero flag set if there is none.
-getk:   LDA     <KEYBUF         ; a held key goes first, and is taken out of
-        BEQ     gk1             ;   the buffer (it has been through ctlc)
-        CLR     <KEYBUF
-        TSTA                    ; (CLR set Z: A is not 0)
-        RTS
-gk1:    JSR     KEY
-        BEQ     cc9
-; ctlc: a key has been read. If it is Ctrl-C and the break key is on, that
-; is the end. If the program has turned it off, wait about 250 ms for one
-; more key: a second Ctrl-C is the end too; any other key is held (the
-; newest wins), and the Ctrl-C goes on: A = 3, zero flag clear.
-ctlc:   CMPA    #3
-        BNE     cc9
-        TST     <BRKOFF
-        BEQ     brk
-        PSHS    X
-        LDX     #250*MSLOOP
-cc1:    JSR     KEY
-        BNE     cc2
-        LEAX    -1,X
-        BNE     cc1
-        BRA     cc3
-cc2:    CMPA    #3
-        BEQ     brk
-        STA     <KEYBUF
-cc3:    LDA     #3
-        PULS    X
-cc9:    RTS
-        IF      1-CHECKED
-brk     EQU     fin             ; the unchecked build stops without a word;
-        ENDIF
-        IF      CHECKED
-brk:    LDA     #'B'            ;   the checked build reports B. (The report
-        JMP     error           ;   takes S from SSAV, so the depth of the
-        ENDIF                   ;   calls here doesn't matter.)
-
-fin:    JMP     EXIT            ; the program has ended
 
 ; =============================================================================
 ;  Startup
@@ -206,10 +147,11 @@ sz:     CLR     ,X+
         DECB
         BNE     sz
         ENDIF
+        LDY     #PROG           ; the reading position
         IF      1-CHECKED
         CLR     <KEYBUF         ; no key held
         CLR     <BRKOFF         ; the break key is on
-        LDX     #PROG           ; the heap starts after the program's NUL
+        TFR     Y,X             ; the heap starts after the program's NUL
         ENDIF
 sc:     LDA     ,X+
         BNE     sc
@@ -219,7 +161,6 @@ sc:     LDA     ,X+
         IF      CHECKED
         STX     <PEND           ; the heap may never go below this
         ENDIF
-        LDY     #PROG
 
 ; =============================================================================
 ;  The inner loop: read one character and sort it by range.
@@ -254,12 +195,11 @@ next:
         BLO     next            ; 01h-20h ignored
         CMPA    #0Fh
         BLO     punct           ; 21h-2Fh: PTAB index 0-14
-        SUBA    #0Fh            ; A = c - 30h
-        CMPA    #0Ah
+        CMPA    #19h
         BLO     digit           ; 30h-39h
-        CMPA    #11h
-        BLO     p3a             ; 3Ah-40h
-        SUBA    #11h            ; A = c - 41h
+        CMPA    #20h
+        BLO     p3a             ; 3Ah-40h: A = 19h-1Fh
+        SUBA    #20h            ; A = c - 41h
         CMPA    #1Ah
         BLO     upper           ; 41h-5Ah: A = letter index 0-25
         CMPA    #20h
@@ -275,8 +215,8 @@ next:
         BHI     e_resv          ; 80h-FFh: reserved
         ENDIF
         SUBA    #1Ah            ; 7Bh-7Eh: -1Eh in all, index 28-31
-p5b:    SUBA    #9              ; 5Bh-60h: -4 in all, index 22-27
-p3a:    ADDA    #5              ; 3Ah-40h: index 15-21
+p5b:    ADDA    #6              ; 5Bh-60h: -4 in all, index 22-27
+p3a:    SUBA    #0Ah            ; 3Ah-40h: index 15-21
 ; Punctuation: A = the PTAB index.
 punct:  LDX     #PTAB
         IF      1-CHECKED
@@ -317,7 +257,7 @@ upper:  BSR     cellx
         ENDIF
         PSHS    Y
         TFR     D,Y
-        JSR     pollk           ; the break check, at every word call
+        BSR     pollk           ; the break check, at every word call
         BRA     next
 
 ; =============================================================================
@@ -356,9 +296,13 @@ e_R:    LDA     #'R'
         FCB     8Ch
 e_resv: LDA     #'X'            ; a reserved byte (80h-FFh) outside a string
         FCB     8Ch
+e_break:LDA     #'B'            ; Ctrl-C (from ctlc, at any depth)
+        FCB     8Ch
 e_undef:LDA     #'U'            ; a word never defined (its cell is still 0)
 eall:   JMP     error
         ENDIF
+
+fin:    JMP     EXIT            ; the program has ended
 
 ; cellx: A = letter index (0-25, or 32-57 for lowercase) -> X = cell address
 cellx:  ASLA
@@ -394,6 +338,65 @@ rd1:    BSR     isdig
         ADCA    #0
         STD     ,U
         BRA     rd1
+
+; =============================================================================
+;  Console layer: the break key. A running program reads the keyboard only
+;  through pollk and getk, which between them give the break key its rules:
+;    - Ctrl-C (03h) stops the program;
+;    - any other key that the break check reads is held in KEYBUF for the
+;      next '?', and a newer one takes its place;
+;    - '?' (getk) takes the held key first;
+;    - a program that has stored a non-zero byte at BRKOFF gets Ctrl-C as a
+;      key like any other, but two of them within about 250 ms still stop it.
+;  On a break the unchecked build ends without a word (EXIT); the checked
+;  one reports B. All three keep B, X, Y and U.
+; =============================================================================
+; pollk: the break check, at every word call and every true ')' loop-back.
+; It looks at the keyboard only once in 256 calls.
+pollk:  DEC     <COUNT
+        BNE     cc9
+        JSR     KEY
+        BEQ     cc9             ; no key
+        STA     <KEYBUF         ; held for the next '?'
+        BRA     ctlc
+
+; getk: a key for '?', or A = 0 with the zero flag set if there is none.
+getk:   LDA     <KEYBUF         ; a held key goes first, and is taken out of
+        CLR     <KEYBUF         ;   the buffer (it has been through ctlc)
+        TSTA
+        BNE     cc9
+        JSR     KEY
+        BEQ     cc9
+; ctlc: a key has been read. If it is Ctrl-C and the break key is on, that
+; is the end. If the program has turned it off, wait about 250 ms for one
+; more key: a second Ctrl-C is the end too; any other key is held (the
+; newest wins), and the Ctrl-C goes on: A = 3, zero flag clear.
+ctlc:   CMPA    #3
+        BNE     cc9
+        TST     <BRKOFF
+        BEQ     brk
+        PSHS    X
+        LDX     #250*MSLOOP
+cc1:    JSR     KEY
+        BNE     cc2
+        LEAX    -1,X
+        BNE     cc1
+        BRA     cc3
+cc2:    CMPA    #3
+        BEQ     brk
+        STA     <KEYBUF
+cc3:    LDA     #3
+        PULS    X
+cc9:    RTS
+        IF      1-CHECKED
+brk     EQU     fin             ; the unchecked build stops without a word;
+        ENDIF
+        IF      CHECKED
+brk     EQU     e_break         ;   the checked build reports B (the report
+        ENDIF                   ;   takes S from SSAV, so the depth of the
+                                ;   calls here doesn't matter)
+
+
 
 ; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
 ; and return its value in A with the carry set; otherwise leave the IP and
@@ -530,11 +533,11 @@ h_tor:  PULS    X
         PSHS    D
         JMP     ,X
 
-; '}' ( -- n ) R: ( n -- )
-h_fromr:PULS    X
-        PULS    D
-        PSHU    D
-        JMP     ,X
+; '}' ( -- n ) R: ( n -- )    The dispatcher's return address comes off
+; into D and the entry under it into X; D is then jumped to.
+h_fromr:PULS    D,X
+        PSHU    X
+        TFR     D,PC
 
 ; '_' ( n -- addr ): the heap pointer moves by n (signed: a 16-bit add);
 ; TOS is the old pointer.
@@ -548,9 +551,12 @@ h_alloc:LDB     <HEAP
         ADDD    ,U
         IF      CHECKED
         CMPD    <PEND
-        LBLO    e_heap          ; below the program's end
+        BLO     ah9             ; below the program's end
         CMPA    #HEAPLIM
-        LBHS    e_heap          ; the new top must stay below the limit page
+        BLO     ah1             ; the new top must stay below the limit page
+ah9:    LDA     #'H'
+        BRA     ejmp            ; (with [ below)
+ah1:
         ENDIF
         STB     <HEAP
         STA     <HEAP+1
@@ -585,8 +591,8 @@ hx2:    LDA     #39h            ; RTS
         STA     ,X
         STX     ,U
         RTS
-exec:   LDX     ,U++
-        JMP     ,X              ; the code's RTS returns to the dispatcher
+exec:   PULU    PC              ; jump to it: the code's RTS returns to the
+                                ;   dispatcher
 
         IF      CHECKED
 hexc:   JSR     isdig
@@ -634,7 +640,8 @@ def1:   CMPA    #' '-'A'+256
         BEQ     def2
         LEAY    -1,Y            ; anything but a letter or a space: W. The
         STY     <AT             ;   place is that character, just read
-        LBRA    e_brack
+        LDA     #'W'
+ejmp:   JMP     error           ; (H and N come here too)
         ENDIF
 h_def:  LDA     ,Y+
         SUBA    #'A'            ; a letter gives 0-25 or 32-57: lowercase
@@ -664,8 +671,9 @@ def2:   PSHU    Y               ; an anonymous block: push its address
         FCB     8Ch             ; (CMPX #: steps over the BSR)
 opf:    BSR     skip
         TSTA
-        LBNE    e_nest
-        RTS
+        BEQ     sk9             ; (an RTS)
+        LDA     #'N'
+        BRA     ejmp
         ENDIF
 
 ; skip: read past text to the closer at this level, and return A = 0 if it
@@ -956,16 +964,11 @@ chkst:  CMPX    #LET
         RTS                     ; in range
 cs9:    LDA     #'O'
         FCB     8Ch
-e_brack:LDA     #'W'            ; [ and a bad character (AT is set)
-        FCB     8Ch
 e_zero: LDA     #'Z'            ; / by zero
         FCB     8Ch
-e_heap: LDA     #'H'            ; _ past the limit, or below the program's end
-        FCB     8Ch
 e_quote:LDA     #'Q'            ; " or $ ran into the NUL
-        FCB     8Ch
-e_nest: LDA     #'N'            ; a skip from ( or [: the NUL or the wrong closer
-        ; and fall into error
+        ; and fall into error. (H, W and N have their own entries, near
+        ; their handlers, at ejmp.)
 
 ; =============================================================================
 ;  Checked build: the error report. A = the letter, AT = the place; U is
@@ -992,18 +995,13 @@ e_nest: LDA     #'N'            ; a skip from ( or [: the NUL or the wrong close
 ;  return stack page, so the report runs on a fresh return stack at RSREP
 ;  (80F0h), below those bytes.
 ; =============================================================================
-error:  TFR     A,B             ; the letter (pmsg and CONOUT keep B)
-        JSR     pmsg
+error:  LDS     #RSREP
+        TFR     A,B             ; the letter (pmsg and CONOUT keep B)
+        BSR     pmsg
         FCB     13,10,"Err",' '+80h
         TFR     B,A
         JSR     CONOUT
-        LDD     #RSTOP          ; the return stack's depth, (RSTOP - S) / 2,
-        SUBD    <SSAV           ;   S as it was when this character began
-        LSRA
-        RORB
-        LDS     #RSREP
-        PSHU    D               ; kept on the data stack, printed last
-        JSR     pmsg
+        BSR     pmsg
         FCB     " @",' '+80h
         ; the place: Y counts the lines, X walks, the cell at ,U holds the
         ; address of the last LF (PROG-1 to begin with)
@@ -1023,6 +1021,18 @@ lc2:    LEAX    1,X
         BNE     lc2
         STX     ,U
         BRA     lc1
+
+; pmsg: print the text after the call, up to and including the character
+; that has bit 7 set (it is printed without it), then return after it.
+; (It sits here, in the middle of the report, where all its calls reach.)
+pmsg:   PULS    X
+pm1:    LDA     ,X
+        ANDA    #7Fh
+        JSR     putc
+        TST     ,X+
+        BPL     pm1
+        JMP     ,X
+
 lc3:    LDD     <AT
         SUBD    ,U
         STD     ,U              ; the column
@@ -1030,7 +1040,7 @@ lc3:    LDD     <AT
         JSR     pdec            ; the line
         BSR     pmsg
         FCB     ','+80h
-        JSR     pdec            ; the column
+        BSR     pdec            ; the column
         BSR     pmsg
         FCB     13,10+80h
         ; the text at the place
@@ -1042,25 +1052,20 @@ tx1:    LDA     ,X+
         BEQ     tx9
         CMPA    #13
         BEQ     tx9
-        JSR     putc
+        BSR     putc
         DECB
         BNE     tx1
 tx9:    BSR     pmsg
         FCB     13,10,"Stk",' '+80h
         ; the data stack: its depth, then its top 8 cells, from Y down to
-        ; the program's top cell, which is under the return stack's depth,
-        ; at 2,U.
-        LEAY    2,U
-        PSHS    Y               ; where the walk ends
+        ; the program's top cell, at ,U.
+        PSHS    U               ; where the walk ends
         LDD     #DSTOP
         SUBD    ,S
-        LSRA
-        RORB
-        PSHU    D
-        BSR     pdec            ; the depth
+        BSR     pdh             ; the depth (pdec leaves U as it was)
         BSR     pmsg
         FCB     ':'+80h
-        LEAY    16,Y            ; past the 8th cell from the top ...
+        LEAY    16,U            ; past the 8th cell from the top ...
         CMPY    #DSTOP
         BHS     sl1
         BSR     pmsg            ; (there are more than 8)
@@ -1077,20 +1082,18 @@ sl2:    CMPY    ,S
         BRA     sl2
 sl9:    BSR     pmsg
         FCB     13,10,"Rtn",' '+80h
-        BSR     pdec            ; the depth of the return stack, pushed first
-        BSR     pmsg
+        LDD     #RSTOP          ; the return stack's depth, (RSTOP - S) / 2,
+        SUBD    <SSAV           ;   S as it was when this character began
+        BSR     pdh
+        JSR     pmsg
         FCB     13,10+80h
         JMP     EXIT
 
-; pmsg: print the text after the call, up to and including the character
-; that has bit 7 set (it is printed without it), then return after it.
-pmsg:   PULS    X
-pm1:    LDA     ,X
-        ANDA    #7Fh
-        BSR     putc
-        TST     ,X+
-        BPL     pm1
-        JMP     ,X
+; pdh: print D/2 (a depth: D is twice it), unsigned.
+pdh:    LSRA
+        RORB
+        PSHU    D
+        BRA     pdec
         ENDIF
 
 ; '#' prints TOS as a signed decimal number, with no space after it.
@@ -1107,10 +1110,10 @@ pdec:   LDD     #10
         PSHS    B
         LDD     ,U
         BEQ     pd1
-        BSR     pdec
-        BRA     pd2
+        BSR     pdec            ; (it drops the quotient)
+        FCB     8Ch             ; (CMPX #: steps over the LEAU)
 pd1:    LEAU    2,U             ; drop the zero quotient
-pd2:    PULS    A
+        PULS    A
         ADDA    #'0'            ; and fall into putc
 
 putc:   JMP     CONOUT

@@ -5,13 +5,18 @@
 ;  Three switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
-;    EDITOR   1 = with a small line editor built in (see the end of this
-;                 file). It goes with either setting of the other two.
+;    EDITOR   1 = with the line editor built in (see the end of this file):
+;                 the spec's suggested standard. It goes with either setting
+;                 of the other two.
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
 ;             1 = starts with every variable at 0 and every word undefined,
 ;                 and stops on every error in the spec's table (and Ctrl-C)
 ;                 with a four-line report: the letter and the place as line
 ;                 and column, the text there, and both stacks. See `error`.
+;
+;  In every build Ctrl-C stops a running program (an unchecked build stops
+;  without a word): see the console layer for the rules, the held key and
+;  the break-off cell.
 ;
 ;  Assembler: asm80 (https://maly.github.io/asm80-node/), Z80 mode.
 ; =============================================================================
@@ -20,6 +25,8 @@ CPM     EQU     0               ; 1 = CP/M .COM build
 CHECKED EQU     0               ; 1 = checked build
 EDITOR  EQU     0               ; 1 = with the line editor
 EDGEN   EQU     EDITOR*(1-CPM)  ; (the generic build with the editor)
+                                ; (IF takes any value but 0 as true, so
+                                ;  IF CHECKED+EDITOR means "either")
 TABP0   EQU     EDGEN*(1-CHECKED) ; (the build with its table in page zero)
 
 ; -----------------------------------------------------------------------------
@@ -99,8 +106,18 @@ BASE    EQU     0000h           ; where the image starts
         IF      (1-CPM)*(1-EDITOR)
 EXIT    EQU     0FF09h          ; where to go when the program ends
         ENDIF
+        IF      EDGEN
+LEAVE   EQU     0FF09h          ; where the editor's ^X goes
+        ENDIF
+        IF      EDITOR*CPM
+LEAVE   EQU     0000h           ; the editor's ^X: warm boot
+        ENDIF
         IF      EDITOR
-EXIT    EQU     edit            ; a program that ends goes back to the editor
+EXIT    EQU     edend           ; a program that ends goes back to the editor,
+SKEND   EQU     skend           ;   also when it ends inside skip
+        ENDIF
+        IF      1-EDITOR
+SKEND   EQU     EXIT
         ENDIF
 
 MSLOOP  EQU     40              ; n? inner loop count for about 1 ms (1-255):
@@ -114,7 +131,9 @@ HEAP    EQU     LET+7Ch         ; the heap pointer
 RSAVE   EQU     LET+34h         ; gap after Z: return stack pointer, saved
                                 ;   around machine code;
 NPEND   EQU     LET+38h         ;   minus the address of the program's end
-                                ;   (the heap's first byte), for the checked '_'
+                                ;   (the heap's first byte), for the checked '_';
+EDLN    EQU     LET+3Ah         ;   the editor: the number of the line that ^E
+                                ;   put in the input line (0: none)
 KEYBUF  EQU     LET+7Ah         ; gap after z: a key read by the break check and
                                 ;   held for the next '?' (0: none);
 BRKOFF  EQU     LET+7Bh         ;   the break-off cell: a program that stores a
@@ -151,16 +170,9 @@ DSTOP   EQU     DSPAGE*256+0FCh ; empty data stack. The four bytes above it
         DW      0               ; 06  spare
         ENDIF
         IF      EDGEN
-        XOR     A               ; 00  reset: no program yet
-        LD      (PROG),A
-        ENDIF
-        IF      EDGEN*(1-CHECKED)
-        JP      edit            ; 04
-        ENDIF
-        IF      EDGEN*CHECKED
-        JP      init            ; 04  (and no key held back)
-        ENDIF
-        IF      EDGEN
+        XOR     A               ; 00  reset: no program yet. (This byte, AFh,
+        LD      (PROG),A        ;     is also what an undefined word runs
+        JP      init            ; 04  into in the checked build: see e_hi.)
         NOP                     ; 07  spare
         ENDIF
         IF      CPM
@@ -724,7 +736,7 @@ h_str:  PUSH    HL
 ; '$' prints the string at TOS, decoding escapes: '/' plus a character
 ; clears that character's bit 6 (/M is CR, /` is space; '/' and '"' have no
 ; bit 6, so // and /" give themselves).
-        IF      1-CHECKED
+        IF      (1-CHECKED)*(1-EDITOR)
 h_print:LD      A,(HL)
         INC     HL
         CP      22h
@@ -744,6 +756,11 @@ pr1:    RST     28h
 h_print:PUSH    HL
         CALL    prstr
         POP     DE
+        RST     18h
+        ENDIF
+        IF      (1-CHECKED)*EDITOR
+; (With the editor the loop is a routine, prstr, which ^V uses too.)
+h_print:CALL    prstr
         RST     18h
         ENDIF
 
@@ -790,15 +807,6 @@ line:   LD      DE,127          ; TOS is minus the count: adding 127 carries
         SBC     A,A
         AND     L               ; (0 for a count that is too big)
         XOR     127             ; A = the count, 127 at most
-        ENDIF
-        IF      CPM*EDITOR
-        CALL    rdline          ; (the editor calls rdline too)
-        LD      L,LINEBUF & 0FFh
-        RST     30h
-; rdline: read a line of at most A characters; HL -> the CR that ends it
-rdline:
-        ENDIF
-        IF      CPM
         LD      (LBHDR),A
         LD      DE,LBHDR
         LD      A,10
@@ -810,36 +818,19 @@ rdline:
         LD      L,A
         LD      (HL),13
         ENDIF
-        IF      CPM*(1-EDITOR)
-        LD      L,LINEBUF & 0FFh
-        RST     30h
-        ENDIF
-        IF      CPM*EDITOR
-        RET
-        ENDIF
         IFN     CPM
         ; Generic: Backspace takes the last character back (and is echoed as
         ; it is), CR ends (stored, not echoed), every other key is stored and
         ; echoed until the line is full. The line buffer starts at offset 80h
         ; of its page, so L alone is the place in the line: D holds the L of
         ; a full line.
-        ENDIF
-        IFN     CPM
 line:   LD      DE,127          ; TOS is minus the count: adding 127 carries
         ADD     HL,DE           ;   only for 1 to 127, and leaves 127 - count
         SBC     A,A
         AND     L               ; (0 for a count that is too big)
         CPL
         LD      D,A             ; D = the L of a full line: 80h + count, FFh
-        ENDIF                   ;   at most
-        IF      EDGEN
-        CALL    rdline          ; (the editor calls rdline too)
-        LD      L,LINEBUF & 0FFh
-        RST     30h
-; rdline: read a line that is full when L reaches D; HL -> the CR that ends it
-rdline:
-        ENDIF
-        IFN     CPM
+                                ;   at most
         LD      HL,LINEBUF
 ln2:    CALL    getk
         JR      Z,ln2
@@ -862,13 +853,8 @@ ln4:    DEC     L               ; Backspace: one back, and echo it,
         JR      ln2
 ln5:    LD      (HL),A          ; the CR
         ENDIF
-        IF      (1-CPM)*(1-EDITOR)
         LD      L,LINEBUF & 0FFh
         RST     30h
-        ENDIF
-        IF      EDGEN
-        RET
-        ENDIF
 
 ; =============================================================================
 ;  More routines (no handler starts past this point)
@@ -981,7 +967,7 @@ sk1:    LD      A,(BC)
         IF      1-CHECKED
         INC     BC
         OR      A
-        JP      Z,endprog
+        JP      Z,SKEND         ; (the end of the program)
         ENDIF
         IF      CHECKED
         OR      A
@@ -1013,7 +999,7 @@ sk4:    DEC     D
         RET     NZ
         JR      sk7
 sk6:    BIT     2,E             ; the text ran out:
-        JP      NZ,endprog      ;   '\' with no closer ends the program
+        JP      NZ,SKEND        ;   '\' with no closer ends the program
 sk7:    PUSH    IX              ; N. The place is the opener
         POP     BC
         LD      A,'N'
@@ -1139,8 +1125,11 @@ ct2:    POP     DE              ; A = the second key, or 0 if none came
 ct3:    LD      A,3
         OR      A
         RET
-        IF      1-CHECKED
-brk     EQU     endprog         ; the unchecked build stops without a word;
+        IF      (1-CHECKED)*(1-EDITOR)
+brk     EQU     endprog         ; the unchecked build stops without a word
+        ENDIF                   ;   (with the editor, both stacks are cleared);
+        IF      (1-CHECKED)*EDITOR
+brk     EQU     edit0
         ENDIF
         IF      CHECKED
 brk     EQU     e_break         ;   the checked build reports B
@@ -1239,37 +1228,6 @@ chkhp:
 e_heap: OR      A               ; put the count back in TOS for the report
         SBC     HL,DE
         JP      e_heap1
-
-; prstr: print the string at HL, to its closing quote, decoding '/' (this is
-; '$', and the error report's texts). A NUL first is an error: Q.
-prstr:  LD      A,(HL)
-        INC     HL
-        CP      22h
-        RET     Z
-        OR      A
-        JR      Z,e_dollar
-        CP      '/'
-        JR      NZ,prs1
-        LD      A,(HL)
-        INC     HL
-        AND     0BFh
-prs1:   RST     28h
-        JR      prstr
-e_dollar:POP    DE              ; '$' ran into a NUL: drop the return address,
-        POP     HL              ;   and put the string's address back in TOS
-        LD      A,'Q'
-        JP      error
-
-; pmsg: print the text that follows the CALL, to its closing quote. Keeps HL.
-; pnl: the same, on a new line.
-pnl:    LD      A,13
-        RST     28h
-        LD      A,10
-        RST     28h
-pmsg:   EX      (SP),HL
-        CALL    prstr
-        EX      (SP),HL
-        RET
 
 ; chkstk: both stacks are checked once per character, not in every handler.
 ; The data stack is right when SP lies in the 256 bytes below DSTOP: adding
@@ -1409,9 +1367,28 @@ er4:    LD      A,(HL)
         IF      CHECKED
         RST     28h
         DJNZ    er4
-er5:    CALL    pnl
+er5:                            ; (without the editor: on into pstk)
+        ENDIF
+        IF      CHECKED*EDITOR
+        CALL    pstk
+        CALL    pnl
+        DB      22h
+        JP      edit0           ; back to the editor, with both stacks cleared
+        ENDIF
+
+; =============================================================================
+;  Routines that the checked build's report and the editor share
+; =============================================================================
+SPADJ   EQU     2*EDITOR        ; (with the editor pstk is called, not fallen
+                                ;   into: the stack is one address deeper)
+        IF      CHECKED+EDITOR
+; pstk: the two stack lines:  Stk n: the top 8 cells at most, bottom to top
+;                             Rtn n
+; TOS must be in memory with the rest (pushed). In a build without the
+; editor this is the end of `error`, which runs on into it.
+pstk:   CALL    pnl
         DB      "Stk ",22h
-        LD      HL,DSTOP-2      ; (the cell at DSTOP-2 was pushed with the
+        LD      HL,DSTOP-2-SPADJ ; (the cell at DSTOP-2 was pushed with the
         OR      A               ;   first value and holds nothing)
         SBC     HL,SP
         CALL    phalf           ; the depth
@@ -1427,6 +1404,12 @@ er6:    LD      H,0             ; C = the number of cells to show
         LD      L,C
         ADD     HL,HL
         ADD     HL,SP           ; HL -> just above the deepest of them
+        ENDIF
+        IF      EDITOR
+        INC     HL
+        INC     HL
+        ENDIF
+        IF      CHECKED+EDITOR
         INC     C
 er7:    DEC     C
         JR      Z,er8
@@ -1452,170 +1435,391 @@ er8:    CALL    pnl
         LD      HL,RSTOP
         OR      A
         SBC     HL,DE
+        ENDIF
+        IF      CHECKED*(1-EDITOR)
         CALL    phalf
         CALL    pnl
         DB      22h
         JP      endprog
-; phalf: print half of HL, and leave it in C
+        ENDIF
+        IF      CHECKED+EDITOR
+; phalf: print half of HL, and leave it in C. (With the editor, pstk ends by
+; running on into this.)
 phalf:  SRL     H
         RR      L
         PUSH    HL
         CALL    pdec
         POP     BC
         RET
+
+; prstr: print the string at HL, to its closing quote, decoding '/' (this is
+; '$', and the texts of the report and the editor). In the checked build a
+; NUL first is an error: Q.
+prstr:  LD      A,(HL)
+        INC     HL
+        CP      22h
+        RET     Z
+        ENDIF
+        IF      CHECKED
+        OR      A
+        JR      Z,e_dollar
+        ENDIF
+        IF      CHECKED+EDITOR
+        CP      '/'
+        JR      NZ,prs1
+        LD      A,(HL)
+        INC     HL
+        AND     0BFh
+prs1:   RST     28h
+        JR      prstr
+
+; pmsg: print the text that follows the CALL, to its closing quote. Keeps HL.
+; pnl: the same, on a new line.
+pnl:    LD      A,13
+        RST     28h
+        LD      A,10
+        RST     28h
+pmsg:   EX      (SP),HL
+        CALL    prstr
+        EX      (SP),HL
+        RET
+        ENDIF
+        IF      CHECKED
+e_dollar:POP    DE              ; '$' ran into a NUL: drop the return address,
+        POP     HL              ;   and put the string's address back in TOS
+        LD      A,'Q'
+        JP      error
         ENDIF
 
 ; =============================================================================
 ;  The line editor (EDITOR = 1)
 ;
-;  The interpreter starts here, and a program that ends comes back here. Type
-;  a line and press Return:
+;  The interpreter starts here, and a program that ends comes back here.
+;  There is no prompt. It follows the spec's suggested standard for a line
+;  editor (docs/b8script.md, Environments). Type a line and press Return:
 ;
-;    n text    put the text in as line n; the lines from n on move down.
-;              A number past the end, or 0, adds the line at the end.
+;    n text    put the text in as line n; the lines from n on move down. A
+;              number past the end (or 0) adds the line at the end.
 ;    n         take line n out
-;    0         run the program
-;    -n        list the program from line n on (-1 lists all of it). Any key
-;              stops the list until another key is pressed; Ctrl-C ends it.
 ;    anything else is run at once, as B8Script. (Start such a line with a
-;    space if it would begin with a digit or a minus sign.)
+;    space if it would begin with a digit.)
+;
+;  A command key ends the line too, and takes what was typed as its argument:
+;
+;    ^G        run the program
+;    n ^L      list from line n (no number: all of it). Any key holds the
+;              list until another key is pressed; Ctrl-C ends it.
+;    n ^E      put line n in the input line; Return puts it back, changed
+;    name ^R   read. CP/M: the file of that name (no name: the same file as
+;              last time). Generic: what is typed, or pasted, from now until
+;              ^Z replaces the program; it is not echoed.
+;    name ^W   write. CP/M: to that file (no name: the same file as last
+;              time). Generic: the text is printed, as it is.
+;    ^N ^N     new: no program (the key twice in a row)
+;    ^V        view: the build, both stacks, and the program's size, lines
+;              and free memory
+;    ^X        leave (to LEAVE)
+;
+;  In the line: ^B and ^F, or the left and right arrow keys, move the cursor;
+;  a character goes in at the cursor; Backspace and DEL take out the one
+;  before it; Esc drops the line. Only CR, LF, BS and printing characters are
+;  sent to the terminal, so any terminal will do.
 ;
 ;  Lines are counted, not numbered: the text holds no line numbers, and the
 ;  list shows each line's place. There can be 65535 lines. A typed line holds
-;  125 characters, the line number and the one character after it included;
-;  that character is not stored. The text is kept as it is typed, each line
-;  ending in CR LF, at PROG. Nothing is checked.
+;  125 characters; the one character after a line number separates it from
+;  the text and is not stored. The text is kept as it is typed, each line
+;  ending in CR LF, at PROG.
 ;
-;  With CPM = 1 the file named on the command line is the program to start
-;  with (no file, or no such file: no program). Lines are read by BDOS 10, so
-;  its editing keys work, and Ctrl-C as the first key of a line goes back to
-;  CP/M. Nothing is written back: there is no command to save.
-;
-;  With CHECKED = 1 a program that is stopped (an error, or Ctrl-C) prints
-;  its report and comes back here, with both stacks empty. The place is a
-;  line and column of the program; in a line typed here it is line 0.
+;  What lasts from one line to the next: the program, the words, the
+;  variables and the data stack. An error or a break clears both stacks. The
+;  return stack starts empty for every line.
 ;
 ;  Things to know:
 ;    - Reset empties the program (generic builds).
-;    - Words and variables last from one line to the next. A word's address
-;      points into the program, so run the program again after editing it.
+;    - A word's address points into the program, so run the program again
+;      after editing it.
 ;    - Nothing is printed between a program's output and what is typed next.
 ;    - A line run at once sits in the line buffer, which -n? also reads into:
 ;      a line that calls -n? and carries on afterwards runs what was typed.
 ;      (The stored program never comes back to the line, so it may.)
+;    - The editor's own keys are not the program's: -n? is the plain line
+;      read of the other builds (BDOS 10 under CP/M).
+;
+;  The data stack is the CPU's stack, so the editor works on top of whatever
+;  the last line left there, with TOS pushed like the rest.
 ; =============================================================================
+        IF      EDGEN
+init:                           ; reset (A = 0)
+        ENDIF
         IF      EDGEN*CHECKED
-; Reset (A = 0): clear the lower half of the letter page. Every variable
-; starts at 0, every word cell holds 0000h, the address an undefined word is
-; caught at (see e_hi), and no key is held back.
-init:   LD      HL,LET
+; Clear the lower half of the letter page: every variable starts at 0, and
+; every word cell holds 0000h, the address an undefined word is caught at
+; (see e_hi).
+        LD      HL,LET
 ini1:   LD      (HL),A
         INC     L
         JP      P,ini1          ; +00h to +7Fh
-        JR      edit
         ENDIF
-        IF      EDITOR
-; -n: list from line n. DE = the number of the line at HL.
-list:   INC     BC
-        CALL    rdnum           ; HL = n
-        PUSH    HL
-        CALL    find
-        POP     DE
-li1:    LD      A,(HL)
-        OR      A
-        JR      Z,edit          ; the end of the text
-        CALL    rawk
-        JR      Z,li3           ; no key: carry on
-        CP      3
-        JR      Z,edit          ; Ctrl-C
-li2:    CALL    rawk            ; any other key: wait for one more
-        JR      Z,li2
-        CP      3
-        JR      Z,edit
-li3:    PUSH    HL
-        PUSH    DE
-        EX      DE,HL
-        CALL    pdec            ; the line's number,
-        LD      A,' '
-        RST     28h             ;   a space,
-        POP     DE
-        POP     HL
-        INC     DE
-        CALL    prl             ;   and the line
-        JR      li1
-
-; Take line n (in HL) out: copy everything after it down over it.
-del:    CALL    find
-        LD      D,H
-        LD      E,L
-        CALL    nxl             ; HL -> the next line
-de1:    LD      A,(HL)
-        LD      (DE),A
-        INC     HL
-        INC     DE
-        OR      A
-        JR      NZ,de1          ; and fall into the editor
-
-edit:   LD      SP,DSTOP
-        XOR     A               ; a key that the break check held while the
-        LD      (KEYBUF),A      ;   program ran is let go (the Ctrl-C that
-        ENDIF                   ;   stopped it, for one)
         IF      EDGEN
-        LD      D,0FDh          ; 125 characters at most
-        ENDIF
-        IF      EDITOR*CPM
-        LD      A,125
+        JR      edit0
         ENDIF
         IF      EDITOR
-        CALL    rdline          ; HL -> the CR that ended the line
-        INC     L
-        LD      (HL),10         ; a LF after it,
+; ^B, left arrow: the cursor goes one to the left
+left:   LD      A,L
+        ADD     A,A
+        JR      Z,ed1           ; (L = 80h: at the start)
         DEC     L
-        CALL    prl             ; (print the CR LF: a new line)
-        LD      (HL),0          ;   and a NUL after that
-        PUSH    HL              ; the end of what was typed
-        LD      BC,LINEBUF
-        LD      A,(BC)
-        CP      '-'
-        JR      Z,list
-        CALL    rdnum           ; HL = the number it starts with, BC -> after
-        LD      A,C             ; C is still 80h if there was no number:
-        ADD     A,A             ;   only then is twice it 0
-        JR      Z,st0           ; no number: run the line where it is
-        LD      A,(BC)
-        SUB     13
-        JR      NZ,ins          ; text follows the number
-        OR      H               ; the number alone:
-        OR      L
-        JR      NZ,del          ;   not 0: take that line out
-        LD      BC,PROG         ;   0: run the program
+        LD      A,8
+lf1:    RST     28h
+        JR      ed1
+; ^F, right arrow: one to the right, by printing the character there
+right:  LD      A,L
+        CP      E
+        JR      Z,ed1           ; at the end
+        LD      A,(HL)
+        INC     L
+        JR      lf1
 
-; st0: start running at BC. The heap starts after the stored program's NUL.
-st0:    POP     HL              ; (the end of what was typed: the stack is empty)
-        XOR     A
-        LD      H,A             ; no key is held, and the break key is on: a
-        LD      L,A             ;   key left over from the last run is let go
-        LD      (KEYBUF),HL
-        LD      HL,PROG
-st1:    CP      (HL)
-        INC     HL
-        JR      NZ,st1
-        LD      (HEAP),HL
-        ENDIF
-        IF      EDITOR*CHECKED
-        RST     20h             ; minus the heap's first address: '_' may not
-        LD      (NPEND),HL      ;   release below it
-        ENDIF
-        IF      EDITOR
-        EXX
+; Esc: alone it drops the line. An arrow key sends Esc [ and a letter, so
+; wait about 5 ms for a second key: after a '[' read on to the letter that
+; ends the sequence, and act on C (right) and D (left).
+esc:    LD      BC,5*MSLOOP
+es1:    CALL    rawk
+        JR      NZ,es2
+        DEC     BC
+        LD      A,B
+        OR      C
+        JR      NZ,es1
+        CALL    fin             ; no second key: the line is dropped
+        JR      edit
+es2:    CP      '['
+        JR      NZ,ed1          ; not a sequence known here
+es3:    CALL    ekey
+        CP      40h
+        JR      C,es3           ; (its parameters)
+        CP      'C'
+        JR      Z,right
+        CP      'D'
+        JR      Z,left
+        JR      ed1
+
+; edit0: reset, an error or a break: both stacks are cleared.
+; skend: a program that ended inside skip: its return address goes.
+; edend: a program that ended: TOS joins the rest of the data stack.
+edit0:  LD      SP,DSTOP-2      ; empty (the cell that stands for TOS is pushed)
+        DB      21h             ; (LD HL,nn: steps over the next two bytes)
+skend:  POP     DE
+edend:  PUSH    HL
+; edit: start a new input line.
+edit:   EXX
         LD      HL,RSTOP        ; the return stack is empty
         EXX
-        RST     30h             ; (its return address is thrown away)
+        LD      HL,0
+        LD      (KEYBUF),HL     ; no key is held, and the break key is on
+        LD      (EDLN),HL       ; no line is being edited
+        LD      HL,LINEBUF      ; HL = the cursor,
+        LD      E,L             ;   E = the end of the line (its low byte)
+ed1:    CALL    ekey
+        CP      7Fh
+        JR      Z,bsp           ; DEL
+        CP      ' '
+        JR      NC,insc
+        CP      9
+        JR      Z,insc          ; Tab is text
+        CP      8
+        JR      Z,bsp
+        CP      2
+        JR      Z,left          ; ^B
+        CP      6
+        JR      Z,right         ; ^F
+        CP      1Bh
+        JR      Z,esc
+        PUSH    HL              ; a command key? Look it up
+        LD      HL,cmds
+        LD      B,NCMD
+ed2:    CP      (HL)
+        INC     HL
+        JR      Z,ed3
+        INC     HL
+        INC     HL
+        DJNZ    ed2
+        POP     HL
+        JR      ed1             ; no: the key is ignored
+ed3:    LD      A,(HL)
+        INC     HL
+        LD      H,(HL)
+        LD      L,A
+        EX      (SP),HL         ; the command's address: fin returns to it
+; fin: end the input line: CR LF and a NUL after it, and a new line on the
+; terminal. Leaves BC -> the line and HL -> the NUL.
+fin:    LD      H,LETPAGE
+        LD      L,E
+        LD      (HL),13
+        INC     L
+        LD      (HL),10
+        DEC     L
+        CALL    prl             ; (prints the CR LF)
+        LD      (HL),0
+        LD      BC,LINEBUF
+        RET
 
-; Put the typed text in as line n (in HL): open a gap of its length there,
+; Backspace, DEL: the character before the cursor goes. The cursor moves
+; left, the rest of the line moves down over it, and the last place (now a
+; space) is printed over along with the rest.
+bsp:    LD      A,L
+        ADD     A,A
+        JR      Z,ed1           ; at the start
+        DEC     L
+        LD      A,8
+        RST     28h
+        PUSH    HL
+bs1:    INC     L
+        LD      A,(HL)
+        DEC     L
+        LD      (HL),A
+        INC     L
+        LD      A,L
+        CP      E
+        JR      NZ,bs1
+        DEC     L
+        LD      (HL),' '
+        POP     HL
+        LD      D,E
+        DEC     E
+        JR      ic2
+; A character goes in at the cursor: it ripples up through the rest of the
+; line, the cursor moves on, and the rest is printed again.
+insc:   LD      B,A
+        LD      A,E
+        CP      0FDh
+        JR      Z,ed1           ; the line is full: 125 characters
+        LD      A,B
+        RST     28h
+        PUSH    HL
+ic1:    LD      A,(HL)
+        LD      (HL),B
+        LD      B,A
+        LD      A,L
+        INC     L
+        CP      E
+        JR      NZ,ic1
+        POP     HL
+        INC     L
+        INC     E
+        LD      D,E
+ic2:    CALL    tail
+        JR      ed1
+; tail: print the line from the cursor to D (a low byte), and bring the
+; cursor back with backspaces. Nothing at all if the cursor is at D.
+tail:   LD      C,L
+ta1:    LD      A,L
+        CP      D
+        JR      Z,ta2
+        LD      A,(HL)
+        RST     28h
+        INC     L
+        JR      ta1
+ta2:    LD      A,L
+        CP      C
+        RET     Z
+        LD      A,8
+        RST     28h
+        DEC     L
+        JR      ta2
+
+; ekey: wait for a key
+ekey:   CALL    rawk
+        JR      Z,ekey
+        RET
+
+; The command keys, and where each goes (after fin).
+cmds:   DB      13
+        DW      cret
+        DB      7               ; ^G
+        DW      crun
+        DB      12              ; ^L
+        DW      clist
+        DB      5               ; ^E
+        DW      cedln
+        DB      18              ; ^R
+        DW      cread
+        DB      23              ; ^W
+        DW      cwrite
+        DB      14              ; ^N
+        DW      cnew
+        DB      22              ; ^V
+        DW      cview
+        DB      24              ; ^X
+        DW      LEAVE
+NCMD    EQU     9
+
+; ^N ^N: no program, if the next key is ^N too
+cnew:   CALL    ekey
+        CP      14
+        JR      NZ,ged0
+        XOR     A
+        LD      (PROG),A
+ged0:   JP      edit
+
+; ^E: line n goes into the input line, to be changed. EDLN remembers which
+; line it was: Return puts the text back in its place.
+cedln:  CALL    rdnum
+        PUSH    HL
+        CALL    find            ; HL -> the line, or the NUL if there is none
+        POP     DE
+        LD      A,(HL)
+        OR      A
+        JR      Z,ged0
+        LD      (EDLN),DE
+        LD      DE,LINEBUF
+ce1:    LD      A,(HL)
+        CP      13
+        JR      Z,ce2
+        CP      10
+        JR      Z,ce2
+        LD      (DE),A
+        INC     HL
+        INC     E
+        LD      A,E
+        CP      0FDh            ; (a longer line is cut at 125 characters)
+        JR      NZ,ce1
+ce2:    LD      HL,LINEBUF      ; show it; the cursor ends up at its end
+ce3:    LD      A,L
+        CP      E
+        JP      Z,ed1
+        LD      A,(HL)
+        RST     28h
+        INC     L
+        JR      ce3
+
+; Return. If ^E put a line here, the text goes back in its place. If not:
+; a number and text is a line to put in, a number alone a line to take out,
+; and anything else is run where it is.
+cret:   PUSH    HL              ; the end of what was typed
+        LD      HL,(EDLN)
+        LD      A,H
+        OR      L
+        JR      Z,cr1
+        PUSH    HL
+        CALL    delln
+        POP     HL
+        JR      ins
+cr1:    CALL    rdnum           ; HL = the number it starts with, BC -> after
+        LD      A,C             ; C is still 80h if there was no number:
+        ADD     A,A             ;   only then is twice it 0
+        JR      Z,st0p          ; no number: run the line
+        LD      A,(BC)
+        CP      13
+        JR      NZ,cr2
+        POP     DE              ; the number alone: take that line out
+        CALL    delln
+        JR      gedit
+cr2:    INC     BC              ; step over the one character after the number
+
+; Put the text at BC in as line n (in HL): open a gap of its length there,
 ; CR and LF included, and copy it in.
 ins:    CALL    find            ; HL -> where it goes
-        INC     BC              ; step over the one character after the number
         POP     DE              ; the end of what was typed
         LD      A,E
         SUB     C               ; A = the length of the text, with its CR LF
@@ -1643,7 +1847,123 @@ ins:    CALL    find            ; HL -> where it goes
         POP     DE              ; where it goes
         POP     HL              ; the text
         LDIR
-        JR      edit
+gedit:  JP      edit
+
+; ^G: run the program. st0p: run the typed line (BC -> it).
+crun:   LD      BC,PROG
+        DB      3Eh             ; (LD A,n: steps over the POP)
+st0p:   POP     HL              ; (the end of what was typed)
+; st0: start running at BC. The heap starts after the stored program's NUL.
+st0:    LD      HL,PROG
+        XOR     A
+st1:    CP      (HL)
+        INC     HL
+        JR      NZ,st1
+        LD      (HEAP),HL
+        ENDIF
+        IF      EDITOR*CHECKED
+        RST     20h             ; minus the heap's first address: '_' may not
+        LD      (NPEND),HL      ;   release below it
+        ENDIF
+        IF      EDITOR
+        POP     HL              ; TOS: the data stack is as the last line left it
+        RST     30h             ; (its return address is thrown away)
+
+; ^L: list from line n. DE = the number of the line at HL.
+clist:  CALL    rdnum           ; HL = n, or 0 if there was none:
+        LD      A,H
+        OR      L
+        JR      NZ,li0
+        INC     L               ;   then from line 1
+li0:    PUSH    HL
+        CALL    find
+        POP     DE
+li1:    LD      A,(HL)
+        OR      A
+        JR      Z,gedit         ; the end of the text
+        CALL    rawk
+        JR      Z,li3           ; no key: carry on
+        CP      3
+        JR      Z,gedit         ; Ctrl-C
+        CALL    ekey            ; any other key: wait for one more
+        CP      3
+        JR      Z,gedit
+li3:    PUSH    HL
+        PUSH    DE
+        EX      DE,HL
+        CALL    pdec            ; the line's number,
+        LD      A,' '
+        RST     28h             ;   a space,
+        POP     DE
+        POP     HL
+        INC     DE
+        CALL    prl             ;   and the line
+        JR      li1
+
+; ^V: view.
+cview:  CALL    pmsg
+        DB      "B8SZ80E"
+        ENDIF
+        IF      EDITOR*CHECKED
+        DB      "C"
+        ENDIF
+        IF      EDITOR
+        DB      " 2026-11-21",22h
+        CALL    pstk            ; both stacks
+        LD      HL,PROG
+        LD      DE,0
+cv1:    LD      A,(HL)          ; count the lines, and find the end
+        OR      A
+        JR      Z,cv2
+        INC     HL
+        CP      10
+        JR      NZ,cv1
+        INC     DE
+        JR      cv1
+cv2:    PUSH    HL              ; the NUL
+        PUSH    DE              ; the lines
+        LD      DE,(0-PROG)&0FFFFh
+        ADD     HL,DE
+        CALL    pnl
+        DB      "Prog ",22h
+        CALL    pdec            ; the program's size
+        POP     HL
+        CALL    pnl
+        DB      "Lines ",22h
+        CALL    pdec
+        POP     DE
+        ENDIF
+        IF      EDGEN
+        LD      HL,HEAPLIM*256-1
+        ENDIF
+        IF      EDITOR*CPM
+        LD      A,(0007h)       ; the BDOS page is the limit
+        LD      H,A
+        LD      L,0
+        DEC     HL
+        ENDIF
+        IF      EDITOR
+        OR      A
+        SBC     HL,DE
+        CALL    pnl
+        DB      "Free ",22h
+        CALL    pdec            ; the room left for text and heap
+        CALL    pnl
+        DB      22h
+ged1:   JP      edit
+
+; delln: take line n (in HL) out: copy everything after it down over it.
+delln:  CALL    find
+        LD      D,H
+        LD      E,L
+        CALL    nxl             ; HL -> the next line
+de1:    LD      A,(HL)
+        LD      (DE),A
+        INC     HL
+        INC     DE
+        OR      A
+        JR      NZ,de1
+        RET
 
 ; find: HL = a line number. Returns HL -> that line, or -> the NUL at the end
 ; of the text if there are fewer lines (or the number is 0). Keeps BC.
@@ -1678,6 +1998,188 @@ prl:    LD      A,(HL)
         RET
         ENDIF
 
+        IF      EDGEN
+; ^R, generic: what comes in from now until ^Z is the program. A CR is
+; stored as CR LF; a LF right after a line end is dropped (it is the CR's
+; own, or an empty line's), and a LF anywhere else ends a line too. A last
+; line with no end is given one. Nothing is echoed, and there is no check
+; for running out of memory.
+cread:  LD      HL,PROG-1
+        LD      A,10
+        DB      0FEh            ; (CP n: steps over the LD A,13)
+rd1:    LD      A,13            ; a LF alone ends a line
+rd2:    LD      (HL),A
+        INC     HL
+        CP      13
+        LD      A,10
+        JR      Z,rd2           ; after a CR goes a LF
+rd3:    CALL    ekey
+        CP      1Ah
+        JR      Z,rd4
+        CP      10
+        JR      NZ,rd2
+        DEC     HL
+        CP      (HL)
+        INC     HL
+        JR      Z,rd3           ; (the LF is dropped)
+        JR      rd1
+rd4:    DEC     HL
+        LD      A,(HL)
+        INC     HL
+        CP      10
+        JR      Z,rd5
+        LD      (HL),13
+        INC     HL
+        LD      (HL),10
+        INC     HL
+rd5:    LD      (HL),0
+        JR      ged1
+
+; ^W, generic: the text is printed as it is, for the terminal to capture.
+cwrite: LD      HL,PROG
+cw1:    LD      A,(HL)
+        OR      A
+        JR      Z,ged1
+        RST     28h
+        INC     HL
+        JR      cw1
+        ENDIF
+
+        IF      EDITOR*CPM
+CFCB     EQU     005Ch           ; the file's name is kept here, where the CCP
+                                ;   put the one from the command line
+; ^R, CP/M: read the file. A name typed before the key is the file's name
+; from now on.
+cread:  CALL    setname
+        CALL    load
+        JP      edit
+
+; ^W, CP/M: write the file: delete the old one, make it anew, write the
+; text in records of 128 bytes, and close it. The text's NUL and the 127
+; bytes after it are set to ^Z meanwhile, which pads the last record.
+cwrite: CALL    setname
+        CALL    fcbclr
+        LD      C,19            ; delete
+        CALL    fbdos
+        LD      C,22            ; make
+        CALL    fbdos
+        INC     A
+        JP      Z,edit          ; no room in the directory
+        LD      HL,PROG
+        XOR     A
+cw1:    CP      (HL)
+        INC     HL
+        JR      NZ,cw1
+        DEC     HL              ; HL -> the NUL
+        PUSH    HL
+        LD      B,128
+cw2:    LD      (HL),1Ah
+        INC     HL
+        DJNZ    cw2
+        POP     HL
+        LD      DE,PROG
+cw3:    LD      A,E             ; a record that starts before the end is written
+        SUB     L
+        LD      A,D
+        SBC     A,H
+        JR      NC,cw4
+        PUSH    HL
+        PUSH    DE
+        LD      C,26            ; set the DMA address: the record is written
+        CALL    BDOS            ;   from where it lies
+        LD      C,21            ; write
+        CALL    fbdos
+        POP     HL
+        LD      DE,128
+        ADD     HL,DE
+        EX      DE,HL
+        POP     HL
+        JR      cw3
+cw4:    LD      (HL),0          ; the NUL again
+        LD      C,16            ; close
+        CALL    fbdos
+        JP      edit
+
+; setname: if a name was typed (the line does not start with its CR), put it
+; in the CFCB: up to 8 characters, a dot, up to 3 more, in capitals. The drive
+; is the current one.
+setname:LD      DE,LINEBUF
+        LD      A,(DE)
+        CP      13
+        RET     Z
+        LD      HL,CFCB
+        LD      (HL),0          ; the current drive
+        LD      B,11
+sn1:    INC     L
+        LD      (HL),' '
+        DJNZ    sn1
+        LD      L,CFCB+1
+sn2:    LD      A,(DE)
+        INC     DE
+        CP      13
+        RET     Z
+        CP      '.'
+        JR      NZ,sn3
+        LD      L,CFCB+9         ; the type
+        JR      sn2
+sn3:    CP      'a'
+        JR      C,sn4
+        AND     5Fh             ; a capital
+sn4:    LD      (HL),A
+        INC     L
+        JR      sn2
+
+; fcbclr: clear the CFCB after its name, as it must be before a file is opened
+fcbclr: LD      HL,CFCB+12
+        LD      B,24
+fc1:    LD      (HL),0
+        INC     HL
+        DJNZ    fc1
+        RET
+
+; fbdos: BDOS function C on the file
+fbdos:  LD      DE,CFCB
+        JP      BDOS
+
+; load: read the file into PROG. No such file: no program. The text ends at
+; the file's first ^Z (1Ah), which pads a text file's last record; one more
+; goes after the last record, so the search always stops. And every line
+; must end in LF: a last line without one is given a CR LF.
+load:   CALL    fcbclr
+        LD      C,15            ; open (no such file: the first read fails
+        CALL    fbdos           ;   too)
+        LD      DE,PROG
+ld1:    PUSH    DE
+        LD      C,26            ; set the DMA address
+        CALL    BDOS
+        LD      C,20            ; read the next 128 bytes
+        CALL    fbdos
+        POP     HL              ; HL = the address this record went to
+        OR      A
+        JR      NZ,ld2
+        LD      DE,128
+        ADD     HL,DE
+        EX      DE,HL
+        JR      ld1
+ld2:    LD      (HL),1Ah
+        LD      HL,PROG-1
+        LD      A,10            ; (a file with no text needs nothing added)
+tr1:    INC     HL
+        LD      E,A             ; E = the character before this one
+        LD      A,(HL)
+        CP      1Ah
+        JR      NZ,tr1
+        LD      A,E
+        CP      10
+        JR      Z,tr2
+        LD      (HL),13
+        INC     HL
+        LD      (HL),10
+        INC     HL
+tr2:    LD      (HL),0
+        RET
+        ENDIF
+
 ; =============================================================================
 ;  CP/M startup (the generic build starts at address 0: see st0)
 ; =============================================================================
@@ -1701,6 +2203,12 @@ ini1:   LD      (HL),A
         LD      DE,0008h
         LD      BC,vecend-vecs
         LDIR
+        ENDIF
+        IF      CPM*EDITOR
+        CALL    load            ; the file named on the command line
+        JP      edit0
+        ENDIF
+        IF      CPM*(1-EDITOR)
         LD      DE,005Ch        ; open the file named on the command line
         LD      C,15            ; (no such file: the first read fails too,
         CALL    BDOS            ;   and the program is empty)
@@ -1718,36 +2226,10 @@ ld1:    PUSH    DE
         ADD     HL,DE
         EX      DE,HL
         JR      ld1
-ld2:
-        ENDIF
-        IF      CPM*(1-EDITOR)
-        LD      (HL),0          ; the end of the file counts as NUL
+ld2:    LD      (HL),0          ; the end of the file counts as NUL
         INC     HL              ; the heap starts after it
         LD      BC,PROG         ; the IP
         JP      st2
-        ENDIF
-        IF      CPM*EDITOR
-        ; The editor wants the text to end where the file's text ends: at
-        ; the first ^Z (1Ah), which pads a text file's last record. One more
-        ; goes after the last record, so the search always stops. And every
-        ; line must end in LF: a last line without one is given a CR LF.
-        LD      (HL),1Ah
-        LD      HL,PROG-1
-        LD      A,10            ; (a file with no text needs nothing added)
-tr1:    INC     HL
-        LD      E,A             ; E = the character before this one
-        LD      A,(HL)
-        CP      1Ah
-        JR      NZ,tr1
-        LD      A,E
-        CP      10
-        JR      Z,tr2
-        LD      (HL),13
-        INC     HL
-        LD      (HL),10
-        INC     HL
-tr2:    LD      (HL),0
-        JP      edit
         ENDIF
 
         IF      CPM

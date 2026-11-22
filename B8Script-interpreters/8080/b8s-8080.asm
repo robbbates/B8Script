@@ -13,6 +13,10 @@
 ;                 with a four-line report: the letter and the place as line
 ;                 and column, the text there, and both stacks. See `error`.
 ;
+;  In every build Ctrl-C stops a running program (an unchecked build stops
+;  without a word): see the console layer for the rules, the held key and
+;  the break-off cell.
+;
 ;  Assembler: asm80 (https://maly.github.io/asm80-node/), I8080 mode.
 ; =============================================================================
 

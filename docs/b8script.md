@@ -13,6 +13,7 @@ B8Script is a postfix stack language for 64 KB 8-bit computers. Every instructio
 - [Memory, heap and machine code](#memory-heap-and-machine-code)
 - [Errors and checked builds](#errors-and-checked-builds)
 - [The break key](#the-break-key)
+- [The console](#the-console)
 - [Idioms](#idioms)
 - [Tips and gotchas](#tips-and-gotchas)
 - [Examples](#examples)
@@ -363,6 +364,30 @@ Every build, checked or not, stops a running program on Ctrl-C (03h).
 
 [↑ Back to top](#b8script-spec)
 
+## The console
+
+Output is a stream of bytes: `'`, `$` and `#` write to it, and a line ends with CR LF (`13'10'`, or `/M/J` in a string). Input is raw bytes from `?`. What special keys (arrows, function keys) send is implementation-defined; on an ANSI terminal the arrows send ESC `[` and a letter.
+
+**Screen control.** B8Script has no screen commands of its own. Programs use a small subset of the ANSI (VT100) escape sequences, written as strings, and every environment should make that subset work:
+
+| Sequence | In a string | Does |
+|---|---|---|
+| ESC `[2J` | `"/[[2J"` | Clear the screen. The cursor may or may not move, so follow it with ESC `[H` |
+| ESC `[H` | `"/[[H"` | Cursor to the top left |
+| ESC `[`row`;`col`H` | `"/[[5;10H"` | Cursor to that row and column, counted from 1 |
+| ESC `[K` | `"/[[K"` | Clear from the cursor to the end of the line |
+| ESC `[J` | `"/[[J"` | Clear from the cursor to the end of the screen |
+
+- **On an ANSI terminal or emulator** there is nothing to do: the bytes go straight out.
+- **Anywhere else** (a machine's own video, a non-ANSI terminal, or a console that needs a mode switch, as Windows does), the implementation or the machine's console driver translates the subset. A translator must also swallow every other sequence of the same shape, quietly: ESC, `[`, any digits and `;`, then one final character from 40h to 7Eh. A program that uses more of ANSI then loses only the effect, and prints no garbage.
+- **The existing builds:** the Z80, 8080, 6502 and 6809 interpreters send bytes unchanged, so on those machines the subset needs an ANSI terminal, or a console output routine (`CONOUT` or the machine's own) that translates it. The Windows builds switch the console into its ANSI mode (Appendix G).
+- **Screen size** is implementation-defined and given in the appendix; 80 × 24 is the usual. Programs that assume a size should say so.
+- **More than the subset** (colours, hiding the cursor, scrolling regions) works only on real ANSI terminals. Keep it optional in a program.
+
+Keep a program's screen control in a few words at the top (see *Screen* under Idioms). Moving the program to a machine with some other console then means rewriting those words and nothing else.
+
+[↑ Back to top](#b8script-spec)
+
 ## Idioms
 
 Every idiom here runs as shown in the reference interpreter. A word in this section is free for you to rename; the letters are only what the examples use.
@@ -505,12 +530,19 @@ These assume you know your nesting depth: inside a block, the top of the return 
 |---|---|
 | Comment | `"any text";` |
 | New line | `13'10'` |
-| Clear screen (ANSI) | `"/[[2J/[[H"$` |
 | Wait for a key | `0?` |
 | Random seed from key timing | `0r! [K0 1(;r@1+r!1?:0=)]` |
 | Read a number | `[N0v!1(0?:48<\48-:#v@10*+v!1);v@]` |
 | Read a line | `-72?a!` (the text at a ends with CR, 13) |
 | Run a typed line | `[X{] -72?:{1(:,13=\1+1)93%.}X` (writes `]` over the CR, then runs it) |
+
+**Screen** (the console subset; see [The console](#the-console))
+
+| Name | Code | Effect |
+|---|---|---|
+| Clear the screen | `[C"/[[2J/[[H"$]` | Clears and homes the cursor |
+| Clear to the end of the line | `[K"/[[K"$]` |  |
+| Cursor to row, column | `[Y27'91'%#59'#72']` | `( row col -- )`, counted from 1: `5 10Y` sends ESC `[5;10H` |
 
 **Debugging**
 
@@ -542,6 +574,7 @@ If anything leaked, the top of the stack at the end isn't the sentinel. Add it w
 - **Use `0?` to wait for a key, `1?` in real-time loops and `-n?` for typed text,** which it echoes and edits for you. `n?` waits about n ms, so a game's frame time can be set with it instead of counting loops.
 - **Reading addresses.** `#` prints signed, so an address above 7FFFh prints as a negative number: F000h prints as −4096. A decimal literal wraps, so `61440` and `-4096` are the same address. Every appendix lists its addresses in hex, unsigned and signed.
 - **Slashes in strings.** Write `//` for a slash: `"n/s/e/w"` would print `n3%7`.
+- **Keep screen control in words.** Put every escape sequence in a few words such as C, K and Y above, so a program moves to another console by rewriting only them.
 - **Develop on a checked build, run on an unchecked one.** Then test once on the unchecked build too, for the reasons under Don't rely on.
 - **System values live in the appendices.** Heap limit, free memory, the break-off address and similar values are per build. A program that uses them is tied to that build.
 
@@ -554,6 +587,7 @@ These differ between builds or environments, so a portable program must not depe
 - keys typed while a program runs, other than through the held key;
 - how -n? echoes and treats keys other than Backspace and CR;
 - the result of dividing by 0;
+- where the cursor is after a clear screen, the screen's size, and any escape sequence outside the console subset;
 - memory layout, stack sizes and the heap limit.
 
 [↑ Back to top](#b8script-spec)
@@ -619,6 +653,7 @@ This chapter is for anyone writing an interpreter. The first part lists what the
 - **The hex loader.** Mixed case, an odd last digit dropped, the platform's RET byte written, its address left.
 - **The break key.** Ctrl-C stops every build, polled as described under The break key.
 - **Reserved bytes.** Ignored by unchecked builds, `X` in checked builds.
+- **The console subset.** It should work in every environment, translated where the console is not ANSI, with other sequences of the same shape swallowed (see [The console](#the-console)). An appendix says how its build meets this, and gives the screen size.
 - **Checked builds.** The startup state, the error codes, the report format and the behaviour after an error, as in [Errors and checked builds](#errors-and-checked-builds).
 - **An appendix.** Each implementation documents its memory map, stack sizes, heap limit, machine-code contract, RET byte, system addresses (in hex, unsigned and signed decimal) and build options.
 
@@ -1043,7 +1078,7 @@ Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`,
 
 The stacks are outside the 64 KB. The data stack is the program's own Windows stack, one 32-bit slot per cell: 127 cells in a checked build, as much as Windows gives (1 MB) in an unchecked one. The return stack holds 112 entries in a checked build. Memory starts as zeros in every build.
 
-**Console.** Output goes to standard output, and a checked build's report to standard error. Keys come from the console unechoed, Ctrl-C among them; when input is redirected, bytes are read from it instead, by `?`, `-n?` and the editor only. `-n?` is the plain line read of the generic builds.
+**Console.** Output goes to standard output, and a checked build's report to standard error. Keys come from the console unechoed, Ctrl-C among them; when input is redirected, bytes are read from it instead, by `?`, `-n?` and the editor only. `-n?` is the plain line read of the generic builds. At startup the output's console mode is set to 7 (processed output, wrap at the end of a line, and virtual terminal processing), so the console subset and the rest of ANSI work in the Windows 10 and later console as on a terminal. On older Windows, or when the output is redirected, the call fails and the bytes go out unchanged. The mode is left on at the end, which does no harm.
 
 **The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
 

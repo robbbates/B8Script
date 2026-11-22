@@ -196,6 +196,15 @@ start:  mov     ebp,next
         push    0
         push    dword [V(v_hin)]
         call    [V(iat_SetConsoleMode)]
+        ; ANSI escape sequences: the output mode becomes processed output,
+        ; wrap at the end of a line and virtual terminal processing (1+2+4),
+        ; so the console obeys ESC [ ... as a terminal does. 1+2 is the
+        ; console's usual output mode. On Windows before 10, or when the
+        ; output is not a console, the call fails and nothing changes. The
+        ; mode is left on at the end, which does no harm.
+        push    7
+        push    dword [V(v_outh)]
+        call    [V(iat_SetConsoleMode)]
         ; The command line: the program's own name, then the file's.
         call    [V(iat_GetCommandLineA)]
         xchg    eax,esi

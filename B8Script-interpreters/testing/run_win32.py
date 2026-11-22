@@ -14,7 +14,7 @@ the command line in quotes, or no program at all.
 """
 import sys, os, glob, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from harness_win32 import Run, plat, symbols, HIN
+from harness_win32 import Run, plat, symbols, HIN, HOUT
 import tests
 from run_tests import check
 import test_editor
@@ -65,6 +65,14 @@ def windows_only(exe, checked, editor, verbose):
             r.run()
             ok(r.modes[0] == (HIN, 0) and r.modes[-1] == (HIN, 0x1F7) and r.ended == 'exit',
                f'the input mode is raw, then put back ({p!r})', r)
+        # ANSI sequences: virtual terminal processing is turned on for the
+        # output, once, at the start (a redirected output just fails the call)
+        for oc in (True, False):
+            r = Run(exe, b'"/[[2J/[[Hhi"$', b'', outcon=oc)
+            o = r.run()
+            ok(o == b'\x1b[2J\x1b[Hhi' and [x for x in r.modes if x[0] == HOUT] == [(HOUT, 7)]
+               and r.modes[0] == (HIN, 0) and r.ended == 'exit',
+               f'VT processing asked for on the output (output a console: {oc})', r)
         # input that is not a console: bytes from ReadFile, and the end of
         # it ends the program; the break check does not read it
         r = Run(exe, b'0?# 0i! 1( i@1+:i! 3000<) 0?# -9?; 0?# 0?# "no"$', b'AB12\rC', console=False)
@@ -87,8 +95,8 @@ def windows_only(exe, checked, editor, verbose):
         # the console's mode is put back when the editor is left
         r = Run(exe, b'', [b'\x18'], mode='editor', files={})
         r.run()
-        ok(r.modes[0] == (HIN, 0) and r.modes[-1] == (HIN, 0x1F7) and r.ended == 'exit',
-           'the input mode is put back at ^X', r)
+        ok(r.modes[0] == (HIN, 0) and r.modes[-1] == (HIN, 0x1F7) and (HOUT, 7) in r.modes
+           and r.ended == 'exit', 'the input mode is put back at ^X; VT output on', r)
         if checked:
             r = Run(exe, b'', [b' "abc"$ 1 0/\r'], mode='editor', files={})
             o = r.run()

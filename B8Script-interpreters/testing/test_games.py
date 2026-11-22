@@ -216,6 +216,20 @@ TESTS += [
 ]
 
 
+# Reversi, seed 1: games against a small minimax player in Python, reading the
+# board from the game (three moves deep wins as X and as O; two deep loses)
+TESTS += [
+    ('REVERSI', 'you win as X', b'xyd3b6c2d1f5f3a5b1h3c7a3e1g6f1e2a4h5h7f6f8a7c4d7h1d8b8b2h2b7g7n',
+     [b'You are X, I am O.', b'I play ', b'You win 37 to 27.', b'Bye.']),
+    ('REVERSI', 'you win as O', b'xnd6d3b3d8a5a3e1c1f4f8e2c2a1b5a7c5c8e3a8g4f1h3h5h1e6g5f6h7h8g2n',
+     [b'You are O, I am X.', b'You win 48 to 16.', b'Bye.']),
+    ('REVERSI', 'it wins', b'xyd3b6c2d1d6g3b1g6h6h4a5e1c4c3a3a4g1d8h3h1a7c6e6f8f7f6b8b7g7h7n',
+     [b'I win 42 to 22.', b'Bye.']),
+    ('REVERSI', 'marks, a bad cell, the cursor, resign', b'xymd4a1 d3qn',
+     [b'\x1b[6;11H+', b"You can't play there.", b'I play ', b'X 4   O 1', b'You resign.', b'Bye.']),
+]
+
+
 def play(path, keys, steps=20_000_000):
     r = Play(open(path, 'rb').read(), keys, checked=True)
     out = r.run(steps)

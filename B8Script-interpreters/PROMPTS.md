@@ -96,8 +96,8 @@ bytes, one CPU at a time. Ideas not yet tried:
 - Every build: the break-off cell and its 250 ms wait for a second Ctrl-C
   is about 30 bytes.
 - Windows: a file only shrinks in steps of 512 bytes. The four builds are
-  1502, 2032, 2538 and 2968 bytes past their headers, so the next steps
-  down are 478, 496, 490 and 408 bytes away: not in reach by trimming.
+  1506, 2032, 2538 and 2968 bytes past their headers, so the next steps
+  down are 482, 496, 490 and 408 bytes away: not in reach by trimming.
   What matters there is not to grow past the 30, 16, 22 and 104 bytes
   each has to spare.
 

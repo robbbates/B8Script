@@ -368,21 +368,38 @@ Every build, checked or not, stops a running program on Ctrl-C (03h).
 
 Output is a stream of bytes: `'`, `$` and `#` write to it, and a line ends with CR LF (`13'10'`, or `/M/J` in a string). Input is raw bytes from `?`. What special keys (arrows, function keys) send is implementation-defined; on an ANSI terminal the arrows send ESC `[` and a letter.
 
+**Control codes.** These act on the cursor rather than print:
+
+| Code | Does |
+|---|---|
+| CR (0Dh) | Cursor to the start of the line |
+| LF (0Ah) | Cursor down one line; on the bottom line the screen scrolls up |
+| BS (08h) | Cursor left one place, without erasing |
+| BEL (07h) | A beep, or nothing |
+| ESC (1Bh) | Starts an escape sequence (below) |
+
+What the other control codes do (TAB among them) is implementation-defined: a machine may show them as glyphs. So is what happens after a character is written in the last column: the cursor may wrap to the next line or stay. Programs that draw to the edge of the screen should place the cursor themselves.
+
 **Screen control.** B8Script has no screen commands of its own. Programs use a small subset of the ANSI (VT100) escape sequences, written as strings, and every environment should make that subset work:
 
 | Sequence | In a string | Does |
 |---|---|---|
 | ESC `[2J` | `"/[[2J"` | Clear the screen. The cursor may or may not move, so follow it with ESC `[H` |
+| ESC `[J` | `"/[[J"` | Clear from the cursor to the end of the screen |
 | ESC `[H` | `"/[[H"` | Cursor to the top left |
 | ESC `[`row`;`col`H` | `"/[[5;10H"` | Cursor to that row and column, counted from 1 |
 | ESC `[K` | `"/[[K"` | Clear from the cursor to the end of the line |
-| ESC `[J` | `"/[[J"` | Clear from the cursor to the end of the screen |
+| ESC `[2K` | `"/[[2K"` | Clear the whole line the cursor is on; the cursor stays where it is |
+| ESC `[?25l` | `"/[[?25l"` | Hide the cursor |
+| ESC `[?25h` | `"/[[?25h"` | Show the cursor |
 
+- **Hiding the cursor.** Some terminals don't understand ESC `[?25l` and ESC `[?25h`. Put them at the very start and end of the program, each on its own line, so they are easy to delete or comment out for such a terminal (see *Screen* under Idioms). A program that hides the cursor must show it again before it ends, or the cursor stays hidden after it. After a break or an error the program can't, so an environment that goes back to a prompt or editor should show the cursor again itself, where its console understands the sequence.
 - **On an ANSI terminal or emulator** there is nothing to do: the bytes go straight out.
-- **Anywhere else** (a machine's own video, a non-ANSI terminal, or a console that needs a mode switch, as Windows does), the implementation or the machine's console driver translates the subset. A translator must also swallow every other sequence of the same shape, quietly: ESC, `[`, any digits and `;`, then one final character from 40h to 7Eh. A program that uses more of ANSI then loses only the effect, and prints no garbage.
+- **Anywhere else** (a machine's own video, a non-ANSI terminal, or a console that needs a mode switch, as Windows does), the implementation or the machine's console driver translates the subset.
+- **Everything else is swallowed.** A translator must quietly swallow every other sequence of the ANSI shape (ECMA-48): ESC, `[`, any number of parameter bytes from 30h to 3Fh (digits, `;`, `<` `=` `>` `?`), any number of intermediate bytes from 20h to 2Fh, then one final byte from 40h to 7Eh. A program that uses more of ANSI (colours, say) then loses only the effect, and prints no garbage. ESC followed by anything other than `[` is implementation-defined.
 - **The existing builds:** the Z80, 8080, 6502 and 6809 interpreters send bytes unchanged, so on those machines the subset needs an ANSI terminal, or a console output routine (`CONOUT` or the machine's own) that translates it. The Windows builds switch the console into its ANSI mode (Appendix G).
 - **Screen size** is implementation-defined and given in the appendix; 80 × 24 is the usual. Programs that assume a size should say so.
-- **More than the subset** (colours, hiding the cursor, scrolling regions) works only on real ANSI terminals. Keep it optional in a program.
+- **More than the subset** (colours, reverse video, scrolling regions) works only on real ANSI terminals. Keep it optional in a program.
 
 Keep a program's screen control in a few words at the top (see *Screen* under Idioms). Moving the program to a machine with some other console then means rewriting those words and nothing else.
 
@@ -542,6 +559,8 @@ These assume you know your nesting depth: inside a block, the top of the return 
 |---|---|---|
 | Clear the screen | `[C"/[[2J/[[H"$]` | Clears and homes the cursor |
 | Clear to the end of the line | `[K"/[[K"$]` |  |
+| Clear the whole line | `"/[[2K"$` | The cursor stays put; send CR after it to start the line again |
+| Hide the cursor, show it again | `"/[[?25l"$` first, `"/[[?25h"$` last | Each on its own line at the start and end of the program, so it can be deleted for a terminal that doesn't know it |
 | Cursor to row, column | `[Y27'91'%#59'#72']` | `( row col -- )`, counted from 1: `5 10Y` sends ESC `[5;10H` |
 
 **Debugging**
@@ -587,7 +606,7 @@ These differ between builds or environments, so a portable program must not depe
 - keys typed while a program runs, other than through the held key;
 - how -n? echoes and treats keys other than Backspace and CR;
 - the result of dividing by 0;
-- where the cursor is after a clear screen, the screen's size, and any escape sequence outside the console subset;
+- where the cursor is after a clear screen, what happens after the last column, what control codes other than CR, LF, BS, BEL and ESC do, the screen's size, and any escape sequence outside the console subset;
 - memory layout, stack sizes and the heap limit.
 
 [↑ Back to top](#b8script-spec)
@@ -653,7 +672,7 @@ This chapter is for anyone writing an interpreter. The first part lists what the
 - **The hex loader.** Mixed case, an odd last digit dropped, the platform's RET byte written, its address left.
 - **The break key.** Ctrl-C stops every build, polled as described under The break key.
 - **Reserved bytes.** Ignored by unchecked builds, `X` in checked builds.
-- **The console subset.** It should work in every environment, translated where the console is not ANSI, with other sequences of the same shape swallowed (see [The console](#the-console)). An appendix says how its build meets this, and gives the screen size.
+- **The console.** The control codes and the console subset should work in every environment, translated where the console is not ANSI, with every other ANSI-shaped sequence swallowed (see [The console](#the-console)). An appendix says how its build meets this, and gives the screen size.
 - **Checked builds.** The startup state, the error codes, the report format and the behaviour after an error, as in [Errors and checked builds](#errors-and-checked-builds).
 - **An appendix.** Each implementation documents its memory map, stack sizes, heap limit, machine-code contract, RET byte, system addresses (in hex, unsigned and signed decimal) and build options.
 

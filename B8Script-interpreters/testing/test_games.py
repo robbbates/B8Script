@@ -263,8 +263,8 @@ TESTS += [
      [b'Docked at Xeva.', b'Docked at Kaxe.', b'Day 2', b'Fuel 4/7', b'Debt 5050',
       b'Refuelled 3 units for 60.', b'Cr 940']),
     ('IDOL', 'a profitable trade', b'nmsssb\rcsssssss\rmsssx\r',
-     [b'Buy Machinery: how many (Return for 18)? ', b'Bought 18 t of Machinery for 954.',
-      b'Docked at Talo.', b'Sold 18 t of Machinery for 1188.', b'Cr 1234']),
+     [b'Buy Machinery: how many (Return for 20)? ', b'Bought 20 t of Machinery for 980.',
+      b'Docked at Talo.', b'Sold 20 t of Machinery for 1400.', b'Cr 1420']),
     ('IDOL', 'an upgrade, then too little money', b'nysbsbr',
      [b'Shield\x1b[5;17H0 of 2\x1b[5;46H  1000', b'Bought: Shield.',
       b'Courier L1 S1 M0', b'Cr 0\x1b', b"You can't pay for that.", b'The hull needs no repair.']),
@@ -280,8 +280,8 @@ TESTS += [
       b'Your ship is destroyed, and you with it. Game over.', b'Press a key.', b'Bye.']),
     # the police scan you on the way back home on day 3
     ('IDOL', 'a police scan: submit', b'nmssssssb5\rc\r\rs',
-     [b'Bought 5 t of Narcotics for 740.', b'The police find 5 t of contraband. s submits, r resists.',
-      b'They take it and fine you 600.', b'Docked at Xeva.', b'Cr 260']),
+     [b'Bought 5 t of Narcotics for 730.', b'The police find 5 t of contraband. s submits, r resists.',
+      b'They take it and fine you 600.', b'Docked at Xeva.', b'Cr 0\x1b', b'Debt 5430']),
     ('IDOL', 'a police scan: resist', b'nmssssssb5\rc\r\rrf',
      [b'You resist the police!', b'Duel: police ship, level 3', b'Wanted 20']),
     ('IDOL', 'pay the loan', b'nl500\rl\rl',
@@ -306,9 +306,9 @@ TESTS += [
     # a save code made, loaded back, and played on: the state cells and the stock
     # here are checked by idol_save() below; here the messages
     ('IDOL', 'a save code', b'nmsssb\rcss\rv',
-     [b'Save code: cMIVd2vD-7P5q_XvyuvjNOXj4es2fvBMuX4lS-KFd-iptMG']),
-    ('IDOL', 'a mistyped save code refused, then the right one', b'lcMIVd2vD-7P5q_XvyuvjNOXj4es2fvBMuX4lS-KFdXiptMG\rlcMIVd2vD-7P5q_XvyuvjNOXj4es2fvBMuX4lS-KFd-iptMG\r',
-     [b'That code is not right.', b'Docked at Kaxe.', b'Cr 46', b'Debt 5050', b'Fuel 4/7', b'Cargo 18/20']),
+     [b'Save code: cMIVd2vD-BP5q_XvytvjNOXj4es2fvBMuX4lS-LB8ucy1M6M']),
+    ('IDOL', 'a mistyped save code refused, then the right one', b'lcMIVd2vD-BP5q_XvytvjNOXj4es2fvBMuX4lS-LB8ucy1N6M\rlcMIVd2vD-BP5q_XvytvjNOXj4es2fvBMuX4lS-LB8ucy1M6M\r',
+     [b'That code is not right.', b'Docked at Kaxe.', b'Cr 20\x1b', b'Debt 5050', b'Fuel 4/7', b'Cargo 20/20']),
 ]
 
 
@@ -320,6 +320,59 @@ IDOL_SAVES = [
     (b'nmsssb\rcss\rv', b'mb\rcs\r'),
     (b'nss\rk2mssssssssbcs\rv', b'\rf\r'),
     (b'n' + b's' * 13 + b'\rtv', b'sss\rf'),
+]
+
+
+# Idol's save code, made in Python from the format in IDOL.TXT (the notes before
+# routine 70), so that a test can start from a state set up for it: the cells 0
+# to 33 at their widths, the stock where you are, a salt, the XOR, the check
+IDOL_WIDTHS = [16, 10, 10, 14, 15, 6] + [7] * 8 + [2, 3, 3, 3, 2, 2, 7, 4, 1, 1, 5, 6, 6, 2, 6, 3, 7, 10, 15, 1]
+IDOL_ALPHA = b'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+
+
+def idol_code(cells, stock, salt=5):
+    bits = '0001' + ''.join(format(v & (1 << w) - 1, f'0{w}b') for v, w in zip(cells, IDOL_WIDTHS))
+    bits += ''.join(format(v, '07b') for v in stock)
+    vals = [salt] + [int(bits[i:i + 6], 2) for i in range(0, len(bits), 6)]
+    r = (salt * 97 + 12345) & 0xFFFF
+    for i in range(1, len(vals)):
+        r = (r * 25173 + 13849) & 0xFFFF            # R, as in the program
+        q = int((r - 65536 if r > 32767 else r) / 256)
+        vals[i] ^= (q & 255) % 64
+    c = 0
+    for v in vals:
+        c = (c * 3 + v) & 63
+    return bytes(IDOL_ALPHA[v] for v in vals + [c])
+
+
+def idol_cells(**kw):
+    """the state of a new game on seed 1 (day 1, home, a new Courier), changed by kw"""
+    names = ('seed day cashhi cashlo debt pos c0 c1 c2 c3 c4 c5 c6 c7 cls laser shield missiles pods '
+             'tankup hull fuel escape hidden wanted held known ckind cdest cgood ctonnes cdead cpay cpass').split()
+    cells = dict.fromkeys(names, 0)
+    cells.update(seed=1, day=1, cashlo=1000, debt=5000, laser=1, hull=30, fuel=7)
+    cells.update(kw)
+    return [cells[n] for n in names]
+
+
+# seed 1: the Base of the idol (part 5) lies at system 43 and wants 26 t of
+# Medicine and 13 t of Machinery
+IDOL_BASE = dict(pos=43, c4=26, c3=13, pods=2, cashlo=3000, day=50)
+TESTS += [
+    ('IDOL', 'an idol part traded', b'l' + idol_code(idol_cells(**IDOL_BASE), [60] * 8) + b'\rt',
+     [b"The Idol's Base is here: 26 t of Medicine and 13 t of Machinery (t trades).",
+      b"You trade for the Idol's Base: 1 of 6.", b'Idol 1/6', b'Cargo 0/40']),
+    ('IDOL', 'the win', b'l' + idol_code(idol_cells(held=31, debt=0, **IDOL_BASE), [60] * 8) + b'\rt\r',
+     [b"You trade for the Idol's Base: 6 of 6.", b' is whole and the loan is paid. You win in 50 days!',
+      b'Press a key.', b'Bye.']),
+    ('IDOL', 'the end at day 999', b'l' + idol_code(idol_cells(day=998, held=5), [60] * 8) + b'\r\r\r',
+     [b'Day 999', b'Day 999: the end. You held 2 of the six parts of the Idol of ', b'Bye.']),
+    # a hull of 2 loses the first duel out (the 16th system): with an escape pod,
+    # and without one
+    ('IDOL', 'a duel lost with an escape pod', b'l' + idol_code(idol_cells(hull=2, escape=1, c0=10), [60] * 8)
+     + b'\r' + b's' * 16 + b'\rcl',
+     [b'Duel: pirate ship', b'Your ship is lost. The escape pod takes you home to a new Courier.',
+      b'Docked at Xeva.', b'Debt 10050', b'Cargo 0/20']),
 ]
 
 
@@ -335,7 +388,7 @@ def idol_saves(path):
     bad = 0
     for keys, more in IDOL_SAVES:
         r, out = play(path, keys)
-        code = re.findall(rb'Save code: ([A-Za-z0-9_-]{47})', out)[-1]
+        code = re.findall(rb'Save code: ([A-Za-z0-9_-]{48})', out)[-1]
         for tail in (b'', more):
             a, _ = play(path, keys + tail)
             b, _ = play(path, b'l' + code + b'\r' + tail)

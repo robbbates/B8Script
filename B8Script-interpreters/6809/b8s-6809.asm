@@ -1353,11 +1353,11 @@ g_cur:  BSR     csi
         BSR     gputc
         LDA     #'5'
         BSR     gputc
-        LDB     #'l'
-        LDX     ,U++
+        LDX     ,U++            ; the flag
         BEQ     gc1
-        LDB     #'h'
-gc1:    TFR     B,A
+        LDA     #'h'
+        FCB     8Ch             ; (CMPX #: steps over the LDA)
+gc1:    LDA     #'l'
         BRA     gputc
 
 ; csi: print ESC [, which starts every ANSI sequence.
@@ -1378,10 +1378,10 @@ g_at:   BSR     csi
         LDA     #'H'
         BRA     gputc
 ; pinc: print the top cell plus 1, unsigned, and drop it
-pinc:   LDD     ,U
-        ADDD    #1
-        STD     ,U
-        JMP     pdec
+pinc:   INC     1,U
+        BNE     pi1
+        INC     ,U
+pi1:    JMP     pdec
         ENDIF
         IF      1-ANSI
 ; With ANSI = 0 the machine's own routines do the work (see the equates).

@@ -1372,20 +1372,13 @@ g_rnd:
 gr9:    JMP     e_zero
 gr8:
         ENDIF
-        LDA     TL
-        STA     D0
-        LDA     TH
-        STA     D1              ; D = n
         LDA     SEED
-        STA     TL
-        LDA     SEED+1
-        STA     TH              ; TOS = the seed
-        DEX
-        LDA     #05h            ; 261 is 0105h
-        STA     DSL,X
-        LDA     #01h
-        STA     DSH,X
-        JSR     h_mul           ; TOS = seed * 261
+        LDY     SEED+1
+        JSR     pushay          ; the seed,
+        LDA     #05h            ;   and 261 (0105h) on top of it
+        LDY     #01h
+        JSR     pushay
+        JSR     h_mul           ; TOS = seed * 261, and n is under it again
         JSR     inctos
         LDA     TL
         STA     SEED
@@ -1393,9 +1386,12 @@ gr8:
         STA     SEED+1
         EOR     TL
         STA     TL
-        DEX                     ; a cell for the remainder
-        JSR     udiv
-        JMP     drop            ; the remainder is TOS
+        LDA     DSL,X
+        STA     D0
+        LDA     DSH,X
+        STA     D1              ; D = n
+        JSR     udiv            ; the remainder goes where n was,
+        JMP     drop            ;   and comes up as TOS
 
 ; `< and `>: one routine. scmp leaves the carry clear if a < b. Y is odd for
 ; '<' and even for '>', so the low bit of Y plus the carry is set when a,

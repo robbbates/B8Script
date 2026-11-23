@@ -1260,18 +1260,19 @@ g_rnd:
 
 ; `< and `>. The carry says which: set for the larger. The two are put in
 ; order, HL the smaller and DE the larger, and then swapped for '>'.
-; b < a (signed) is the sign of b - a, turned round if the subtraction
-; overflowed.
+; b < a (signed) is the borrow of b - a, turned round if the two signs
+; differ: RRA puts the borrow in bit 7, where the two XORs meet it.
 g_max:  SCF                     ; ('<' comes in with the carry clear)
 g_min:  POP     DE              ; DE = a, HL = b
         PUSH    AF
-        OR      A
-        SBC     HL,DE
+        LD      A,L
+        SUB     E
         LD      A,H
-        ADD     HL,DE           ; b again (the sign and overflow flags stay)
-        JP      PO,gm1
-        CPL
-gm1:    RLA                     ; carry: b < a
+        SBC     A,D
+        RRA
+        XOR     H
+        XOR     D
+        RLA                     ; carry: b < a
         JR      C,gm2
         EX      DE,HL
 gm2:    POP     AF

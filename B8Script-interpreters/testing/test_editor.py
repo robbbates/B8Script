@@ -277,6 +277,10 @@ def sessions():
 
     'enter, list, run': [R(b'1 "Hi"$'), R(b'2 2 3+#'), L, G],
     'run a line at once': [R(b' 7 6*#'), R(b'"x"$ 1 2+#'), R(b' [S:*] 9S#'), R(b'-5 3*#'), R(b'')],
+    "the grave's codes, typed and stored": [
+        R(b' 5x! x`+# x`-# x`-# 3 7`<# 3 7`># -3 7`<#'), R(b" 0`.! 6`,# 100`,# `' 30000`,#"),
+        R(b'1 2 3`@ "a"$ `^ "b"$ `_ 0`? 1`?'), R(b"2 4_:y! `$4142 ; y@,# y@1+,# `'"),
+        R(b'3 0i! 1( i@# i`+ 5<) 77`.! 10`,# 10`,#'), L, G, G],
     'insert in the middle and at the ends': [
         R(b'1 "b"$'), R(b'1 "a"$'), R(b'9 "d"$'), R(b'3 "c"$'), L, G],
     'delete': [R(b'1 1#'), R(b'2 2#'), R(b'3 3#'), R(b'4 4#'), L, R(b'2'), L, R(b'1'), L, R(b'9'), R(b'2'), L,

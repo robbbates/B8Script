@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  B8Script interpreter for the 6502 (NMOS opcodes only), with the data stack
 ;  in zero page
-;  Spec: docs/b8script.md (2026-11-21). -n? does no more editing than
+;  Spec: docs/b8script.md (2026-11-23). -n? does no more editing than
 ;        Backspace. Ctrl-C stops every build (see the console layer); the
 ;        break-off cell is BRKOFF, $047B.
 ;
@@ -31,6 +31,8 @@
 ; =============================================================================
 
 CHECKED EQU     0               ; 1 = checked build
+ANSI    EQU     1               ; 1 = the console codes send ANSI sequences;
+                                ; 0 = they call CONAT, CONCLS, CONEOL, CONCUR
 
 ; -----------------------------------------------------------------------------
 ;  Registers and zero page
@@ -114,6 +116,15 @@ KEY     EQU     0FF06h          ; a waiting key in A, or A = 0 if none is
 CONOUT  EQU     0FF03h          ; print the character in A
 EXIT    EQU     0FF09h          ; where to go when the program ends
 ;   KEY and CONOUT must preserve X and Y.
+        IF      1-ANSI
+; With ANSI = 0 the console codes call these four instead of sending ANSI
+; sequences. All must preserve X.
+CONAT   EQU     0FF0Ch          ; `@  cursor to row Y, column A, both from 0
+CONCLS  EQU     0FF0Fh          ; `^  clear the screen and home the cursor
+CONEOL  EQU     0FF12h          ; `_  clear from the cursor to the end of the line
+CONCUR  EQU     0FF15h          ; `?  cursor off if A = 0 (the Z flag is set
+                                ;     to match), on if not
+        ENDIF
 DSE     EQU     0F0h            ; X when the data stack is empty
 DSFULL  EQU     10h             ; X when it is full
 LETPAGE EQU     04h
@@ -125,6 +136,9 @@ HEAP    EQU     LET+7Ch         ; the heap pointer (the heap top)
 KEYBUF  EQU     LET+7Ah         ; a key held back by the break check (0: none)
 BRKOFF  EQU     LET+7Bh         ; the break-off cell: a program that stores a
                                 ;   non-zero byte here gets Ctrl-C as a key
+SEED    EQU     LET+76h         ; the random seed: the cell whose address `.
+                                ;   gives. Nothing sets it at the start but
+                                ;   the checked build's clearing
 CDOWN   EQU     LET+79h         ; the break check's countdown (see pnext)
 RSV     EQU     LET+35h         ; checked: S as it was before this character
 PEND    EQU     LET+38h         ; checked: the program's end, where the heap
@@ -499,16 +513,19 @@ negnum: LDA     #0              ; a number from 0 (the digit routine's start)
 ; Signed compares: a - b sets N and V; N xor V is "a < b". The carry ends up
 ; clear for true, and bool turns it into -1 (true) or 0.
 h_gt:   JSR     h_swap          ; a > b is b < a
-h_lt:   LDA     2,X
+h_lt:   JSR     scmp
+        INX
+        INX                     ; (keeps the carry; X is never 0)
+        BNE     bool            ; always
+; scmp: the carry clear if NOS < TOS (signed). `< and `> use it too.
+scmp:   LDA     2,X
         CMP     0,X
         LDA     3,X
         SBC     1,X
         BVS     lt1
         EOR     #80h
 lt1:    ASL
-        INX
-        INX                     ; (keeps the carry; X is never 0)
-        BNE     bool            ; always
+        RTS
 
 h_eq:   JSR     sub1            ; a - b: zero if equal; A = its high byte
         ORA     0,X
@@ -607,6 +624,10 @@ kt2:    JSR     getk
         BNE     seta
         DEY
         BNE     kt2
+        INC     SEED            ; a millisecond with no key stirs the random
+        BNE     kt5             ;   seed by one: how long a key takes to come
+        INC     SEED+1          ;   is the one thing here that is not the
+kt5:                            ;   same every time
         LDA     0,X             ; count the millisecond off:
         BNE     kt4
         LDA     1,X
@@ -784,30 +805,42 @@ dsk:
         ENDIF
         JMP     skip
 
-; ---- machine code: the grave
-; '`' plus a hex digit loads bytes: ( addr -- addr' ). Pairs of hex digits
-; are stored from addr until a non-hex character; then a RET (60h) is
-; written and its address is left. An odd last digit is consumed and dropped.
-; '`' plus anything else calls the machine code at TOS: ( addr -- ); see the
-; contract in the header.
-h_grave:JSR     rdhex
-        BCS     exec
-hx1:    ASL
-        ASL
-        ASL
-        ASL
-        STA     T0
-        JSR     rdhex
-        BCS     hx2             ; odd digit: already consumed, dropped
-        ORA     T0
-        STA     (0,X)           ; (never checked)
-        JSR     inctos
-        JSR     rdhex
-        BCC     hx1
-hx2:    LDA     #60h
-        STA     (0,X)
-        RTS
+; ---- the grave
+; The grave is a prefix: with the character after it, it is one command.
+; GTAB (after the three pages, with the handlers) holds each character with
+; its handler's address, less 1 for the RTS trick. A handler starts with the
+; carry SET and Y = three times its place in the table, and ends in RTS. A
+; character that is not in the table is unsafe: the unchecked build does
+; nothing, the checked build stops with W.
+h_grave:
+        IF      CHECKED
+        INC     PLACE           ; the place of anything that goes wrong in
+        BNE     gr0             ;   one of these is the character after the
+        INC     PLACE+1         ;   grave
+gr0:
+        ENDIF
+        JSR     getc
+        LDY     #GTABE-GTAB-3
+gr1:    CMP     GTAB,Y
+        BEQ     gr2
+        DEY
+        DEY
+        DEY
+        BPL     gr1
+        IF      1-CHECKED
+        RTS                     ; no such code
+        ENDIF
+        IF      CHECKED
+        JMP     eb1             ; no such code: W
+        ENDIF
+gr2:    LDA     GTAB+2,Y
+        PHA
+        LDA     GTAB+1,Y
+        PHA
+        RTS                     ; to the handler
 
+; `! ( addr -- ): call the machine code at addr; see the contract in the
+; header.
 exec:   LDA     0,X
         STA     T0
         LDA     1,X
@@ -886,6 +919,227 @@ chkst:  PHA
 ; =============================================================================
 
         UDIV
+
+; =============================================================================
+;  The grave's codes (h_grave, in the third page, is the dispatcher). Each
+;  starts with the carry SET and Y = three times its place in GTAB.
+;
+;    `!  ( addr -- )        call the machine code at addr (exec)
+;    `$  ( addr -- addr' )  the hex loader: pairs of hex digits are stored
+;                           from addr until a non-hex character; then a RTS
+;                           (60h) is written and its address is left. An odd
+;                           last digit is consumed and dropped.
+;    `'  ( -- )             new line: CR LF
+;    `+  ( addr -- n )      add 1 to the cell at addr and leave its new value
+;    `,  ( n -- r )         a random number from 0 to n-1 (n is 1 to 32767)
+;    `-  ( addr -- n )      subtract 1 from the cell at addr, the same way
+;    `.  ( -- addr )        the address of the random seed
+;    `<  ( a b -- n )       the smaller of the two (signed)
+;    `>  ( a b -- n )       the larger
+;    `?  ( flag -- )        the cursor off (0) or on
+;    `@  ( row col -- )     the cursor to that row and column, both from 0
+;    `^  ( -- )             clear the screen and home the cursor
+;    `_  ( -- )             clear from the cursor to the end of the line
+; =============================================================================
+GTAB:   DB      '!'
+        DW      exec-1
+        DB      '$'
+        DW      g_hex-1
+        DB      27h
+        DW      g_nl-1
+GPLUS:  DB      '+'
+        DW      g_inc-1
+        DB      ','
+        DW      g_rnd-1
+        DB      '-'
+        DW      g_inc-1
+        DB      '.'
+        DW      g_seed-1
+        DB      '<'             ; ('<' must have an odd place here, and '>'
+        DW      g_min-1         ;   an even one: see g_min)
+        DB      '>'
+        DW      g_min-1
+        DB      '?'
+        DW      g_cur-1
+        DB      '@'
+        DW      g_at-1
+        DB      '^'
+        DW      g_cls-1
+        DB      '_'
+        DW      g_eol-1
+GTABE:
+
+; `$ (never checked: the spec says so)
+g_hex:  JSR     rdhex
+        BCS     hx2
+        ASL
+        ASL
+        ASL
+        ASL
+        STA     T0
+        JSR     rdhex
+        BCS     hx2             ; odd digit: already consumed, dropped
+        ORA     T0
+        STA     (0,X)
+        JSR     inctos
+        BCC     g_hex           ; always (rdhex left the carry clear)
+hx2:    LDA     #60h
+        STA     (0,X)
+        RTS
+
+g_nl:   LDA     #13
+        JSR     CONOUT
+        LDA     #10
+        JMP     CONOUT
+
+; `+ and `-: one routine, which adds 1 or -1 (FFFFh): Y says which. The cell
+; is reached a byte at a time through the top cell, which moves on between.
+g_inc:
+        IF      CHECKED
+        JSR     chkst           ; each byte's address is tested, as for '!'
+        ENDIF
+        CPY     #GPLUS-GTAB+3   ; carry: '-'
+        LDA     #0
+        BCC     gi1
+        LDA     #0FFh
+gi1:    STA     T1              ; the high byte of 1 or -1,
+        ORA     #1              ;   and the low
+        CLC
+        ADC     (0,X)
+        STA     (0,X)
+        PHA
+        JSR     inctos          ; (keeps the carry)
+        IF      CHECKED
+        PHP
+        JSR     chkst
+        PLP
+        ENDIF
+        LDA     T1
+        ADC     (0,X)
+        STA     (0,X)
+        STA     1,X             ; the new value is TOS
+        PLA
+        STA     0,X
+        RTS
+
+; `. pushes the address of the random seed.
+g_seed: LDA     #<SEED
+        LDY     #>SEED
+        JMP     pushay
+
+; `, ( n -- r ). The seed goes one step on: seed * 261 + 1, which takes
+; every 16-bit value in turn. The high bits of such a seed are the good ones
+; and the low ones repeat soon, so the high byte is folded into the low
+; (EOR) before the remainder of dividing by n is taken.
+; n must be 1 to 32767: the checked build stops with Z on anything less
+; than 1.
+g_rnd:
+        IF      CHECKED
+        LDA     1,X
+        BMI     gr9
+        ORA     0,X
+        BNE     gr8
+gr9:    JMP     e_zero
+gr8:
+        ENDIF
+        LDA     0,X
+        STA     D0
+        LDA     1,X
+        STA     D1              ; D = n
+        LDA     SEED
+        STA     0,X
+        LDA     SEED+1
+        STA     1,X             ; the seed in n's place,
+        LDA     #05h            ;   and 261 (0105h) on top of it
+        LDY     #01h
+        JSR     pushay
+        JSR     h_mul           ; TOS = seed * 261
+        JSR     inctos
+        LDA     0,X
+        STA     SEED
+        LDA     1,X
+        STA     SEED+1
+        EOR     0,X
+        STA     0,X
+        JSR     udiv            ; TOS = the quotient, the remainder under it
+        DEX
+        DEX
+        JSR     h_swap
+        JMP     drop            ; the remainder is TOS
+
+; `< and `>: one routine. scmp leaves the carry clear if a < b. Y is odd for
+; '<' and even for '>', so the low bit of Y plus the carry is set when a,
+; the cell below, is the one to keep.
+g_min:  JSR     scmp
+        TYA
+        ADC     #0
+        LSR
+        BCS     gm1
+        JSR     h_swap          ; b is wanted: a on top, to be dropped
+gm1:    JMP     drop
+
+        IF      ANSI
+; `^: ESC [ H homes the cursor, and ESC [ J clears from there to the end of
+; the screen. `_: ESC [ K clears to the end of the line.
+g_cls:  JSR     csi
+        LDA     #'H'
+        JSR     CONOUT
+        LDA     #'J'
+        DB      2Ch             ; (BIT abs: hides the next instruction)
+g_eol:  LDA     #'K'
+        PHA
+        JSR     csi
+        PLA
+        JMP     CONOUT
+
+; `? ( flag -- ): ESC [ ? 2 5 l hides the cursor, ESC [ ? 2 5 h shows it.
+g_cur:  JSR     csi
+        LDY     #2
+gc1:    LDA     GQ25,Y
+        JSR     CONOUT
+        DEY
+        BPL     gc1
+        JSR     flag
+        BEQ     gc2
+        LDA     #'h'
+        DB      2Ch
+gc2:    LDA     #'l'
+        JMP     CONOUT
+GQ25:   DB      '5','2','?'     ; (printed from the end)
+
+; `@ ( row col -- ): ESC [ row+1 ; col+1 H. (ANSI counts from 1.)
+g_at:   JSR     csi
+        JSR     h_swap          ; the row on top
+        JSR     pinc
+        LDA     #';'
+        JSR     CONOUT
+        JSR     pinc
+        LDA     #'H'
+        JMP     CONOUT
+; pinc: print TOS + 1, unsigned, and drop it
+pinc:   JSR     inctos
+        JMP     pn1
+
+; csi: print ESC [, which starts every ANSI sequence. Keeps X and Y.
+csi:    LDA     #27
+        JSR     CONOUT
+        LDA     #'['
+        JMP     CONOUT
+        ENDIF
+        IF      1-ANSI
+; With ANSI = 0 the machine's own routines do the work (see the equates).
+; CONCLS and CONEOL are jumped to straight from the table.
+g_cls   EQU     CONCLS
+g_eol   EQU     CONEOL
+g_cur:  JSR     flag            ; A = 0 and Z set: off
+        JMP     CONCUR
+g_at:   LDY     2,X             ; Y = the row
+        LDA     0,X             ; A = the column
+        JSR     CONAT
+        INX
+        INX
+        JMP     drop
+        ENDIF
 
         IF      CHECKED
 ; The checked build's inner loop, out of page 1, where it would not fit,

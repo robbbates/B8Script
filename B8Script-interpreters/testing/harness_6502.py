@@ -25,6 +25,8 @@ GAP = 1000      # instructions: two looks at the keyboard closer than this are
                 # thousands.
 
 
+from harness_z80 import CONHOOKS, CONCLS, CONEOL, conat, concur
+
 class Run:
     def __init__(self, hexf, lst, prog, inp=b'', brk_at=None, maxsteps=4_000_000_000, timed=()):
         self.sy = symbols(lst)
@@ -81,6 +83,10 @@ class Run:
         sy = self.sy
         key, cout, ext = sy['KEY'], sy['CONOUT'], sy['EXIT']
         traps = {key, cout, ext}
+        # a build with ANSI = 0 calls four routines of the machine's for the
+        # console codes: each is answered with what a build with ANSI = 1 prints
+        hooks = {sy[k]: k for k in CONHOOKS if k in sy}
+        traps |= set(hooks)
         step = m.step
         out = self.out
         n = 0
@@ -90,6 +96,11 @@ class Run:
             if pc in traps:
                 if pc == cout:
                     out.append(m.a); idle = 0; self.ret()
+                elif pc in hooks:
+                    h = hooks[pc]
+                    out += (conat(m.y, m.a) if h == 'CONAT' else CONCLS if h == 'CONCLS'
+                            else CONEOL if h == 'CONEOL' else concur(m.a))
+                    idle = 0; self.ret()
                 elif pc == key:
                     self.now = n
                     m.a = self.key()

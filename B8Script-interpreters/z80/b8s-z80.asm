@@ -1,8 +1,8 @@
 ; =============================================================================
 ;  B8Script interpreter for the Z80
-;  Spec: docs/b8script.md (2026-11-21).
+;  Spec: docs/b8script.md (2026-11-23).
 ;
-;  Three switches, set in the EQU lines below:
+;  Four switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
 ;    EDITOR   1 = with the line editor built in (see the end of this file):
@@ -13,6 +13,10 @@
 ;                 and stops on every error in the spec's table (and Ctrl-C)
 ;                 with a four-line report: the letter and the place as line
 ;                 and column, the text there, and both stacks. See `error`.
+;    ANSI     1 = the four console codes (`@ `^ `_ `?) send ANSI escape
+;                 sequences through CONOUT
+;             0 = they call four routines of the machine's own instead:
+;                 CONAT, CONCLS, CONEOL and CONCUR (see the equates)
 ;
 ;  In every build Ctrl-C stops a running program (an unchecked build stops
 ;  without a word): see the console layer for the rules, the held key and
@@ -24,6 +28,7 @@
 CPM     EQU     0               ; 1 = CP/M .COM build
 CHECKED EQU     0               ; 1 = checked build
 EDITOR  EQU     0               ; 1 = with the line editor
+ANSI    EQU     1               ; 1 = the console codes send ANSI sequences
 EDGEN   EQU     EDITOR*(1-CPM)  ; (the generic build with the editor)
                                 ; (IF takes any value but 0 as true, so
                                 ;  IF CHECKED+EDITOR means "either")
@@ -103,6 +108,17 @@ PROG    EQU     8300h           ; where the loader puts the program text
 HEAPLIM EQU     0F0h            ; the heap must stay below F000h (a page)
 BASE    EQU     0000h           ; where the image starts
         ENDIF
+        IF      (1-CPM)*(1-ANSI)
+; ---- generic machine with ANSI = 0: the console codes call these ------------
+CONAT   EQU     0FF0Ch          ; `@  cursor to row E, column L, both from 0
+                                ;     (DE and HL hold the whole cells). May
+                                ;     change A, DE and HL
+CONCLS  EQU     0FF0Fh          ; `^  clear the screen and home the cursor
+CONEOL  EQU     0FF12h          ; `_  clear from the cursor to the end of the line
+CONCUR  EQU     0FF15h          ; `?  cursor off if A = 0 (the zero flag is set
+                                ;     to match), on if not. May change A, DE, HL
+;   All four must preserve BC and HL'; CONCLS and CONEOL also DE and HL.
+        ENDIF
         IF      (1-CPM)*(1-EDITOR)
 EXIT    EQU     0FF09h          ; where to go when the program ends
         ENDIF
@@ -134,7 +150,10 @@ NPEND   EQU     LET+38h         ;   minus the address of the program's end
                                 ;   (the heap's first byte), for the checked '_';
 EDLN    EQU     LET+3Ah         ;   the editor: the number of the line that ^E
                                 ;   put in the input line (0: none)
-KEYBUF  EQU     LET+7Ah         ; gap after z: a key read by the break check and
+SEED    EQU     LET+76h         ; gap after z: the random seed, the cell whose
+                                ;   address `. gives. Nothing sets it at the
+                                ;   start but the checked build's clearing;
+KEYBUF  EQU     LET+7Ah         ;   a key read by the break check and
                                 ;   held for the next '?' (0: none);
 BRKOFF  EQU     LET+7Bh         ;   the break-off cell: a program that stores a
                                 ;   non-zero byte here gets Ctrl-C as a key
@@ -485,23 +504,27 @@ rpushn: EXX
         CALL    Z,pollk
         RST     30h
 
-; ---- machine code: the grave -----------------------------------------------
-; '`' plus a hex digit loads bytes: ( addr -- addr' ). Pairs of hex digits
-; are stored from addr until a non-hex character; then a RET (C9h) is
-; written and its address is left. An odd last digit is consumed and dropped.
-; '`' plus anything else calls the machine code at TOS: ( addr -- ). The
-; code is entered by CALL with the data stack above the return address; it
-; must keep BC, and on return the top cell becomes the new TOS.
-h_grave:CALL    hexc
-        JR      NC,exec
-hx1:    LD      (HL),A          ; the high digit goes in first ...
-        CALL    hexc
-        JR      NC,hx2          ; odd digit: consumed, and the RET below
-        RLD                     ;   overwrites it
-        INC     HL              ; ... and RLD shifts it up under the low one
-        CALL    hexc
-        JR      C,hx1
-hx2:    LD      (HL),0C9h       ; (never range-checked: the spec says so)
+; ---- the grave -------------------------------------------------------------
+; The grave is a prefix: with the character after it, it is one command.
+; The characters are tested one after another, each SUB taking off the step
+; from the one before, so A is 0 (and the carry clear) when a handler is
+; reached. Two are here, where they keep the first page as full as the
+; layout needs; grave2 has the rest.
+;
+;   `!  ( addr -- )  calls the machine code at TOS. The code is entered by
+;       CALL with the data stack above the return address; it must keep BC,
+;       and on return the top cell becomes the new TOS.
+;   `'  ( -- )  new line: CR LF
+h_grave:LD      A,(BC)
+        INC     BC
+        SUB     '!'
+        JR      Z,exec
+        SUB     27h-'!'         ; "'"
+        JP      NZ,grave2
+        LD      A,13
+        RST     28h
+        LD      A,10
+        RST     28h
         RST     30h
 
 ; ---- where the two pages meet ----------------------------------------------
@@ -783,6 +806,7 @@ h_num:  PUSH    BC
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
 ;   n = 0: wait for a key
+;          (both stir the random seed while they wait: see kt2)
 ;   n < 0: read a line of at most -n characters, with echo. The buffer
 ;          holds 127 characters and the CR: a bigger count is taken as 127.
 h_key:  BIT     7,H
@@ -792,6 +816,11 @@ kt2:    CALL    getk
         JR      NZ,kt3
         DEC     E
         JR      NZ,kt2
+        EX      DE,HL           ; a millisecond with no key stirs the random
+        LD      HL,(SEED)       ;   seed by one: how long a key takes to come
+        INC     HL              ;   is the one thing here that is not the
+        LD      (SEED),HL       ;   same every time
+        EX      DE,HL
         LD      A,H             ; 0? never counts down: it waits
         OR      L
         JR      Z,kt1
@@ -1031,6 +1060,224 @@ pdec:   LD      DE,10
         ADD     A,'0'
         RST     28h
         RET
+
+; =============================================================================
+;  The grave's other codes. h_grave comes here with A = the character minus
+;  27h, not zero; the tests carry on from there.
+;
+;    `$  ( addr -- addr' )  the hex loader: pairs of hex digits are stored
+;        from addr until a non-hex character; then a RET (C9h) is written
+;        and its address is left. An odd last digit is consumed and dropped.
+;    `+  ( addr -- n )   add 1 to the cell at addr and leave its new value
+;    `,  ( n -- r )      a random number from 0 to n-1 (n is 1 to 32767)
+;    `-  ( addr -- n )   subtract 1 from the cell at addr, the same way
+;    `.  ( -- addr )     the address of the random seed
+;    `<  ( a b -- n )    the smaller of the two (signed)
+;    `>  ( a b -- n )    the larger
+;    `?  ( flag -- )     the cursor off (0) or on
+;    `@  ( row col -- )  the cursor to that row and column, both from 0
+;    `^  ( -- )          clear the screen and home the cursor
+;    `_  ( -- )          clear from the cursor to the end of the line
+;
+;  Any other character is unsafe: the unchecked build takes it as '_', the
+;  checked build stops with W.
+; =============================================================================
+; (The console codes are here, before the tests, to be in reach of them.)
+        IF      ANSI
+; `? ( flag -- ): ESC [ ? 2 5 l hides the cursor, ESC [ ? 2 5 h shows it.
+g_cur:  CALL    csi
+        LD      A,'?'
+        RST     28h
+        LD      A,'2'
+        RST     28h
+        LD      A,'5'
+        RST     28h
+        LD      A,H
+        OR      L
+        LD      A,'l'
+        JR      Z,gc1
+        LD      A,'h'
+gc1:    RST     28h
+        RST     18h
+
+; `@ ( row col -- ): ESC [ row+1 ; col+1 H. (ANSI counts from 1.)
+g_at:   POP     DE              ; DE = the row
+        PUSH    BC              ; (pdec uses BC)
+        PUSH    HL              ; the column
+        EX      DE,HL
+        CALL    csi
+        INC     HL
+        CALL    pdec
+        LD      A,';'
+        RST     28h
+        POP     HL
+        INC     HL
+        CALL    pdec
+        LD      A,'H'
+        RST     28h
+        POP     BC
+        RST     18h
+
+; csi: print ESC [, which starts every ANSI sequence. Keeps all but A.
+csi:    LD      A,27
+        RST     28h
+        LD      A,'['
+        RST     28h
+        RET
+        ENDIF
+        IF      1-ANSI
+; With ANSI = 0 the machine's own routines do the work (see the equates).
+g_cur:  LD      A,H
+        OR      L
+        CALL    CONCUR
+        RST     18h
+g_at:   POP     DE              ; DE = the row, HL = the column
+        CALL    CONAT
+        RST     18h
+        ENDIF
+
+grave2: ADD     A,27h-'$'       ; '$'
+        JR      NZ,gv1
+hx1:    CALL    hexc
+        JR      NC,hx2
+        LD      (HL),A          ; the high digit goes in first ...
+        CALL    hexc
+        JR      NC,hx2          ; odd digit: consumed, and the RET below
+        RLD                     ;   overwrites it
+        INC     HL              ; ... and RLD shifts it up under the low one
+        JR      hx1
+hx2:    LD      (HL),0C9h       ; (never range-checked: the spec says so)
+        RST     30h
+gv1:    SUB     '+'-'$'
+        JR      Z,g_inc
+        DEC     A               ; ','
+        JR      Z,g_rnd
+        DEC     A               ; '-'
+        JR      Z,g_dec
+        DEC     A               ; '.'
+        JR      Z,g_seed
+        SUB     '<'-'.'
+        JR      Z,g_min
+        SUB     '>'-'<'
+        JR      Z,g_max
+        DEC     A               ; '?'
+        JR      Z,g_cur
+        DEC     A               ; '@'
+        JR      Z,g_at
+        SUB     '^'-'@'         ; '^' leaves 0 and '_' leaves 1
+        IF      CHECKED
+        CP      2
+        JP      NC,e_brack      ; anything else: W. The place is the character
+        OR      A
+        ENDIF
+        IF      ANSI
+        JR      NZ,ge1
+        CALL    csi             ; '^': ESC [ H homes the cursor, and then
+        LD      A,'H'           ;   ESC [ J clears from there to the end of
+        RST     28h             ;   the screen
+        XOR     A
+ge1:    ADD     A,'J'           ; '_': ESC [ K clears to the end of the line
+        LD      E,A
+        CALL    csi
+        LD      A,E
+        RST     28h
+        RST     30h
+        ENDIF
+        IF      1-ANSI
+        JR      NZ,ge1
+        CALL    CONCLS
+        RST     30h
+ge1:    CALL    CONEOL
+        RST     30h
+        ENDIF
+
+; `+ and `-. The carry says which: set to add.
+        IF      1-CHECKED
+g_dec:  DB      3Eh             ; (LD A,n: steps over the SCF, and '-' comes
+g_inc:  SCF                     ;   here with the carry clear)
+        ENDIF
+        IF      CHECKED
+; (The checked build tests the address first, as '!' does, and then looks at
+; the character again: the test has used the flags.)
+g_inc:
+g_dec:  CALL    chkst
+        DEC     BC
+        LD      A,(BC)
+        INC     BC
+        CP      ','             ; carry for '+'
+        ENDIF
+        LD      E,(HL)
+        INC     HL
+        LD      D,(HL)
+        JR      NC,gi1
+        INC     DE
+        INC     DE
+gi1:    DEC     DE
+        LD      (HL),D
+        DEC     HL
+        LD      (HL),E
+        EX      DE,HL           ; the new value is TOS
+        RST     30h
+
+; `. pushes the address of the random seed.
+g_seed: PUSH    HL
+        LD      HL,SEED
+        RST     30h
+
+; `, ( n -- r ). The seed goes one step on: seed * 261 + 1, which takes
+; every 16-bit value in turn. The high bits of such a seed are the good ones
+; and the low ones repeat soon, so the high byte is folded into the low
+; (XOR) before the remainder of dividing by n is taken.
+; n must be 1 to 32767: the checked build stops with Z on anything less
+; than 1.
+g_rnd:
+        IF      CHECKED
+        DEC     HL
+        BIT     7,H             ; n - 1 negative: n is 0 or less
+        INC     HL
+        JP      NZ,e_zero
+        ENDIF
+        EX      DE,HL           ; DE = n
+        PUSH    BC
+        LD      HL,(SEED)
+        LD      B,H
+        LD      C,L
+        ADD     HL,HL
+        ADD     HL,HL
+        ADD     HL,BC           ; * 5
+        LD      A,H
+        ADD     A,C
+        LD      H,A             ; + * 256: * 261
+        INC     HL
+        LD      (SEED),HL
+        LD      A,H
+        XOR     L
+        LD      L,A
+        CALL    udiv            ; DE = the remainder
+        EX      DE,HL
+        POP     BC
+        RST     30h
+
+; `< and `>. The carry says which: set for the larger. The two are put in
+; order, HL the smaller and DE the larger, and then swapped for '>'.
+; b < a (signed) is the sign of b - a, turned round if the subtraction
+; overflowed.
+g_max:  SCF                     ; ('<' comes in with the carry clear)
+g_min:  POP     DE              ; DE = a, HL = b
+        PUSH    AF
+        OR      A
+        SBC     HL,DE
+        LD      A,H
+        ADD     HL,DE           ; b again (the sign and overflow flags stay)
+        JP      PO,gm1
+        CPL
+gm1:    RLA                     ; carry: b < a
+        JR      C,gm2
+        EX      DE,HL
+gm2:    POP     AF
+        JR      NC,gm3
+        EX      DE,HL
+gm3:    RST     30h
 
 ; =============================================================================
 ;  Dispatch table: the low byte of each handler's address, in code order

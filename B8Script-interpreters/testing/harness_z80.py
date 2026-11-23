@@ -2,7 +2,8 @@
 
 generic: the image is ROM at 0000h, the program text is loaded at PROG (taken
 from the listing) and NUL-terminated, and KEY/CONOUT/EXIT are traps. KEY
-returns a waiting key in A, or 0, with the zero flag matching A.
+returns a waiting key in A, or 0, with the zero flag matching A. A build with
+ANSI = 0 also has CONAT, CONCLS, CONEOL and CONCUR, which are traps too.
 cpm: the image is a .COM at 0100h; BDOS 6, 10, 15, 16, 19, 20, 21, 22 and
 26 are emulated. `files` is the disk: a dict of 11-character names (as in an
 FCB) to contents, and it holds what the build wrote when the run is over.
@@ -30,6 +31,21 @@ warm boot.
 """
 import re
 import z80
+
+# A build with ANSI = 0 calls four routines of the machine's for the console
+# codes. The machine here answers each by printing what a build with ANSI = 1
+# sends, so the output of the two can be compared with the same tests.
+CONHOOKS = ('CONAT', 'CONCLS', 'CONEOL', 'CONCUR')
+CONCLS, CONEOL = b'\x1b[H\x1b[J', b'\x1b[K'
+
+
+def conat(row, col):
+    return b'\x1b[%d;%dH' % ((row + 1) & 0xFFFF, (col + 1) & 0xFFFF)
+
+
+def concur(on):
+    return b'\x1b[?25h' if on else b'\x1b[?25l'
+
 
 TRAP = 0xFFF0          # BDOS lives here in the cpm runs
 WBOOT = 0xFFE0
@@ -70,7 +86,7 @@ def plat(lst, cpm=False):
     runs the limit is the page of the BDOS entry, which is TRAP here.)"""
     sy = symbols(lst)
     return dict(prog_at=sy['PROG'], let=sy['LET'], linebuf=sy['LINEBUF'],
-                heaplim=(TRAP & 0xFF00) if cpm else sy['HEAPLIM'] << 8)
+                heaplim=(TRAP & 0xFF00) if cpm else sy['HEAPLIM'] << 8, seed=sy['SEED'])
 
 
 class Run:
@@ -101,12 +117,13 @@ class Run:
         if mode == 'generic':
             p = self.sy['PROG']
             self.m.set_memory_block(p, prog + b'\0')
-            for k in ('KEY', 'CONOUT', 'EXIT'):
-                self.m.set_breakpoint(self.sy[k])
+            for k in ('KEY', 'CONOUT', 'EXIT') + CONHOOKS:
+                if k in self.sy:
+                    self.m.set_breakpoint(self.sy[k])
             self.m.pc = 0
         elif mode == 'editor':
             self.m.set_memory_block(self.sy['PROG'], b'\xAA' * 2048)
-            for k in ('KEY', 'CONOUT', 'LEAVE'):
+            for k in ('KEY', 'CONOUT', 'LEAVE') + CONHOOKS:
                 if k in self.sy:
                     self.m.set_breakpoint(self.sy[k])
             self.m.pc = 0
@@ -192,6 +209,14 @@ class Run:
                     self.ret()
                 elif pc == (sy['EXIT'] if self.mode == 'generic' else sy.get('LEAVE')):
                     self.ended = 'exit'; break
+                elif pc == sy.get('CONAT'):         # row in DE, column in HL
+                    self.out += conat(m.de, m.hl); idle = 0; self.ret()
+                elif pc == sy.get('CONCLS'):
+                    self.out += CONCLS; idle = 0; self.ret()
+                elif pc == sy.get('CONEOL'):
+                    self.out += CONEOL; idle = 0; self.ret()
+                elif pc == sy.get('CONCUR'):        # off if A = 0
+                    self.out += concur(m.a); idle = 0; self.ret()
                 # anything else: the tick budget ran out; carry on
             else:
                 if pc == WBOOT:

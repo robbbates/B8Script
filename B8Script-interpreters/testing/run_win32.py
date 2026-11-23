@@ -32,10 +32,10 @@ import test_editor
 #             of junk becomes x's address all the same (only the low word
 #             counts).
 tests.MC['win32'] = [
-    ('mcdouble', b'8_:d! `5A5801C05052 ; 21 d@` #', b'', b'42'),
-    ('mcpush', b'8_:d! `5A6A0752 ; 5 d@` # #', b'', b'75'),
-    ('mcarena', b'1234x! 16_:d! `5A89D866B86E01668B005052 ; d@` #', b'', b'1234'),
-    ('mcjunk', b'99x! 16_:d! `5A686E01FFFF52 ; 3 d@` @# #', b'', b'993'),
+    ('mcdouble', b'8_:d! `$5A5801C05052 ; 21 d@`! #', b'', b'42'),
+    ('mcpush', b'8_:d! `$5A6A0752 ; 5 d@`! # #', b'', b'75'),
+    ('mcarena', b'1234x! 16_:d! `$5A89D866B86E01668B005052 ; d@`! #', b'', b'1234'),
+    ('mcjunk', b'99x! 16_:d! `$5A686E01FFFF52 ; 3 d@`! @# #', b'', b'993'),
 ]
 
 

@@ -10,9 +10,9 @@ from harness_z80 import symbols
 # machine-code test: double the top data cell. Entered by JSR with U at the
 # top cell (big-endian): PULU D; ASLB; ROLA; PSHU D; RTS (the loader's RTS)
 tests.MC['6809'] = [
-    ('mcdouble', b'8_:d! `370658493606 ; 21 d@` #', b'', b'42'),
+    ('mcdouble', b'8_:d! `$370658493606 ; 21 d@`! #', b'', b'42'),
     # push a constant: LDD #7; PSHU D; RTS
-    ('mcpush', b'8_:d! `CC00073606 ; d@` #', b'', b'7'),
+    ('mcpush', b'8_:d! `$CC00073606 ; d@`! #', b'', b'7'),
 ]
 
 d = sys.argv[1]
@@ -24,7 +24,7 @@ for hexf in sorted(glob.glob(d + '/*.hex')):
     base = hexf[:-4]
     if only and not any(o in base for o in only):
         continue
-    checked = base.endswith('-chk')
+    checked = '-chk' in base
     def runner(p, i, timed=None, base=base):
         r = Run(base + '.hex', base + '.lst', p, i, timed=timed or ())
         o = r.run()
@@ -34,7 +34,7 @@ for hexf in sorted(glob.glob(d + '/*.hex')):
     # build's error reports exactly (places, the heap limit, addresses)
     sy = symbols(base + '.lst')
     plat = dict(prog_at=sy['PROG'], let=sy['LET'], linebuf=sy['LINEBUF'],
-                heaplim=sy['HEAPLIM'] << 8)
+                heaplim=sy['HEAPLIM'] << 8, seed=sy['LET'] + sy['SEED'])
     total += check(runner, os.path.basename(base), '6809', False, checked, 0x39,
                    games=games, verbose=verbose, plat=plat)
 sys.exit(1 if total else 0)

@@ -14,6 +14,7 @@ See docs/b8sms.md for the games themselves.
 """
 import sys, os, random
 here = os.path.dirname(os.path.abspath(__file__))
+GAMES = os.path.normpath(os.path.join(here, '..', '..', 'games'))   # games/ at the root of the repository
 sys.path.insert(0, here)
 from ref import Ref, NeedKey
 
@@ -32,7 +33,7 @@ class Play(Ref):
 
 
 def path(folder, game):
-    return os.path.join(here, 'games', folder, game + '.B8S')
+    return os.path.join(GAMES, folder, game + '.B8S')
 
 
 def play(folder, game, keys, steps=200_000_000):
@@ -227,7 +228,7 @@ if __name__ == '__main__':
     bad = 0
     for folder, limit in LIMITS.items():
         print(f'-- games/{folder}, {limit} characters')
-        for f in sorted(os.listdir(os.path.join(here, 'games', folder))):
+        for f in sorted(os.listdir(os.path.join(GAMES, folder))):
             name = f[:-4]
             if not f.endswith('.B8S') or (want and name not in want):
                 continue

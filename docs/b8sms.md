@@ -8,7 +8,7 @@ Thirty-one B8Script games, in three sizes, and one that runs over:
 
 Each one is a complete program, with no line breaks and nothing left out. Paste it into a runner and play.
 
-The files are in `B8Script-interpreters/testing/games/`: [`b8sms/`](../B8Script-interpreters/testing/games/b8sms/), [`tweet140/`](../B8Script-interpreters/testing/games/tweet140/) and [`tweet280/`](../B8Script-interpreters/testing/games/tweet280/), plus [`longer/`](../B8Script-interpreters/testing/games/longer/) for one over the limit. `test_tweets.py` in `testing/` checks each folder's limit and plays every game with scripted keys on the checked reference interpreter; `test_tweets.py --all` adds the check that Tic-tac-toe never loses, which plays all 201 legal games against it. All of them were developed and tested on `ref.py`. None has been run on a real CPU build yet: `gamecheck.py` covers only `games/*.B8S`.
+The files are in `games/` (at the root of the repository): [`b8sms/`](../games/b8sms/), [`tweet140/`](../games/tweet140/) and [`tweet280/`](../games/tweet280/), plus [`longer/`](../games/longer/) for one over the limit. `test_tweets.py` in `testing/` checks each folder's limit and plays every game with scripted keys on the checked reference interpreter; `test_tweets.py --all` adds the check that Tic-tac-toe never loses, which plays all 201 legal games against it. All of them were developed and tested on `ref.py`. None has been run on a real CPU build yet: `gamecheck.py` covers only `games/*.B8S`.
 
 | Game | SMS | 140 | Kind | You press |
 |---|---|---|---|---|
@@ -107,7 +107,7 @@ Five rounds. After a random pause it says GO!, and you hit a key as fast as you 
 ### Ski
 
 ```text
-"SKI j l/M/J"$[S1(:1<\32'1- 1);]5q!9p!0t!0r!1(r@75*74+:r!:0<%256/;31&p@<%-:p@+p!50?:r@+r!:106=%108=-%-q@+:q!:0>%9<&0=\p@S"|"$q@1-S"V"$8q@-S"|/M/J"$t@1+t!1)t@#
+"SKI j l/M/J"$[S1(:1<\32'1- 1);]5q!9p!0t!0r!1(r@75*74+:r!:0<%256/;31&p@<%-:p@+p!99?:r@+r!:106=%108=-%-q@+:q!:0>%9<&0=\p@S"|"$q@1-S"V"$8q@-S"|/M/J"$t@1+t!1)t@#
 ```
 
 A slalom course scrolls up past your skier, `V`. Steer with j and l to stay between the poles. The score is the number of lines you survive.
@@ -115,7 +115,7 @@ A slalom course scrolls up past your skier, `V`. Steer with j and l to stay betw
 - The course wanders by −1, 0 or +1 a line. It is the difference of two random bits, one of them more likely to be set the further right the course is, so it drifts back toward the middle and never leaves the screen. No clamping code needed.
 - The skier is kept as `q`, its place relative to the left pole, so a crash is just `q` outside 1–8 and a line is always three runs of spaces.
 - Every key you press is added into the random state, so your steering changes the course to come.
-- One frame is one `50?`, about 20 lines a second.
+- One frame is one `99?`, about 10 lines a second. Make the number bigger to slow it down, smaller to speed it up.
 
 ### Rock Paper Scissors
 
@@ -158,7 +158,7 @@ The dice game Pig, solo: reach 100 in as few turns as you can. Each line shows t
 ### Tron
 
 ```text
-"/[[2J"$1024_g!0 1(:g@+0%.1+:1024<);520i!0d!0t!1(40?:46=%44=-d@%- 3&:d!:1&63*1+%2&1%-*i@+1023&:i!:64/27'91'%1+#59'1+#72'79'g@+:,%1%.t@1+t!0=)"/[[18Hscore "$t@#
+"/[[2J"$1024_g!0 1(:g@+0%.1+:1024<);520i!0d!0t!1(99?:46=%44=-d@%- 3&:d!:1&63*1+%2&1%-*i@+1023&:i!:64/27'91'%1+#59'1+#72'79'g@+:,%1%.t@1+t!0=)"/[[18Hscore "$t@#
 ```
 
 A light cycle that never stops, leaving a wall behind it. `,` turns left and `.` turns right. Run into the wall, anywhere along it, and you're done. The arena is 64 × 16 and wraps at the edges, so the danger is only ever the trail. Survive as long as you can.
@@ -198,7 +198,7 @@ What the cuts cost:
 - Pig no longer shows the turn number on each line, only at the end.
 - Tron starts in the top left corner, and Ski shows no title.
 
-The files are in [`games/tweet140/`](../B8Script-interpreters/testing/games/tweet140/).
+The files are in [`games/tweet140/`](../games/tweet140/).
 
 ```text
 [N0 1(0?:13=\:'48-%10*+1);]"0-127, 7 tries. Key"$0 1(1+127&1?0=)s!7 1(13'10'N:g!s@-:0<%0>- 61+'1-:0>g@s@-&);g@s@-:(" was "$s@#0)0=(" WIN"$0)
@@ -213,7 +213,7 @@ Eleven games that don't fit in 160, several of them ones I had called out of rea
 ### Snake
 
 ```text
-"/[[2J"$0_g!1024 1(0 1_.1-:);1023m![P64/"/[["$%1+#59'1+#"H"$][Rr@75*74+:r!64/;m@&][F0 1(;R:g@+,):g@+128%.P"*"$][D:1&63*1+%2&1%-*]0r!0i!0j!0d!0l!F1(60?R;:46=%44=-d@%- 3&:d!1+i@g@+.d@Di@+m@&:i!g@+,:7&\:(l@1+l!F0)0=(j@:P32':g@+:,1-D%0%.+m@&j!0)i@:g@+1%.P79'1);"/[[18Hscore "$l@#
+"/[[2J"$0_g!1024 1(0 1_.1-:);1023m![P64/"/[["$%1+#59'1+#"H"$][Rr@75*74+:r!64/;m@&][F0 1(;R:g@+,):g@+128%.P"*"$][D:1&63*1+%2&1%-*]0r!0i!0j!0d!0l!F1(99?R;:46=%44=-d@%- 3&:d!1+i@g@+.d@Di@+m@&:i!g@+,:7&\:(l@1+l!F0)0=(j@:P32':g@+:,1-D%0%.+m@&j!0)i@:g@+1%.P79'1);"/[[18Hscore "$l@#
 ```
 
 Steer with `,` and `.`, eat the `*`, and don't bite yourself. The board is 64 × 16 and wraps at the edges, like Tron's. The score is your length.
@@ -248,7 +248,7 @@ Three heaps of 3, 5 and 7. Press a heap (1–3), then how many to take. Whoever 
 ### Duel
 
 ```text
-"/[[2J"$0_g!1024 1(0 1_.1-:);[D:1&63*1+%2&1%-*][P64/"/[["$%1+#59'1+#"H"$][S{D+1023&:P}':g@+:,%1%.][ADj@+1023&g@+,]520i!0d!556j!2e!1(40?:46=%44=-d@%- 3&:d!i@%79S%i!p!e@A(e@1+3&e!0)e@A(e@2+3&e!0)j@e@88S%j!q!p@q@|0=)"/[[18H WIN"p@(;"/[[18H LOSE"0)q@p@&(;"/[[18H DRAW"0)$
+"/[[2J"$0_g!1024 1(0 1_.1-:);[D:1&63*1+%2&1%-*][P64/"/[["$%1+#59'1+#"H"$][S{D+1023&:P}':g@+:,%1%.][ADj@+1023&g@+,]520i!0d!556j!2e!1(99?:46=%44=-d@%- 3&:d!i@%79S%i!p!e@A(e@1+3&e!0)e@A(e@2+3&e!0)j@e@88S%j!q!p@q@|0=)"/[[18H WIN"p@(;"/[[18H LOSE"0)q@p@&(;"/[[18H DRAW"0)$
 ```
 
 Tron for two: you are `O`, the computer is `X`, and you start facing each other. Last one moving wins.
@@ -297,7 +297,7 @@ You start with $100 and bet $10 a hand. Press h to hit, any other key to stand. 
 ### Copter
 
 ```text
-"COPTER: any key pushes left/M/J"$[S1(:1<\32'1- 1);]9p!56x!0v!0t!0r!1(r@75*74+:r!:0<%256/;31&p@<%-p@+p!12t@50/;-:5<(;5 0)w!40?:r@+r!(-4v!0)v@1+:3>(;3 0):v!x@+:x!4/;p@-:0>%w@<&0=\p@S"|"$x@4/;p@- 1-S"H"$p@w@+x@4/;- 1-S"|/M/J"$t@1+t!1)"score "$t@#
+"COPTER: any key pushes left/M/J"$[S1(:1<\32'1- 1);]9p!56x!0v!0t!0r!1(r@75*74+:r!:0<%256/;31&p@<%-p@+p!12t@50/;-:5<(;5 0)w!99?:r@+r!(-4v!0)v@1+:3>(;3 0):v!x@+:x!4/;p@-:0>%w@<&0=\p@S"|"$x@4/;p@- 1-S"H"$p@w@+x@4/;- 1-S"|/M/J"$t@1+t!1)"score "$t@#
 ```
 
 The one-key game. A cave scrolls past, and gravity pulls your craft, `H`, to the right. Any key gives a push left. It has inertia, so you feather it rather than steer it. The cave narrows from 12 to 5 as you go.
@@ -308,7 +308,7 @@ The one-key game. A cave scrolls past, and gravity pulls your craft, `H`, to the
 ### Breakout
 
 ```text
-[Y27'91'%#59'#72'][Z:@0%-%!]"/[[2J"$0_g!736 1(0 1_.1-:);96 1(1-:64+:g@+1%.32/2+Y35':);12:y!x!1d!-1e!0s!1p!1(30?:106=%108=-:+p@+:32767&30<(:p!0);20p@Y"  ====  "$y@x@Y32'x@2=x@33=|(dZ0)y@1=(eZ0)x@d@+x!y@e@+y!y@32*x@+2-g@+:,(:0%.eZs@1+s!0);x@p@- 2+4/;1=y@20=&(eZ0)y@x@Y111'y@21<)s@#
+[Y27'91'%#59'#72'][Z:@0%-%!]"/[[2J"$0_g!736 1(0 1_.1-:);96 1(1-:64+:g@+1%.32/2+Y35':);12:y!x!1d!-1e!0s!1p!1(99?:106=%108=-:+p@+:32767&30<(:p!0);20p@Y"  ====  "$y@x@Y32'x@2=x@33=|(dZ0)y@1=(eZ0)x@d@+x!y@e@+y!y@32*x@+2-g@+:,(:0%.eZs@1+s!0);x@p@- 2+4/;1=y@20=&(eZ0)y@x@Y111'y@21<)s@#
 ```
 
 Three rows of 32 bricks; j and l move the paddle. Keep the ball in play. The score is the number of bricks broken.

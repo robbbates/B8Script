@@ -346,7 +346,7 @@ A new 19 × 9 maze every game. You are `@`, in the gap at the top right; get out
 - **The keys are a table.** `key & 3` is 0–3 for l, i, j and k, so it indexes the string `"Q'Oy"`, whose characters minus 80 are the steps +1, −41, −1 and +41. A blocked move becomes a step of 0 (`32=&`), so moving and not moving are the same code.
 - **The catch.** A binary-tree maze has a bias: from any cell, north or east is always open. So the way out is always a staircase down and left of the same length (54 steps), and the maze's difficulty is all in its dead ends. Starting at the top right is what makes it a maze at all: from the bottom left, "always go up or right" would walk straight out. A less biased algorithm, such as sidewinder, doesn't fit in what's left.
 
-## Longer: MINE391
+## Longer: MINE390
 
 Minesweeper, with the flood fill that opens blank areas. It doesn't fit in 280, and is here as an example of what a little more room buys. It is 390 characters. The repository's own Minesweeper, `MINES.B8S`, is the full-size version.
 
@@ -365,7 +365,7 @@ An 8 × 8 board with about one mine in eight. Type a row digit, then a column di
 
 Most of the ideas from the first round became the 280 games: Nim 3-5-7, Hamurabi (Kingdom), the one-key game (Copter), and the three I had called out of reach at 160 (Snake, Tron against the computer, full Mastermind), and a maze. Ones still open:
 
-- **Minesweeper at 280.** [MINE391](#longer-mine391) works at 390; getting it under 280 would take about 110 characters of new ideas.
+- **Minesweeper at 280.** [MINE390](#longer-mine390) works at 390; getting it under 280 would take about 110 characters of new ideas.
 - **Bagels (Fermi/Pico) at 160.** Guess a 3-digit code and learn how many digits are in the right place. Simon's replay trick stores the code for free.
 - **Hurkle at 160.** Hi-Lo in 2D on a 10 × 10 grid, with hints like "NE".
 - **2048, Battleship, Sokoban.** Probably over 280 each, but untried.

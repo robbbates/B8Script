@@ -12,7 +12,7 @@ key that is there at once adds nothing.
 
 With checked=True it behaves as a checked build: variables start at 0, words
 start undefined, and every error in the spec's table stops the program with
-the four-line report (see report() for what the stack lines show).
+the three-line report (see report() for what the stack lines show).
 """
 import sys
 
@@ -198,11 +198,7 @@ class Ref:
         flag or pushed its address; and a break comes when it comes."""
         o = self.out
         line, col = self.linecol(place)
-        o += b'\r\nErr %c @ %d,%d\r\n' % (ord(code), line, col)
-        for a in range(place, place + 16):
-            if self.m[a & 0xFFFF] in (0, 10, 13) or (self.cpm and self.m[a & 0xFFFF] == 26):
-                break
-            o.append(self.m[a & 0xFFFF])
+        o += b'\r\nErr %c @ %d,%d' % (ord(code), line, col)
         o += b'\r\nStk %d:' % len(self.ds)
         if len(self.ds) > 8:
             o += b' ...'

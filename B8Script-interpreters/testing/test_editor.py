@@ -25,9 +25,8 @@ from harness_z80 import Run, symbols, TRAP
 from ref import Ref
 
 CR, BS, ESC = b'\r', b'\x08', b'\x1b'
-G, L, E, RD, WR, N, V, X, B, F, Z = (bytes([c]) for c in (7, 12, 5, 18, 23, 14, 22, 24, 2, 6, 26))
+G, L, E, RD, WR, N, X, B, F, Z = (bytes([c]) for c in (7, 12, 5, 18, 23, 14, 24, 2, 6, 26))
 LEFT, RIGHT, UP = ESC + b'[D', ESC + b'[C', ESC + b'[A'
-VERSION = b'2026-11-21'
 
 
 def R(text):
@@ -48,7 +47,6 @@ class Ed:
         self.disk = t.get('disk', cpm)          # read and write use files
         self.pad = t.get('pad', cpm)            # a written file is padded with ^Z
         self.refcpm = t.get('refcpm', cpm)      # -n? is BDOS 10
-        self.build = t.get('build', b'B8SZ80E')
         self.fname = t.get('fname')             # typed name -> the file's name
         self.lines = []                 # the program: each line with its CR LF
         self.out = bytearray()
@@ -107,14 +105,6 @@ class Ed:
         self.cells = bytes(r.m[sy['LET']:sy['LET'] + 0x74])
         queue[:] = list(r.inp)                  # what the program did not read is typed at the editor
 
-    def stack_lines(self):
-        o = b'\r\nStk %d:' % len(self.ds)
-        if len(self.ds) > 8:
-            o += b' ...'
-        for v in self.ds[-8:]:
-            o += b' %d' % Ref.s(v)
-        return o + b'\r\nRtn 0'
-
     # ---- typing ----
     def type(self, step):
         keys, events = step if isinstance(step, tuple) else (step, [])
@@ -168,7 +158,7 @@ class Ed:
                 if cur < len(buf):
                     out.append(buf[cur])
                     cur += 1
-            elif c in (13, 7, 12, 5, 18, 23, 14, 22, 24):
+            elif c in (13, 7, 12, 5, 18, 23, 14, 24):
                 out += b'\r\n'
                 typed = bytes(buf)
                 digits = 0
@@ -243,11 +233,6 @@ class Ed:
                 self.files[self.key(self.name)] = t + (b'\x1a' * (-len(t) % 128) if self.pad else b'')
             else:
                 out += self.text()
-        elif c == 22:
-            t = self.text()
-            out += self.build + (b'C' if self.checked else b'') + b' ' + VERSION + self.stack_lines()
-            out += b'\r\nProg %d\r\nLines %d\r\nFree %d\r\n' % (
-                len(t), len(lines), self.heaplim - 1 - (self.sy['PROG'] + len(t)))
         elif c == 24:
             raise Left
 
@@ -309,7 +294,7 @@ def sessions():
     'the arrow keys': [R(b'1 "ac"$' + LEFT * 3 + b'b' + RIGHT + b'!' + LEFT + BS), R(b'2 7#' + UP + ESC + b'[1;5D' + b'7'), L, G],
     'Esc drops the line': [b'1 "gone"$' + ESC, R(b' 5#'), b'' + ESC, R(b'1 6#') , b'2 x' + B + ESC, L],
     'Esc and a key that is no arrow': [R(b' 1' + ESC + b'O2#'), R(b' 3' + ESC + b'[H#')],
-    'keys that do nothing': [R(b' 1\x03\x01\n\x0f2#'), R(b'\n\x03\x04 5#')],
+    'keys that do nothing': [R(b' 1\x03\x01\n\x0f\x162#'), R(b'\n\x03\x04 5#')],
     'Tab is text': [R(b'1 \t7\t#'), L, G],
     'run, then use what the program defined': [R(b'1 "one"$'), R(b'2 [W "w"$]'), G, R(b' W'), R(b' W')],
     '300 lines': [R(b'0 %d#' % i) for i in range(300)] + [L, R(b'128 "at 128"$'), R(b'100'), b'250' + L, R(b'299'), b'290' + L, G],
@@ -320,7 +305,7 @@ def sessions():
     'Ctrl-C ends the list': [R(b'0 %d#' % i) for i in range(9)] + [
         (L, [(4, 3, None)]), (b'2' + L, [(2, 32, 3)]), (L, [(0, 3, None)]), R(b' 5#'), b'9' + L],
     'the data stack lasts from line to line': [
-        R(b' 1 2 3'), R(b' +#'), R(b'1 10*'), G, R(b' #'), R(b' 4 5'), V, R(b' ;;'), V],
+        R(b' 1 2 3'), R(b' +#'), R(b'1 10*'), G, R(b' #'), R(b' 4 5'), R(b' 6'), R(b' ###')],
     'edit a line': [R(b'1 "abc"$'), R(b'2 5#'), b'1' + E + R(B * 3 + b'X'), L, G,
                     b'2' + E + R(BS * 2 + b'77#'), L, G],
     'edit: no such line, a dropped edit, an emptied line': [
@@ -328,15 +313,14 @@ def sessions():
         b'1' + E + R(BS * 9), L, G, E, R(b' 9#')],
     'edit a line of the full length': [R(b'1 ' + b'x' * 125), b'1' + E + R(BS * 3 + b'abcd'), L],
     'new': [R(b'1 1#'), R(b'2 2#'), N + b'x', L, N + G, L, N + N, L, R(b'1 3#'), L, G],
-    'view': [V, R(b'1 "a"$'), R(b'2 "bc"$'), V, R(b' 1 2 3 4 5 6 7 8 9 -10'), V],
 }
 
 
 # Generic builds: read is a paste that ends at ^Z, write prints the text.
 GEN_SESSIONS = {
-    'read and write': [RD + b'1#\r\n2#\r\n' + Z, L, G, WR, V],
+    'read and write': [RD + b'1#\r\n2#\r\n' + Z, L, G, WR],
     'read: CR alone, LF alone, empty lines, no last line end': [
-        RD + b'1#\r2#\r' + Z, L, RD + b'3#\n4#\n\n5#' + Z, L, G, RD + b'\r\n\r\n6#\r\n\r\n' + Z, L, G, RD + Z, L, V],
+        RD + b'1#\r2#\r' + Z, L, RD + b'3#\n4#\n\n5#' + Z, L, G, RD + b'\r\n\r\n6#\r\n\r\n' + Z, L, G, RD + Z, L, WR],
     'read replaces the program': [R(b'1 9#'), R(b'2 8#'), RD + b'"new"$' + Z, L, G, WR],
     'leave': [R(b' 5#'), X, R(b' 6#')],
 }
@@ -347,12 +331,12 @@ FILE = b'"one "$\r\n[W "w"$]\r\n2 3*#\r\n'
 CPM_SESSIONS = {
     'a file is loaded, listed, run and added to': (FILE, [L, G, R(b' W'), R(b'2 "new "$'), R(b'0 9#'), L, G]),
     'a file with no text': (b'', [L, R(b'1 5#'), L, G]),
-    'no file at all': (None, [L, V, R(b'1 5#'), L, G]),
+    'no file at all': (None, [L, R(b'1 5#'), L, G]),
     'a file of exactly one record': ((b'1#' + b' ' * 61 + b'\r\n') * 2, [L, G, R(b'0 2#'), G]),
     'a file whose last line has no CR LF': (b'1#\r\n2#', [L, G]),
     'write, change, read back': (FILE, [R(b'1 "zero "$'), WR, R(b'1'), R(b'1'), L, RD, L, G]),
     'write under a new name, read both': (FILE, [
-        R(b'1'), b'new.b8s' + WR, N + N, L, RD, L, b'PROG.B8S' + RD, L, b'new.b8s' + RD, L, WR, b'nosuch' + RD, L, V]),
+        R(b'1'), b'new.b8s' + WR, N + N, L, RD, L, b'PROG.B8S' + RD, L, b'new.b8s' + RD, L, WR, b'nosuch' + RD, L]),
     'write a program of several records': (b'', [R(b'0 "%s"$' % (bytes([65 + i]) * 60)) for i in range(7)] + [
         b'BIG' + WR, N + N, L, b'big' + RD, L, G]),
     'write an empty program': (FILE, [N + N, b'EMPTY.TXT' + WR, b'PROG.B8S' + RD, L, b'EMPTY.TXT' + RD, L]),
@@ -364,20 +348,20 @@ CPM_SESSIONS = {
 CHK_SESSIONS = {
     'errors in the program and in a typed line': [
         R(b'1 1 2'), R(b'2 3 0/ "no"$'), G, R(b' 7#'), R(b' 1 0! "no"$'), R(b' 5 Q "no"$'), R(b' [Q 9#] Q'),
-        R(b'3 [5 1]'), R(b'2'), G, R(b'1 [R R] 4'), R(b'2 0( 1'), G, V],
-    'an error clears the stack': [R(b' 1 2 3'), R(b' 4 0/'), V, R(b' 7#'), R(b' ;'), V],
+        R(b'3 [5 1]'), R(b'2'), G, R(b'1 [R R] 4'), R(b'2 0( 1'), G, R(b' ;')],
+    'an error clears the stack': [R(b' 1 2 3'), R(b' 4 0/'), R(b' ;'), R(b' 7#'), R(b' ;')],
     'variables start at 0 and words undefined': [R(b' q@# j@#'), R(b' 1 2 W "no"$'), R(b' [W 3#]W')],
 }
 
 # What can't be modelled: a key pressed while a program is busy. (steps, keys
 # by count of characters printed, the patterns that must follow each other in
 # the output; checked: None = every build, True or False = only those.)
-RPT = rb'\r\nErr B @ %s,\d+\r\n[^\r\n]{0,16}\r\nStk \d+:[ \-\d.]*\r\nRtn \d+\r\n'
+RPT = rb'\r\nErr B @ %s,\d+\r\nStk \d+:[ \-\d.]*\r\nRtn \d+\r\n'
 TIMED = {
-    'Ctrl-C stops a program (checked)': (True, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L, V], [(40, b'\x03')],
-        [rb'\.{10,}' + RPT % b'1' + rb' 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb'\r\nStk 0:\r\nRtn 0\r\n']),
-    'Ctrl-C stops a program (unchecked)': (False, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L, V], [(40, b'\x03')],
-        [rb'\.{10,} 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb'\r\nStk 0:\r\nRtn 0\r\n']),
+    'Ctrl-C stops a program (checked)': (True, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L, R(b' ;')], [(40, b'\x03')],
+        [rb'\.{10,}' + RPT % b'1' + rb' 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb'\r\nErr s @ 0,\d\r\nStk 0:\r\nRtn 0\r\n']),
+    'Ctrl-C stops a program (unchecked)': (False, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L], [(40, b'\x03')],
+        [rb'\.{10,} 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n']),
     'Ctrl-C stops a typed line': (None, [R(b' 1("."$ 1)'), R(b' 8#')], [(40, b'\x03')], [rb'\.{10,}.* 8#\r\n8$']),
     'a key pressed while the program runs is held for it': (
         None, [R(b' 0i! 1( i@1+:i! 3000<) 0?#'), R(b' 6#')], [(28, b'A')], [rb'0\?#\r\n65 6#\r\n6$']),
@@ -397,7 +381,7 @@ def win32_target(exe):
 
     def fname(files, name):
         return next((k for k in files if k.lower() == name.lower()), name)
-    return dict(sy=sy, cpm=False, disk=True, pad=False, refcpm=False, build=b'B8SWINE',
+    return dict(sy=sy, cpm=False, disk=True, pad=False, refcpm=False,
                 checked=exe[:-4].endswith('C'), default=b'PROG.B8S', fname=fname,
                 heaplim=sy['HEAPLIM'] << 8, prog=lambda f: {b'PROG.B8S': f},
                 run=lambda steps, timed, files: WRun(exe, b'', steps, mode='editor', timed=timed, files=files))

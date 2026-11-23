@@ -65,7 +65,7 @@ def check(runner, name, cpu, cpm, checked, retbyte, games=True, verbose=False, p
 
 # The break key (every build). A report for B: its place and the stacks are
 # wherever the program was when the key was noticed.
-BRPT = rb'\r\nErr B @ \d+,\d+\r\n[^\r\n\0]{0,16}\r\nStk \d+:[ \-\d.]*\r\nRtn \d+\r\n'
+BRPT = rb'\r\nErr B @ \d+,\d+\r\nStk \d+:[ \-\d.]*\r\nRtn \d+\r\n'
 LOOP = b'0i! 1( i@1+:i! 3000<) '       # busy for 3000 loop-backs: a dozen looks at the keyboard
 GOTO = b'[G};{] [L}:{] L x! x@:G'      # an endless loop made of word calls only
 CC = b'\x03'

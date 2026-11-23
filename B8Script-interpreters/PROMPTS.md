@@ -101,25 +101,34 @@ bytes, one CPU at a time. Ideas not yet tried:
   bytes). A three-range split was worked out on paper: it would save 13
   to 20 bytes, but needs a handler order the unchecked build can't share.
 - Z80/8080: the first 256 bytes are packed by hand around the RST vectors.
-- Z80 with EDITOR = 1: 1678 bytes, 723 of them the editor (four builds:
-  with or without CPM and CHECKED). It was written for the spec's
-  suggested standard and has had one light size pass. What is left needs
-  a decision or a redesign: the key dispatch (seven compares and a
-  27-byte table: a chain of SUB and JR would be about 10 bytes smaller if
-  every unknown control key may drop the line), ^V (about 170 bytes in an
-  unchecked build, since it brings in the stack listing), the paste's
-  care with LF-only text (about 14 bytes), the CP/M file code (about
-  135 bytes).
-- Every checked build: the report (about 200 bytes on the Z80, 300 on the
-  6502) was written once and not squeezed. The line and column count is
-  the biggest part of it.
+- Z80 with EDITOR = 1: 1480 bytes, 525 of them the editor (four builds:
+  with or without CPM and CHECKED). Every Z80 build is meant to fit 2048
+  bytes, and the CP/M checked editor is 2046: any growth there has to be
+  paid for. ^V (the view of stacks and sizes) was dropped for that on
+  2026-11-23. What is left needs a decision or a redesign: the key
+  dispatch (seven compares and a 24-byte table: a chain of SUB and JR
+  would be about 10 bytes smaller if every unknown control key may drop
+  the line), the cursor inside the line (about 105 bytes: ^B ^F, the
+  arrow keys, insert and delete mid-line; the arrow keys alone are 31),
+  ^E (about 60), names typed for ^R and ^W (46), the paste's care with
+  LF-only text (about 14 bytes), the CP/M file code (about 190 bytes).
+  Two more bytes without a change in behaviour: scan the line buffer for
+  line 0 the way the program is scanned (1), and one routine for "find
+  the program's NUL" in the CP/M editor (1).
+- Every checked build: the report lost its line of program text on
+  2026-11-23, and the Z80's and 8080's were squeezed a little (the '$'
+  error joins the chain of hidden entries; the Z80 takes the return
+  stack's depth from one byte). The line and column count is the biggest
+  part left (about 50 bytes on the Z80); a CPIR version, worked out on
+  paper, is a byte bigger. Untried: the zero-page 6502 copies the place
+  to $02-$03 for its line count, and may be able to use it where it lies
+  (about 8 bytes).
 - Every build: the break-off cell and its 250 ms wait for a second Ctrl-C
   is about 30 bytes.
 - Windows: a file only shrinks in steps of 512 bytes. The four builds are
-  1970, 2524, 3002 and 3456 bytes past their headers, so the next steps
-  down are 434, 476, 442 and 384 bytes away. Each has 78, 36, 70 and 128
-  bytes to spare before the next step up: the checked runner is the one
-  to watch.
+  1970, 2488, 2750 and 3284 bytes past their headers, so the next steps
+  down are 434, 440, 190 and 212 bytes away. Each has 78, 72, 322 and 300
+  bytes to spare before the next step up.
 - The grave (2026-11-23), every CPU: the new codes have had one size pass
   (3 bytes on the Z80, 4 on the 8080, 7 on the 6809, 25 and 23 on the
   6502s, 32 on Windows). Tried or worked out there, and not worth it:

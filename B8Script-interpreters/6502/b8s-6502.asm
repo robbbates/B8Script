@@ -19,9 +19,8 @@
 ;                 O (a store outside the program's space), U (undefined
 ;                 word), Q (no closing quote), W (bad character after [), X
 ;                 (a reserved byte), Z (divide by zero), N (brackets) or B
-;                 (Ctrl-C), printing the spec's four-line report:
+;                 (Ctrl-C), printing the spec's three-line report:
 ;                   Err Z @ 3,4
-;                   0/ "no"$
 ;                   Stk 2: 5 0
 ;                   Rtn 0
 ;                 and then goes to EXIT.
@@ -1481,7 +1480,6 @@ g_eol:  JMP     CONEOL
 ; its depth is shown.
 ;   CR LF
 ;   Err X @ line,col CR LF
-;   up to 16 characters from the place, raw, up to a CR, LF or NUL  CR LF
 ;   Stk n: [...] and the top 8 cells at most, bottom to top  CR LF
 ;   Rtn n CR LF
 ; The numbers go through '#' (prnum), which pushes them over the data stack
@@ -1501,20 +1499,7 @@ error:  PHA                     ; the letter
         LDA     CL
         LDY     CL+1
         JSR     prnum           ; the column
-        LDY     #M_NL-MSG
-        JSR     prs
-        LDY     #0              ; the text at the place
-er1:    LDA     (PLACE),Y
-        BEQ     er2
-        CMP     #13
-        BEQ     er2
-        CMP     #10
-        BEQ     er2
-        JSR     CONOUT
-        INY
-        CPY     #16
-        BNE     er1
-er2:    LDY     #M_STK-MSG
+        LDY     #M_STK-MSG
         JSR     prs             ; CR LF "Stk "
         TXA
         EOR     #0FFh

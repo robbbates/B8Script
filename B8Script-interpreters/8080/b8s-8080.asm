@@ -10,8 +10,8 @@
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
 ;             1 = starts with every variable at 0 and every word undefined,
 ;                 and stops on every error in the spec's table (and Ctrl-C)
-;                 with a four-line report: the letter and the place as line
-;                 and column, the text there, and both stacks. See `error`.
+;                 with a three-line report: the letter and the place as
+;                 line and column, and both stacks. See `error`.
 ;    ANSI     1 = the four console codes (`@ `^ `_ `?) send ANSI escape
 ;                 sequences through CONOUT
 ;             0 = they call four routines of the machine's own instead:
@@ -1456,10 +1456,6 @@ prstr:  MOV     A,M
         ANI     0BFh
 prs1:   RST     5
         JMP     prstr
-e_dollar:POP    D               ; '$' ran into a NUL: drop the return address,
-        POP     H               ;   and put the string's address back in TOS
-        MVI     A,'Q'
-        JMP     error
 
 ; pmsg: print the text that follows the CALL, to its closing quote. Keeps HL.
 ; pnl: the same, on a new line.
@@ -1522,6 +1518,9 @@ e_hi:   INR     B
         JMP     error
 ; Error entries. Each loads its letter and then hides the next entry inside
 ; a 3-byte LXI D (the 11h), so they all fall through to `error`.
+e_dollar:POP    D               ; '$' ran into a NUL: drop prstr's return
+        POP     H               ;   address, put the string's address back in
+        DB      11h             ;   TOS, and step over the next two bytes: Q
 e_quote:MOV     B,H             ; an unclosed string: HL is its address, one
         MOV     C,L             ;   past the opening quote, which is the place
         MVI     A,'Q'
@@ -1539,7 +1538,6 @@ errp:   POP     D
 ; HL = TOS, and both stacks as the report is to show them:
 ;
 ;   Err X @ line,col
-;   up to 16 characters of the text from the place
 ;   Stk n: the top 8 cells at most, bottom to top
 ;   Rtn n
 error:  PUSH    H               ; now the whole data stack is in memory
@@ -1583,32 +1581,10 @@ er3:    PUSH    B
         RST     5
         POP     D
         POP     H
-        PUSH    H
         CALL    sub16
         INX     H
         CALL    pdec            ; the column
         CALL    pnl
-        DB      22h
-        POP     H               ; the text, as it is: 16 characters, or fewer
-        MVI     B,16            ;   if the line or the program ends first
-er4:    MOV     A,M
-        INX     H
-        ORA     A
-        JZ      er5
-        CPI     13
-        JZ      er5
-        CPI     10
-        JZ      er5
-        ENDIF
-        IF      CHECKED*CPM
-        CPI     1Ah             ; (the ^Z that pads a file's last record ends
-        JZ      er5             ;   the text too: some terminals clear the
-        ENDIF                   ;   screen on it)
-        IF      CHECKED
-        RST     5
-        DCR     B
-        JNZ     er4
-er5:    CALL    pnl
         DB      "Stk ",22h
         LXI     H,(2-DSTOP)&0FFFFh ; SP - (DSTOP-2) is minus twice the depth
         DAD     SP              ;   (the cell at DSTOP-2 was pushed with the
@@ -1623,7 +1599,8 @@ er5:    CALL    pnl
         CALL    pmsg
         DB      " ...",22h
         MVI     C,8
-er6:    MVI     H,0             ; C = the number of cells to show
+er6:    MOV     H,B             ; C = the number of cells to show (B is 0:
+                                ;   phal2 left the depth in BC)
         MOV     L,C
         DAD     H
         DAD     SP              ; HL -> just above the deepest of them

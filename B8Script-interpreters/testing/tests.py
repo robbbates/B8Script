@@ -116,7 +116,7 @@ CHK = [
 # must match that: a stack overrun is found once per character, so its place
 # can be a character late, and the sizes of the stacks differ from build to
 # build. No test may reach the "no" (it would be in the output twice).
-PLACE = rb'\r\nErr %c @ \d+,\d+\r\n[^\r\n\0]{0,16}\r\n'
+PLACE = rb'\r\nErr %c @ \d+,\d+\r\n'
 ERRS = [
     # data stack: s underflow (the stack then counts as empty), S overflow
     ('e_under', b'1 2+ ;; "no"$', b'', PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),

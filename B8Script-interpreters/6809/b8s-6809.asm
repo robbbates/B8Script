@@ -8,9 +8,8 @@
 ;    CHECKED  0 = no checks (spec: an unchecked build checks nothing)
 ;             1 = a checked build: variables start at 0, words start
 ;                 undefined, and every error in the spec's table stops the
-;                 program with the four-line report, then goes to EXIT:
+;                 program with the three-line report, then goes to EXIT:
 ;                   Err X @ line,col
-;                   <up to 16 characters of the text at the place>
 ;                   Stk n: ... v v v      (n = depth, then the top 8 values)
 ;                   Rtn n
 ;                 S/s data stack over/underflow, R/r return stack over/
@@ -989,8 +988,6 @@ e_quote:LDA     #'Q'            ; " or $ ran into the NUL
 ;
 ;     CR LF
 ;     Err X @ line,col CR LF
-;     <up to 16 raw characters from the place, ending early at CR, LF, NUL>
-;     CR LF
 ;     Stk n:[ ...][ v]*  CR LF     (the top 8 cells, bottom to top, signed)
 ;     Rtn n CR LF
 ;
@@ -1052,20 +1049,6 @@ lc3:    LDD     <AT
         FCB     ','+80h
         BSR     pdec            ; the column
         BSR     pmsg
-        FCB     13,10+80h
-        ; the text at the place
-        LDX     <AT
-        LDB     #16
-tx1:    LDA     ,X+
-        BEQ     tx9
-        CMPA    #10
-        BEQ     tx9
-        CMPA    #13
-        BEQ     tx9
-        BSR     putc
-        DECB
-        BNE     tx1
-tx9:    BSR     pmsg
         FCB     13,10,"Stk",' '+80h
         ; the data stack: its depth, then its top 8 cells, from Y down to
         ; the program's top cell, at ,U.

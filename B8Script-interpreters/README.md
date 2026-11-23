@@ -15,25 +15,26 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 | CPU | Generic | Generic, checked | CP/M | CP/M, checked |
 |---|---|---|---|---|
-| Z80 | 955 | 1,371 | 1,021 | 1,451 |
-| Z80 with the line editor | 1,678 | 2,004 | 1,853 | 2,195 |
-| 8080 | 1,054 | 1,521 | 1,104 | 1,586 |
-| 6502, stack in pages 2-3 | 1,427 | 1,985 | n/a | n/a |
-| 6502, stack in zero page | 1,355 | 1,915 | n/a | n/a |
-| 6809 | 1,035 | 1,461 | n/a | n/a |
+| Z80 | 955 | 1,340 | 1,021 | 1,416 |
+| Z80 with the line editor | 1,480 | 1,869 | 1,645 | 2,046 |
+| 8080 | 1,054 | 1,487 | 1,104 | 1,547 |
+| 6502, stack in pages 2-3 | 1,427 | 1,958 | n/a | n/a |
+| 6502, stack in zero page | 1,355 | 1,888 | n/a | n/a |
+| 6809 | 1,035 | 1,436 | n/a | n/a |
 
 | Windows .EXE | Unchecked | Checked | With the editor | Editor, checked |
 |---|---|---|---|---|
 | The file | 2,560 | 3,072 | 3,584 | 4,096 |
-| Of that: code and table | 1,542 | 2,096 | 2,554 | 3,008 |
+| Of that: code and table | 1,542 | 2,060 | 2,322 | 2,856 |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
-- A Windows file is a 512-byte header and then the code, the table and about 430 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 78, 36, 70 and 128 bytes to spare before their next step up.
+- A Windows file is a 512-byte header and then the code, the table and about 430 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 78, 72, 322 and 300 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
 - Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 60 to 80 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 280 to 470 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
-- What the grave's codes cost (2026-11-23): the eleven new ones, the search for the handler and the stirring of the seed add 190 bytes to the generic Z80 build, 200 to the 8080, 252 and 260 to the two 6502s and 210 to the 6809. About 50 to 60 of those are the ANSI sequences of the four console codes: built with `ANSI` = 0 the generic images are 905 (Z80), 1,001 (8080), 1,367 and 1,295 (6502) and 979 (6809) bytes, and 1,321, 1,468, 1,925, 1,855 and 1,405 checked. `ANSI` = 0 is for the generic builds: a CP/M build has no machine routines to call, so it always sends ANSI.
-- The Windows code grew by 256 bytes (280 checked), which the files' slack took: none of the four changed size.
+- What the grave's codes cost (2026-11-23): the eleven new ones, the search for the handler and the stirring of the seed add 190 bytes to the generic Z80 build, 200 to the 8080, 252 and 260 to the two 6502s and 210 to the 6809. About 50 to 60 of those are the ANSI sequences of the four console codes: built with `ANSI` = 0 the generic images are 905 (Z80), 1,001 (8080), 1,367 and 1,295 (6502) and 979 (6809) bytes, and 1,290, 1,434, 1,898, 1,828 and 1,380 checked. `ANSI` = 0 is for the generic builds: a CP/M build has no machine routines to call, so it always sends ANSI.
+- The Windows code grew by 256 bytes (280 checked) with the grave's codes, which the files' slack took: none of the four changed size.
+- What came out to fit 2,048 bytes (2026-11-23): every Z80 build is meant to fit 2,048 bytes, a common disk block and a 2716 EPROM, and the grave's codes had pushed the CP/M editor's checked build to 2,195. Two things went, in every build that had them. The checked report lost its line of program text (25 to 39 bytes a build, with a few bytes squeezed from the report beside it). The editor lost ^V, a view of the stacks, the program's size and the build's name (about 200 bytes in an unchecked editor build, which no longer carries the stack listing, and about 105 in a checked one), and 9 bytes were squeezed out of the CP/M editor's file code. The CP/M editor's checked build is now 2,046: 2 bytes to spare. The Windows editor follows: its code is 232 bytes smaller (152 checked), in files of the same size.
 
 ## Files
 
@@ -156,7 +157,6 @@ A command key ends the line too, and takes what was typed before it as its argum
 | ^R, `name`^R | Reads. CP/M: the file of that name, or the same file as last time. Generic: whatever is typed or pasted from then until ^Z replaces the program, with no echo |
 | ^W, `name`^W | Writes. CP/M: to that file, or the same file as last time. Generic: prints the text as it is, for the terminal to capture |
 | ^N ^N | New: no program (the key twice in a row; any other second key calls it off) |
-| ^V | View: the build's name and date, both stacks as an error report shows them, the program's size in bytes, its lines, and the bytes free |
 | ^X | Leaves: to `LEAVE` (generic) or to CP/M |
 | ^B ^F, or the left and right arrow keys | Move the cursor in the line. Text goes in at the cursor |
 | Backspace, DEL | Take out the character before the cursor |
@@ -189,7 +189,7 @@ A command key ends the line too, and takes what was typed before it as its argum
 - A program that is stopped, by an error or by Ctrl-C, prints its report and comes back to the editor, with both stacks empty.
 - A line typed at the editor is line 0 in the report; the column is the place in the line.
 
-The editor adds 723 bytes to the unchecked generic build and 832 to the CP/M one (633 and 744 to the checked ones, which have the report's routines already). ^V alone is about 170 of those in an unchecked build, because it brings in the stack listing. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
+The editor adds 525 bytes to the unchecked generic build and 624 to the CP/M one (529 and 630 to the checked ones). It had a ^V key until 2026-11-23, which showed both stacks, the program's size, its lines, the bytes free and the build's name; that editor is commit `5509e8d`. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
 
 ## The Windows builds (`win32/`)
 
@@ -236,14 +236,12 @@ The report is the spec's:
 
 ```
 Err Z @ 3,5
-/ "no"$
 Stk 6: 1 2 3 4 5 0
 Rtn 0
 ```
 
 - It starts and ends with CR LF. Then the build goes to EXIT, or back to the editor.
 - **The place** is the character that failed. For `U` it is the call, for `N` the `(` or `[` where the skip started, for `Q` the opening quote or the `$`, for `W` the character after the `[` or the grave, and for an `O` or a `Z` from one of the grave's codes the character after the grave. Lines and columns count from 1; text below the program (a line read by `-n?` and then run, or a line typed at the editor) is line 0.
-- **The text line** stops at CR, LF or NUL, and in the CP/M builds at ^Z too.
 - **The stack lines** show the stacks as they were before the failing character ran: `7 0/` shows `Stk 2: 7 0`. More than 8 cells are shown as ` ...` and the top 8. Values are signed, as `#` prints them. There are three exceptions:
   - A stack overrun (`S` `s` `R` `r`) is found after the character has run, once per character. After `s` the data stack counts as empty, after `r` the return stack. The place can be one character late, and after `r` it is wherever the bad return went.
   - `N`, and `Q` for an unclosed string, show the stack after the opener took its flag or pushed its address.
@@ -275,7 +273,7 @@ Rtn 0
 | Data stack | pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS in zero page | zero page $10-$EF, 112 cells, each cell two bytes side by side |
 | Zero page used | $00-$09 ($07 is the held key in the unchecked build, and with $06 the place of the character being run in the checked one) | $00, $01, $04-$06, $08, $09, and the stack ($0E-$0F are scratch when it is full). A checked build's report also uses $02, $03, $0A and $0B, after the program has stopped |
 | Dispatch table | whole addresses (64 bytes) | one byte each (32 bytes), with the layout rules above |
-| Size | 1,427 / 1,985 checked | 1,355 / 1,915 checked |
+| Size | 1,427 / 1,958 checked | 1,355 / 1,888 checked |
 
 The zero-page one is smaller because a cell that holds an address is used as the pointer where it lies (`(0,X)`), a drop is two `INX`, and the 16-bit operators work a byte at a time through one short routine called twice. Machine code written for one needs changing for the other: see the contracts below.
 
@@ -290,7 +288,7 @@ Every build runs, in an emulator, against a reference interpreter written from t
 - the break key, on unchecked and checked builds alike: Ctrl-C in a loop, in a chain of word calls and in `?`; the held key, the newest key winning, `?` taking the held key first; the break-off cell, with one Ctrl-C, two quick ones and two slow ones; and a count of how often KEY is called;
 - for checked builds, every error in the table, several ways each, with the whole report compared byte for byte against the reference (run with that build's own addresses); the stack overruns are compared against patterns, since stack sizes differ.
 
-The four editor builds are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the cursor keys and arrows, Esc, editing a line in place, new, view, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
+The four editor builds are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the cursor keys and arrows, Esc, editing a line in place, new, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
 
 The Windows builds run in the Unicorn emulator (`testing/harness_win32.py`): the .EXE is mapped as Windows would map it, and the dozen `kernel32` calls it makes are modelled. They go through the same suite as the others, the break-key tests and the editor sessions included, plus a few tests of their own (the report on standard error, redirected input, the arrow keys, the command line). That tests the interpreter, and the header against the rules; it can't show that Windows itself accepts the file, or that the model of each call is right.
 

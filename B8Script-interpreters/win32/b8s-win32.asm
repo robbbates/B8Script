@@ -14,7 +14,7 @@
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
 ;             1 = starts with every variable at 0 and every word undefined,
 ;                 and stops on every error in the spec's table (and Ctrl-C)
-;                 with the four-line report, on the standard error handle.
+;                 with the three-line report, on the standard error handle.
 ;    EDITOR   0 = a runner: B8SWIN PROG.B8S loads the file, runs it, exits
 ;             1 = the line editor of the spec's suggested standard (the same
 ;                 editor as the Z80's, key for key); the file named on the
@@ -741,7 +741,6 @@ e_brack:mov     al,'W'                  ; bad character after [
 ; place, EBX = TOS, and both stacks as the report is to show them:
 ;
 ;   Err X @ line,col
-;   up to 16 characters of the text from the place
 ;   Stk n: the top 8 cells at most, bottom to top
 ;   Rtn n
 ;
@@ -786,20 +785,7 @@ error:  push    ebx                     ; now the whole data stack is in memory
         movzx   eax,ax
         inc     eax
         call    pdec                    ; the column
-        call    pmsg
-        db      '/M/J',22h
-        push    16                      ; the text, as it is: 16 characters,
-        pop     ecx                     ;   or fewer if the line or the
-.er4:   lodsb                           ;   program ends first
-        test    al,al
-        jz      .er5
-        cmp     al,13
-        je      .er5
-        cmp     al,10
-        je      .er5
-        call    putc
-        loop    .er4
-.er5:   call    pstk
+        call    pstk
         call    pmsg
         db      '/M/J',22h
  %if EDITOR
@@ -1350,7 +1336,7 @@ endprog:
 %endif
 
 
-%if CHECKED+EDITOR
+%if CHECKED
 ; pstk: the two stack lines:  Stk n: the top 8 cells at most, bottom to top
 ;                             Rtn n
 ; TOS must be in memory with the rest (pushed), and pstk is called: so the
@@ -1415,8 +1401,6 @@ pstk:   call    pmsg
 ;              one from the command line, or the last one typed)
 ;    name ^W   write the program to that file (no name: the current one)
 ;    ^N ^N     new: no program (the key twice in a row)
-;    ^V        view: the build, both stacks, and the program's size, lines
-;              and free memory
 ;    ^X        leave
 ;
 ;  In the line: ^B and ^F, or the left and right arrow keys, move the cursor;
@@ -1581,10 +1565,9 @@ ekey:   or      eax,-1
 ; The command keys, and where each goes (after fin). REPNE SCASB leaves ECX
 ; = the number of keys after the one found, so the table is backwards. (The
 ; addresses are kept as RVAs, which fit in a word.)
-ckeys:  db      13, 7, 12, 5, 18, 23, 14, 22, 24
+ckeys:  db      13, 7, 12, 5, 18, 23, 14, 24
 NCMD    equ     $-ckeys
 ctabr:  dw      exit-IB                 ; ^X
-        dw      cview-IB                   ; ^V
         dw      cnew-IB                 ; ^N
         dw      cwrite-IB                  ; ^W
         dw      cread-IB                   ; ^R
@@ -1726,37 +1709,6 @@ clist:  call    rdnum                   ; DX = n, or 0 if there was none:
         inc     edx
         call    prl                     ;   and the line
         jmp     .li1
-
-; ^V: view.
-cview:  call    pmsg
- %if CHECKED
-        db      'B8SWINEC 2026-11-21',22h
- %else
-        db      'B8SWINE 2026-11-21',22h
- %endif
-        call    pstk                    ; both stacks
-        mov     edi,ARENA+PROG
-        or      ecx,-1
-.cv1:   inc     ecx                     ; count the lines, and find the end
-        call    nxl
-        jnz     .cv1
-        push    ecx
-        call    pmsg
-        db      '/M/JProg ',22h
-        lea     eax,[edi-(ARENA+PROG)]
-        call    pdec                    ; the program's size
-        call    pmsg
-        db      '/M/JLines ',22h
-        pop     eax
-        call    pdec
-        call    pmsg
-        db      '/M/JFree ',22h
-        mov     eax,ARENA+LIMIT-1
-        sub     eax,edi
-        call    pdec                    ; the room left for text and heap
-        call    pmsg
-        db      '/M/J',22h
-        jmp     gedit
 
 ; delln: take line EAX out: copy everything after it down over it. Keeps ESI.
 delln:  push    esi

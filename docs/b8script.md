@@ -344,16 +344,14 @@ B8Script comes in two kinds of build. An **unchecked** build checks nothing, for
 
 ```
 Err X @ 4,16
-d@:*n@>\
 Stk 3: 1 2 42
 Rtn 1
 ```
 
 - The report starts with CR LF, so it never lands in the middle of the program's output.
 - **Line 1:** `Err`, the code, `@`, then the line and column of the character that failed, both counted from 1. A line typed at a prompt or editor is line 0. Values up to 32767 are guaranteed; a build may print up to 65535. For `U` the place is the call; for `N` it is the opener where the skip started; for anything that goes wrong in a grave's command it is the character after the grave.
-- **Line 2:** up to 16 characters of the program text from that place, printed raw (escapes not decoded), stopping early at CR, LF or NUL.
-- **Line 3:** the data stack as it was when the error hit: `Stk`, the depth, then up to the top 8 values, bottom to top, so the top is last. More than 8 are shown as `…` and the top 8.
-- **Line 4:** `Rtn` and the return stack's depth.
+- **Line 2:** the data stack as it was when the error hit: `Stk`, the depth, then up to the top 8 values, bottom to top, so the top is last. More than 8 are shown as `…` and the top 8.
+- **Line 3:** `Rtn` and the return stack's depth.
 - The report goes to the console, or the platform's error channel where it has one, never into a program's redirected output.
 
 **After an error or a break,** a one-shot build returns to the OS or monitor. A build with a prompt or editor returns there, with both stacks cleared and words and variables kept.
@@ -817,7 +815,6 @@ This section is a suggestion, so that line editors on different machines feel al
 | ^R, `name`^R | Read | Load. With storage, from the named file. Without, by paste: raw text until ^Z or ^@ replaces the program |
 | ^W, `name`^W | Write | Save. With storage, to the current or named file. Without, print the raw text for the terminal to capture |
 | ^N ^N | New | Clear the program (pressed twice in a row) |
-| ^V | View | Show both stacks, the program size, free memory, the line count, and the build's name and version |
 | ^X | eXit | Leave to the OS or monitor |
 | Esc (^[) | — | Cancel the line being typed |
 | ^B, ^F, ← → | Back, Forward | Move the cursor in the line, with insert and delete mid-line |
@@ -1036,13 +1033,13 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 | Build | File | Bytes | Notes |
 |---|---|---|---|
 | Generic ROM | `b8s-z80-rom-0000.bin` | 955 | Starts at 0000h (reset); owns page zero |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,371 |  |
+| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,340 |  |
 | CP/M runner | `B8SZ80.COM` | 1,021 | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` | 1,451 |  |
-| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,678 | The suggested standard under [Environments](#environments); see the interpreters README |
-| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 2,004 |  |
-| CP/M with the line editor | `B8SZ80E.COM` | 1,853 | `B8SZ80E PROG.B8S`, or with no file |
-| The same, checked | `B8SZ80EC.COM` | 2,195 |  |
+| CP/M runner, checked | `B8SZ80C.COM` | 1,416 |  |
+| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,480 | The suggested standard under [Environments](#environments); see the interpreters README |
+| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,869 |  |
+| CP/M with the line editor | `B8SZ80E.COM` | 1,645 | `B8SZ80E PROG.B8S`, or with no file |
+| The same, checked | `B8SZ80EC.COM` | 2,046 |  |
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), HL' is the return-stack pointer. A and DE are scratch.
 
@@ -1075,7 +1072,7 @@ Under CP/M the pages sit after the image and the heap limit is the BDOS. The bre
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (1,054 bytes), `b8s-8080-rom-checked-0000.bin` (1,521), `B8S8080.COM` (1,104), `B8S8080C.COM` (1,586).
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (1,054 bytes), `b8s-8080-rom-checked-0000.bin` (1,487), `B8S8080.COM` (1,104), `B8S8080C.COM` (1,547).
 
 The memory map, the break key, the console interface, the console codes, the random seed and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 0A7Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
 
@@ -1085,7 +1082,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
-| Bytes (unchecked, checked) | 1,427 and 1,985 | 1,355 and 1,915 |
+| Bytes (unchecked, checked) | 1,427 and 1,958 | 1,355 and 1,888 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
 | Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |
@@ -1107,7 +1104,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 ## Appendix D: 6809
 
-Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. Builds: `b8s-6809-rom-F000.bin` (1,035 bytes), `b8s-6809-rom-checked-F000.bin` (1,461). The image starts at F000h, with label `start`: point the reset vector at it.
+Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. Builds: `b8s-6809-rom-F000.bin` (1,035 bytes), `b8s-6809-rom-checked-F000.bin` (1,436). The image starts at F000h, with label `start`: point the reset vector at it.
 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|

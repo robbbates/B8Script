@@ -11,8 +11,8 @@
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
 ;             1 = starts with every variable at 0 and every word undefined,
 ;                 and stops on every error in the spec's table (and Ctrl-C)
-;                 with a four-line report: the letter and the place as line
-;                 and column, the text there, and both stacks. See `error`.
+;                 with a three-line report: the letter and the place as
+;                 line and column, and both stacks. See `error`.
 ;    ANSI     1 = the four console codes (`@ `^ `_ `?) send ANSI escape
 ;                 sequences through CONOUT
 ;             0 = they call four routines of the machine's own instead:
@@ -765,7 +765,7 @@ h_str:  PUSH    HL
 ; '$' prints the string at TOS, decoding escapes: '/' plus a character
 ; clears that character's bit 6 (/M is CR, /` is space; '/' and '"' have no
 ; bit 6, so // and /" give themselves).
-        IF      (1-CHECKED)*(1-EDITOR)
+        IF      1-CHECKED
 h_print:LD      A,(HL)
         INC     HL
         CP      22h
@@ -785,11 +785,6 @@ pr1:    RST     28h
 h_print:PUSH    HL
         CALL    prstr
         POP     DE
-        RST     18h
-        ENDIF
-        IF      (1-CHECKED)*EDITOR
-; (With the editor the loop is a routine, prstr, which ^V uses too.)
-h_print:CALL    prstr
         RST     18h
         ENDIF
 
@@ -1525,6 +1520,9 @@ e_break:LD      A,'B'           ; Ctrl-C (found inside pollk or getk)
 ; errp: an error found inside a routine: drop its return address first.
 errp:   POP     DE
         JR      error
+e_dollar:POP    DE              ; '$' ran into a NUL: drop prstr's return
+        POP     HL              ;   address, put the string's address back in
+        DB      11h             ;   TOS, and step over the next two bytes: Q
 e_quote:LD      B,H             ; an unclosed string: HL is its address, one
         LD      C,L             ;   past the opening quote, which is the place
         LD      A,'Q'
@@ -1539,7 +1537,6 @@ e_brack:LD      A,'W'           ; bad character after [
 ; HL = TOS, and both stacks as the report is to show them:
 ;
 ;   Err X @ line,col
-;   up to 16 characters of the text from the place
 ;   Stk n: the top 8 cells at most, bottom to top
 ;   Rtn n
 error:  PUSH    HL              ; now the whole data stack is in memory
@@ -1583,53 +1580,16 @@ er3:    PUSH    BC
         RST     28h
         POP     DE
         POP     HL
-        PUSH    HL
         OR      A
         SBC     HL,DE
         INC     HL
         CALL    pdec            ; the column
+; The two stack lines:  Stk n: the top 8 cells at most, bottom to top
+;                       Rtn n
+; TOS is in memory with the rest (pushed).
         CALL    pnl
-        DB      22h
-        POP     HL              ; the text, as it is: 16 characters, or fewer
-        LD      B,16            ;   if the line or the program ends first
-er4:    LD      A,(HL)
-        INC     HL
-        OR      A
-        JR      Z,er5
-        CP      13
-        JR      Z,er5
-        CP      10
-        JR      Z,er5
-        ENDIF
-        IF      CHECKED*CPM
-        CP      1Ah             ; (the ^Z that pads a file's last record ends
-        JR      Z,er5           ;   the text too: some terminals clear the
-        ENDIF                   ;   screen on it)
-        IF      CHECKED
-        RST     28h
-        DJNZ    er4
-er5:                            ; (without the editor: on into pstk)
-        ENDIF
-        IF      CHECKED*EDITOR
-        CALL    pstk
-        CALL    pnl
-        DB      22h
-        JP      edit0           ; back to the editor, with both stacks cleared
-        ENDIF
-
-; =============================================================================
-;  Routines that the checked build's report and the editor share
-; =============================================================================
-SPADJ   EQU     2*EDITOR        ; (with the editor pstk is called, not fallen
-                                ;   into: the stack is one address deeper)
-        IF      CHECKED+EDITOR
-; pstk: the two stack lines:  Stk n: the top 8 cells at most, bottom to top
-;                             Rtn n
-; TOS must be in memory with the rest (pushed). In a build without the
-; editor this is the end of `error`, which runs on into it.
-pstk:   CALL    pnl
         DB      "Stk ",22h
-        LD      HL,(2+SPADJ-DSTOP)&0FFFFh ; SP - (DSTOP-2) is minus twice the
+        LD      HL,(2-DSTOP)&0FFFFh ; SP - (DSTOP-2) is minus twice the
         ADD     HL,SP           ;   depth (the cell at DSTOP-2 was pushed
         RST     20h             ;   with the first value and holds nothing)
         CALL    phalf           ; the depth
@@ -1641,16 +1601,11 @@ pstk:   CALL    pnl
         CALL    pmsg
         DB      " ...",22h
         LD      C,8
-er6:    LD      H,0             ; C = the number of cells to show
+er6:    LD      H,B             ; C = the number of cells to show (B is 0:
+                                ;   phalf left the depth in BC)
         LD      L,C
         ADD     HL,HL
         ADD     HL,SP           ; HL -> just above the deepest of them
-        ENDIF
-        IF      EDITOR
-        INC     HL
-        INC     HL
-        ENDIF
-        IF      CHECKED+EDITOR
         INC     C
 er7:    DEC     C
         JR      Z,er8
@@ -1668,30 +1623,25 @@ er7:    DEC     C
         POP     HL
         JR      er7
 er8:    CALL    pnl
-        ENDIF
-        IF      (1-CHECKED)*EDITOR
-        DB      "Rtn 0",22h     ; (only ^V comes here, and at the editor the
-        RET                     ;   return stack is always empty)
-        ENDIF
-        IF      CHECKED
         DB      "Rtn ",22h
+        EXX                     ; twice the depth is RSTOP less the pointer:
+        LD      A,RSTOP&0FFh    ;   the low bytes are enough, since even an
+        SUB     L               ;   overflowing stack holds under 128 entries
         EXX
-        PUSH    HL
-        EXX
-        POP     DE
-        LD      HL,RSTOP
-        OR      A
-        SBC     HL,DE
-        ENDIF
-        IF      CHECKED*(1-EDITOR)
+        LD      L,A
+        LD      H,B             ; (B is still 0)
         CALL    phalf
         CALL    pnl
         DB      22h
+        ENDIF
+        IF      CHECKED*(1-EDITOR)
         JP      endprog
         ENDIF
-        IF      CHECKED+EDITOR
-; phalf: print half of HL, and leave it in C. (With the editor, pstk ends by
-; running on into this.)
+        IF      CHECKED*EDITOR
+        JP      edit0           ; back to the editor, with both stacks cleared
+        ENDIF
+        IF      CHECKED
+; phalf: print half of HL, and leave it in C.
 phalf:  SRL     H
         RR      L
         PUSH    HL
@@ -1700,18 +1650,14 @@ phalf:  SRL     H
         RET
 
 ; prstr: print the string at HL, to its closing quote, decoding '/' (this is
-; '$', and the texts of the report and the editor). In the checked build a
+; '$', and the texts of the report). A
 ; NUL first is an error: Q.
 prstr:  LD      A,(HL)
         INC     HL
         CP      22h
         RET     Z
-        ENDIF
-        IF      CHECKED
         OR      A
-        JR      Z,e_dollar
-        ENDIF
-        IF      CHECKED+EDITOR
+        JP      Z,e_dollar
         CP      '/'
         JR      NZ,prs1
         LD      A,(HL)
@@ -1730,12 +1676,6 @@ pmsg:   EX      (SP),HL
         CALL    prstr
         EX      (SP),HL
         RET
-        ENDIF
-        IF      CHECKED
-e_dollar:POP    DE              ; '$' ran into a NUL: drop the return address,
-        POP     HL              ;   and put the string's address back in TOS
-        LD      A,'Q'
-        JP      error
         ENDIF
 
 ; =============================================================================
@@ -1763,8 +1703,6 @@ e_dollar:POP    DE              ; '$' ran into a NUL: drop the return address,
 ;    name ^W   write. CP/M: to that file (no name: the same file as last
 ;              time). Generic: the text is printed, as it is.
 ;    ^N ^N     new: no program (the key twice in a row)
-;    ^V        view: the build, both stacks, and the program's size, lines
-;              and free memory
 ;    ^X        leave (to LEAVE)
 ;
 ;  In the line: ^B and ^F, or the left and right arrow keys, move the cursor;
@@ -1994,11 +1932,9 @@ cmds:   DB      13
         DW      cwrite
         DB      14              ; ^N
         DW      cnew
-        DB      22              ; ^V
-        DW      cview
         DB      24              ; ^X
         DW      LEAVE
-NCMD    EQU     9
+NCMD    EQU     8
 
 ; ^N ^N: no program, if the next key is ^N too
 cnew:   CALL    ekey
@@ -2006,18 +1942,16 @@ cnew:   CALL    ekey
         JR      NZ,ged0
         XOR     A
         LD      (PROG),A
-ged0:   JP      edit
+ged0:   JR      gedit
 
 ; ^E: line n goes into the input line, to be changed. EDLN remembers which
 ; line it was: Return puts the text back in its place.
 cedln:  CALL    rdnum
-        PUSH    HL
+        LD      (EDLN),HL       ; (no such line: `edit` clears it again)
         CALL    find            ; HL -> the line, or the NUL if there is none
-        POP     DE
         LD      A,(HL)
         OR      A
         JR      Z,ged0
-        LD      (EDLN),DE
         LD      DE,LINEBUF
 ce1:    LD      A,(HL)          ; copy it, and show it, up to its CR (or LF)
         CP      13
@@ -2141,53 +2075,6 @@ li3:    PUSH    HL
         CALL    prl             ;   and the line
         JR      li1
 
-; ^V: view.
-cview:  CALL    pmsg
-        DB      "B8SZ80E"
-        ENDIF
-        IF      EDITOR*CHECKED
-        DB      "C"
-        ENDIF
-        IF      EDITOR
-        DB      " 2026-11-21",22h
-        CALL    pstk            ; both stacks
-        LD      HL,PROG
-        LD      DE,0FFFFh
-cv1:    INC     DE              ; count the lines, and find the end
-        CALL    nxl
-        JR      NZ,cv1
-        PUSH    HL              ; the NUL
-        PUSH    DE              ; the lines
-        LD      DE,(0-PROG)&0FFFFh
-        ADD     HL,DE
-        CALL    pnl
-        DB      "Prog ",22h
-        CALL    pdec            ; the program's size
-        POP     HL
-        CALL    pnl
-        DB      "Lines ",22h
-        CALL    pdec
-        POP     DE
-        ENDIF
-        IF      EDGEN
-        LD      HL,HEAPLIM*256-1
-        ENDIF
-        IF      EDITOR*CPM
-        LD      A,(0007h)       ; the BDOS page is the limit
-        LD      H,A
-        LD      L,0
-        DEC     HL
-        ENDIF
-        IF      EDITOR
-        OR      A
-        SBC     HL,DE
-        CALL    pnl
-        DB      "Free ",22h
-        CALL    pdec            ; the room left for text and heap
-        CALL    pnl
-        DB      22h
-ged1:   JP      edit
-
 ; delln: take line n (in HL) out: copy everything after it down over it.
 delln:  CALL    find
         LD      D,H
@@ -2265,7 +2152,7 @@ rd4:    LD      A,C
         CP      1Ah
         JR      NZ,rd1
         LD      (HL),0
-        JR      ged1
+ged1:   JP      edit
 
 ; ^W, generic: the text is printed as it is, for the terminal to capture.
 cwrite: LD      HL,PROG
@@ -2280,12 +2167,6 @@ cw1:    LD      A,(HL)
         IF      EDITOR*CPM
 CFCB     EQU     005Ch           ; the file's name is kept here, where the CCP
                                 ;   put the one from the command line
-; ^R, CP/M: read the file. A name typed before the key is the file's name
-; from now on.
-cread:  CALL    setname
-        CALL    load
-        JP      edit
-
 ; ^W, CP/M: write the file: delete the old one, make it anew, write the
 ; text in records of 128 bytes, and close it. The text's NUL and the 127
 ; bytes after it are set to ^Z meanwhile, which pads the last record. (A
@@ -2319,9 +2200,12 @@ cw3:    LD      A,E             ; a record that starts before the end is written
         POP     HL
         JR      cw3
 cw4:    LD      (HL),0          ; the NUL again
-        LD      C,16            ; close
-        CALL    fbdos
-        JP      edit
+        LD      C,16            ; close,
+        LD      HL,edit         ;   and from there back to the editor
+        PUSH    HL
+; fbdos: BDOS function C on the file. (^W ends by running on into it.)
+fbdos:  LD      DE,CFCB
+        JP      BDOS
 
 ; frec: BDOS function C (read or write a record) with the 128 bytes at DE.
 ; Returns A = the BDOS's answer, HL = DE and DE = DE + 128.
@@ -2331,9 +2215,8 @@ frec:   PUSH    DE
         CALL    BDOS
         POP     BC
         CALL    fbdos
-        POP     HL
-        LD      DE,128
-        EX      DE,HL
+        POP     DE
+        LD      HL,128
         ADD     HL,DE
         EX      DE,HL
         RET
@@ -2374,10 +2257,11 @@ fc1:    LD      (HL),0
         DJNZ    fc1
         RET
 
-; fbdos: BDOS function C on the file
-fbdos:  LD      DE,CFCB
-        JP      BDOS
-
+; ^R, CP/M: read the file. A name typed before the key is the file's name
+; from now on. It runs on into load, which returns to the editor.
+cread:  CALL    setname
+        LD      HL,edit
+        PUSH    HL
 ; load: read the file into PROG. No such file: no program. The text ends at
 ; the file's first ^Z (1Ah), which pads a text file's last record; one more
 ; goes after the last record, so the search always stops. And every line

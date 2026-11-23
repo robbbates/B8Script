@@ -93,4 +93,4 @@ The same ten games, cut down. They play the same, with shorter titles and messag
 
 ### Speed of the real-time tiny games
 
-Ski, Tron, Snake, Duel, Copter and Breakout move one step per `99?` in their code: a wait of up to 99 ms for a key, so about ten steps a second. To change the speed, change that number: bigger is slower. Up to `99?` it costs nothing; a three-digit wait costs one character, which still fits every limit. Pressing a key ends a wait early, so a game runs a little faster while you press keys.
+Ski, Tron, Snake, Duel and Copter move one step per `99?` in their code: a wait of up to 99 ms for a key, so about ten steps a second. Breakout waits `250?`, about four steps a second, which keeps it playable but still a challenge. It is now exactly 280 characters, so it has no room for a longer number. To change the speed, change that number: bigger is slower. Up to `99?` it costs nothing; a three-digit wait costs one character, which still fits every limit. Pressing a key ends a wait early, so a game runs a little faster while you press keys.

@@ -368,8 +368,8 @@ rpushd: LHLD    RSP
 ; ---- the grave -------------------------------------------------------------
 ; The grave is a prefix: with the character after it, it is one command.
 ; GTAB holds each character with the place of its handler, as a byte to add
-; to gbase. The handler starts with HL = TOS, A = the character and the
-; carry clear. A character that is not in the table is unsafe: the unchecked
+; to that byte's own address (so the table sits just ahead of the handlers).
+; The handler starts with HL = TOS, A = the character and the carry clear. A character that is not in the table is unsafe: the unchecked
 ; build searches on through memory, the checked build stops with W.
 h_grave:LDAX    B
         INX     B
@@ -386,8 +386,7 @@ gr1:    INX     H
         JNZ     gr1
         MOV     E,M
         MVI     D,0
-        LXI     H,gbase
-        DAD     D               ; the handler
+        DAD     D               ; the handler: this byte's address plus it
         XTHL                    ; TOS back, and jump there
         RET
 
@@ -929,7 +928,37 @@ udv2:   POP     PSW
 ;    `^  ( -- )             clear the screen and home the cursor
 ;    `_  ( -- )             clear from the cursor to the end of the line
 ; =============================================================================
-gbase:
+; The table: a character, then its handler's distance from that second byte.
+GTAB:   DB      '!'
+        DB      g_exec-$
+        DB      '$'
+        DB      g_hex-$
+        DB      27h
+        DB      g_nl-$
+        DB      '+'
+        DB      g_inc-$
+        DB      ','
+        DB      g_rnd-$
+        DB      '-'
+        DB      g_inc-$
+        DB      '.'
+        DB      g_seed-$
+        DB      '<'
+        DB      g_min-$
+        DB      '>'
+        DB      g_min-$
+        DB      '?'
+        DB      g_cur-$
+        DB      '@'
+        DB      g_at-$
+        DB      '^'
+        DB      g_cls-$
+        DB      '_'
+        DB      g_eol-$
+        IF      CHECKED
+        DB      0FFh            ; the end
+        ENDIF
+
 g_exec: JMP     exec            ; (exec is up among the RST routines)
 
 ; `$: pairs of hex digits are stored from addr until a non-hex character;
@@ -960,10 +989,9 @@ g_nl:   MVI     A,13
 ; `+ and `-: one routine. The character says which.
 g_inc:
         IF      CHECKED
-        CALL    chkst           ; the address is tested first, as '!' does
-        DCX     B
-        LDAX    B               ; (the test used A: the character again)
-        INX     B
+        MOV     D,A             ; the address is tested first, as '!' does
+        CALL    chkst           ;   (the test uses A, and under CP/M E)
+        MOV     A,D
         ENDIF
         CPI     ','             ; carry for '+'
         MOV     E,M
@@ -1006,13 +1034,12 @@ g_rnd:
         DAD     H
         DAD     H
         DAD     B               ; * 5
+        INX     H               ; + 1
         MOV     A,H
         ADD     C
-        MOV     H,A             ; + * 256: * 261
-        INX     H
+        MOV     H,A             ; + * 256: * 261 + 1
         SHLD    SEED
-        MOV     A,H
-        XRA     L
+        XRA     L               ; (A is still the high byte)
         MOV     L,A
         CALL    udiv            ; BC = the remainder
         MOV     H,B
@@ -1117,24 +1144,6 @@ g_at:   POP     D               ; DE = the row, HL = the column
         IF      CHECKED
 gbad:   POP     H               ; no such code: W. The place is the character
         JMP     e_brack
-        ENDIF
-
-; The table: a character, then its handler's distance from gbase.
-GTAB:   DB      '!',g_exec-gbase
-        DB      '$',g_hex-gbase
-        DB      27h,g_nl-gbase
-        DB      '+',g_inc-gbase
-        DB      ',',g_rnd-gbase
-        DB      '-',g_inc-gbase
-        DB      '.',g_seed-gbase
-        DB      '<',g_min-gbase
-        DB      '>',g_min-gbase
-        DB      '?',g_cur-gbase
-        DB      '@',g_at-gbase
-        DB      '^',g_cls-gbase
-        DB      '_',g_eol-gbase
-        IF      CHECKED
-        DB      0FFh            ; the end
         ENDIF
 
 ; psgn: print HL as a signed number. Uses BC.

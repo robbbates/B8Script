@@ -47,14 +47,21 @@ Read README.md and testing/README.md first. Things that are easy to break:
 - asm80 accepts some out-of-range 6502 branches. Run testing/chkbr6502.py.
 - On the 6502 every punctuation handler starts with the carry clear, and
   several handlers count on it (the comments say where). The grave's
-  handlers start with it SET, and with Y = their place in GTAB times 3.
-- The grave's handlers. Z80: a ladder of SUB and JR, so every handler must
-  stay in reach of its test, and the first two tests sit in the first page
-  as filler the layout needs. 8080 and 6809: a table of characters with
-  one-byte distances from gbase, so every handler must start within 255
-  bytes of it. The 6809's unchecked build also needs hexc and that table
-  in its first range. Windows: the same, and the assembler stops if one
-  is out of reach.
+  handlers start with it clear too, and with Y = their place in GCH:
+  `+ `- and `< `> tell themselves apart by that place, so the order of
+  the table matters (the comment above it says how).
+- The grave's handlers. Z80: a ladder of SUB and JR, all forward, so every
+  handler must stay in reach of its test; the first two tests sit in the
+  first page as filler the layout needs. 8080 and 6809: a table of
+  characters (GTAB) just before the handlers, each with the one-byte
+  distance from that entry to its handler, so every handler must start
+  within 255 bytes after its entry. Both 6502s: low bytes only (GLO), so
+  the handlers must lie in memory in the table's order and cross at most
+  one page boundary. The 6809's -n? line reader is a macro (LINERD): the
+  unchecked build needs it in its first range as filler, the checked one
+  at the end of the image. Windows: one-byte distances from each entry of
+  gtab, and the assembler stops if the last handler is out of reach. chktab.py, chktab09.py and
+  chktab6502.py check the others.
 - ref.py and the harnesses agree on how the random seed is stirred (a key
   that is there at once: nothing; a timed wait that runs out: its count).
   Change one and the games stop matching.
@@ -86,15 +93,15 @@ bytes, one CPU at a time. Ideas not yet tried:
   but this interpreter's handlers lean on each other more (falling into
   each other, sharing `fin`), and the jumps needed to split them into
   three groups leave only about 11 bytes of the 32.
-- 6502, b8s-6502-zp.asm: 1378 bytes. Its page layout has 68, 62 and 37
-  bytes to spare in its three pages (46, 65 and 13 in the checked build,
+- 6502, b8s-6502-zp.asm: 1355 bytes. Its page layout has 68, 62 and 49
+  bytes to spare in its three pages (46, 65 and 25 in the checked build,
   whose inner loop and skipper live after the third page).
 - 6809, checked: it keeps a whole-address table because its code is bigger
   than the two ranges of the one-byte scheme (its handlers need about 550
   bytes). A three-range split was worked out on paper: it would save 13
   to 20 bytes, but needs a handler order the unchecked build can't share.
 - Z80/8080: the first 256 bytes are packed by hand around the RST vectors.
-- Z80 with EDITOR = 1: 1681 bytes, 723 of them the editor (four builds:
+- Z80 with EDITOR = 1: 1678 bytes, 723 of them the editor (four builds:
   with or without CPM and CHECKED). It was written for the spec's
   suggested standard and has had one light size pass. What is left needs
   a decision or a redesign: the key dispatch (seven compares and a
@@ -109,16 +116,25 @@ bytes, one CPU at a time. Ideas not yet tried:
 - Every build: the break-off cell and its 250 ms wait for a second Ctrl-C
   is about 30 bytes.
 - Windows: a file only shrinks in steps of 512 bytes. The four builds are
-  2002, 2556, 3034 and 3488 bytes past their headers, so the next steps
-  down are 466, 508, 474 and 416 bytes away. Each has 46, 4, 38 and 96
+  1970, 2524, 3002 and 3456 bytes past their headers, so the next steps
+  down are 434, 476, 442 and 384 bytes away. Each has 78, 36, 70 and 128
   bytes to spare before the next step up: the checked runner is the one
   to watch.
-- The grave (2026-11-23), every CPU: the new codes were written once and
-  squeezed lightly. Untried: a hash of the character into a 17-byte table
-  on the Z80 (about 5 bytes less than the ladder, but every handler must
-  then start in one page); the four ANSI console codes as one routine
-  driven by a short table; an 8-bit stir of the seed (3 to 5 bytes a
-  CPU, and 256 possible games after one key instead of thousands).
+- The grave (2026-11-23), every CPU: the new codes have had one size pass
+  (3 bytes on the Z80, 4 on the 8080, 7 on the 6809, 25 and 23 on the
+  6502s, 32 on Windows). Tried or worked out there, and not worth it:
+  on the Z80 a table, a CPIR search or a hash of the character in place
+  of the ladder (from 1 byte more to 5 less, but every handler must then
+  start in one page and "clear the screen" can no longer fall into
+  "clear the line"); one swap in place of two in `< `> (which of the two
+  codes it is must outlive the compare); the ANSI sequences as text after
+  a call on the Z80, 6809 and 6502 (the printer costs more than the
+  sequences save; a checked build already has one, but using it there
+  means a second copy of the four handlers); on the 6502 a base address
+  plus an offset in place of the low-byte table, and the 261 multiply
+  written out; a short branch to the 6809's line reader.
+  Decided against, not for size: an 8-bit stir of the seed (3 to 5 bytes
+  a CPU, but 256 possible games after one key instead of thousands).
 
 Report a table of bytes before and after for every variant, the techniques
 that paid off, and the ones you tried that didn't.

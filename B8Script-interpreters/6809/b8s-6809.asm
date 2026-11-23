@@ -569,9 +569,10 @@ ah1:
 
 ; ---- the grave -------------------------------------------------------------
 ; The grave is a prefix: with the character after it, it is one command.
-; GTAB holds each character with the place of its handler, as a byte to add
-; to gbase (the handlers are at the end of the image). A handler starts with
-; A = the character, is entered by the dispatcher's own JSR and ends in RTS.
+; GTAB (at the end of the image, just ahead of the handlers) holds each
+; character with the place of its handler, as a byte to add to the address
+; after that byte. A handler starts with A = the character, is entered by
+; the dispatcher's own JSR and ends in RTS.
 ; A character that is not in the table is unsafe: the unchecked build
 ; searches on through memory, the checked build stops with W.
 h_grave:
@@ -593,42 +594,51 @@ gr1:    CMPA    ,X++
 gr2:
         ENDIF
         LDB     -1,X
-        LDX     #gbase
-        ABX
+        ABX                     ; the handler: the next entry's address plus it
         JMP     ,X
 
-; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
-; and return its value in A with the carry set; otherwise leave the IP and
-; return with the carry clear.
-hexc:   JSR     isdig
-        BLO     hv1             ; C = 1
-        ANDA    #0DFh
-        SUBA    #11h
-        CMPA    #6
-        BHS     hv9             ; C = 0
-        SUBA    #0F6h           ; + 10, and sets the carry
-hv1:    LEAY    1,Y             ; (LEAY leaves the carry alone)
-hv9:    RTS
 
-; The table: a character, then its handler's distance from gbase.
-GTAB:   FCB     '!',g_exec-gbase
-        FCB     '$',g_hex-gbase
-        FCB     27h,g_nl-gbase
-        FCB     '+',g_inc-gbase
-        FCB     ',',g_rnd-gbase
-        FCB     '-',g_inc-gbase
-        FCB     '.',g_seed-gbase
-        FCB     '<',g_min-gbase
-        FCB     '>',g_max-gbase
-        FCB     '?',g_cur-gbase
-        FCB     '@',g_at-gbase
-        FCB     '^',g_cls-gbase
-        FCB     '_',g_eol-gbase
-        IF      CHECKED
-        FCB     0               ; the end
+; ---- the line reader of -n? (see h_key) --------------------------------------
+; Backspace takes the last character back (and is echoed as it is), CR ends
+; (stored, not echoed), every other key is stored and echoed until the line
+; is full. B = the length so far; the low byte of the top cell becomes the
+; most allowed (it holds minus the count on entry).
+; (A macro, because the two builds need it in different places: the
+; unchecked build here, in the first range, where the layout needs these
+; bytes ahead of the handlers that follow; the checked build at the end of
+; the image, out of the way of its short branches.)
+.macro  LINERD
+line:   CMPX    #-127           ; (X = TOS, minus the count)
+        BHS     ln1
+        LDA     #-127           ; more than 127 is taken as 127
+        STA     1,U
+ln1:    NEG     1,U
+        LDX     #LINEBUF
+        CLRB
+ln2:    JSR     getk
+        BEQ     ln2
+        CMPA    #13
+        BEQ     ln5
+        CMPA    #8
+        BEQ     ln4
+        CMPB    1,U
+        BHS     ln2             ; full
+        STA     B,X
+        INCB
+ln3:    JSR     CONOUT
+        BRA     ln2
+ln4:    TSTB                    ; Backspace: nothing to take back?
+        BEQ     ln2
+        DECB
+        BRA     ln3             ; echo it
+ln5:    STA     B,X             ; A = 13
+        STX     ,U
+        RTS
+.endm
+        IF      1-CHECKED
+        LINERD
         ENDIF
-; (hexc and the table are here, in the first range, because the layout of
-; the unchecked build needs these bytes ahead of the handlers that follow.)
+
 
 ; ---- where the two ranges meet ---------------------------------------------
 ; The first range ends somewhere among the next five handlers, ] \ [ @ ?
@@ -787,8 +797,8 @@ kt3:    CLR     ,U
         STA     1,U
         RTS
 
-; (The line reader, `line`, is at the end of the image: there is no room for
-; it here, between the short branches.)
+; (The line reader, `line`, is the macro LINERD, above: there is no
+; room for it here, between the short branches.)
 
 ; =============================================================================
 ;  Handlers that must start in the second range (unchecked build).
@@ -1237,7 +1247,38 @@ ud3:    STD     ,U
 ;
 ;  Neither the loader's stores nor the machine code are checked.
 ; =============================================================================
-gbase:
+; The table: a character, then its handler's distance from the address
+; after that byte.
+GTAB:   FCB     '!'
+        FCB     g_exec-$-1
+        FCB     '$'
+        FCB     g_hex-$-1
+        FCB     27h
+        FCB     g_nl-$-1
+        FCB     '+'
+        FCB     g_inc-$-1
+        FCB     ','
+        FCB     g_rnd-$-1
+        FCB     '-'
+        FCB     g_inc-$-1
+        FCB     '.'
+        FCB     g_seed-$-1
+        FCB     '<'
+        FCB     g_min-$-1
+        FCB     '>'
+        FCB     g_max-$-1
+        FCB     '?'
+        FCB     g_cur-$-1
+        FCB     '@'
+        FCB     g_at-$-1
+        FCB     '^'
+        FCB     g_cls-$-1
+        FCB     '_'
+        FCB     g_eol-$-1
+        IF      CHECKED
+        FCB     0               ; the end
+        ENDIF
+
 ; `, The seed goes one step on: seed * 261 + 1, which takes every 16-bit
 ; value in turn. The high bits of such a seed are the good ones and the low
 ; ones repeat soon, so the high byte is folded into the low (EOR) before the
@@ -1256,16 +1297,15 @@ g_rnd:
         ROLA
         ASLB
         ROLA
-        ADDB    <SEED
-        ADCA    <SEED+1         ; * 5
-        ADDA    <SEED           ; + * 256: * 261
-        ADDD    #1
+        ORCC    #1              ; (the carry is the + 1)
+        ADCB    <SEED
+        ADCA    <SEED+1         ; * 5 + 1
+        ADDA    <SEED           ; + * 256: * 261 + 1
         STB     <SEED
         STA     <SEED+1
         EORB    <SEED+1
-        LDX     ,U              ; n
-        STD     ,U              ; the dividend under it
-        PSHU    X
+        PSHU    D
+        JSR     h_swap          ; the dividend under n
         BSR     udiv            ; NOS = the quotient, TOS = the remainder
         PULU    D
         STD     ,U
@@ -1314,12 +1354,12 @@ g_nl:   LDA     #13
         BRA     gputc
 
 g_hex:  LDX     ,U
-hx1:    JSR     hexc
+hx1:    BSR     hexc
         BCC     hx2
         LDB     #16
         MUL                     ; B = the digit, moved up to the high half
         STB     ,X              ; (an odd digit is overwritten by the RTS)
-        JSR     hexc
+        BSR     hexc
         BCC     hx2             ; odd digit: already consumed, dropped
         ORA     ,X
         STA     ,X+
@@ -1328,6 +1368,19 @@ hx2:    LDA     #39h            ; RTS
         STA     ,X
         STX     ,U
         RTS
+
+; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
+; and return its value in A with the carry set; otherwise leave the IP and
+; return with the carry clear.
+hexc:   JSR     isdig
+        BLO     hv1             ; C = 1
+        ANDA    #0DFh
+        SUBA    #11h
+        CMPA    #6
+        BHS     hv9             ; C = 0
+        SUBA    #0F6h           ; + 10, and sets the carry
+hv1:    LEAY    1,Y             ; (LEAY leaves the carry alone)
+hv9:    RTS
 
 g_exec: PULU    PC              ; jump to it: the code's RTS returns to the
                                 ;   dispatcher
@@ -1394,37 +1447,8 @@ g_at:   LDD     ,U++            ; D = the column
         JMP     CONAT
         ENDIF
 
-; ---- the line reader of -n? (see h_key) --------------------------------------
-; Backspace takes the last character back (and is echoed as it is), CR ends
-; (stored, not echoed), every other key is stored and echoed until the line
-; is full. B = the length so far; the low byte of the top cell becomes the
-; most allowed (it holds minus the count on entry).
-line:   CMPX    #-127           ; (X = TOS, minus the count)
-        BHS     ln1
-        LDA     #-127           ; more than 127 is taken as 127
-        STA     1,U
-ln1:    NEG     1,U
-        LDX     #LINEBUF
-        CLRB
-ln2:    JSR     getk
-        BEQ     ln2
-        CMPA    #13
-        BEQ     ln5
-        CMPA    #8
-        BEQ     ln4
-        CMPB    1,U
-        BHS     ln2             ; full
-        STA     B,X
-        INCB
-ln3:    JSR     CONOUT
-        BRA     ln2
-ln4:    TSTB                    ; Backspace: nothing to take back?
-        BEQ     ln2
-        DECB
-        BRA     ln3             ; echo it
-ln5:    STA     B,X             ; A = 13
-        STX     ,U
-        RTS
-
+        IF      CHECKED
+        LINERD                  ; the line reader of -n?
+        ENDIF
 
 imgend:

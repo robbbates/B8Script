@@ -756,12 +756,13 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 
 **The grave**
 
-- **Find the handler with a ladder or a small table.** The thirteen characters are scattered, so a second full table would be mostly holes. The Z80 tests them in rising order, each `SUB` taking off only the step from the one before: adjacent characters cost a `DEC A` and a short jump, and every handler starts with A = 0 and the carry clear. The 8080, 6502 and 6809 have no short jump, or a dear one, and search a table of characters instead, each with its handler's distance from one base address (or its whole address).
-- **One routine for two codes.** `` `+ `` and `` `- `` differ only in what is added, `` `< `` and `` `> `` only in which of the two is kept. On the Z80 the second entry is a hidden `SCF`, so the carry tells them apart; the table builds work it out from the character or its place in the table.
+- **Find the handler with a ladder or a small table.** The thirteen characters are scattered, so a second full table would be mostly holes. The Z80 tests them one after another, each `SUB` taking off only the step from the one before, so adjacent characters cost a `DEC A` and a short jump. Four that are neighbours (`+ , - .`) are found by one range test and told apart by rotating the low bits into the carry. The 8080, 6502 and 6809 have no short jump, or a dear one, and search a table of characters instead.
+- **A table that needs no base address.** On the 8080 and 6809 each character in the table is followed by its handler's distance from that byte itself, and the table sits just before the handlers: the search already points there, so the distance is added to the pointer and nothing is loaded. On the 6502 the table holds low bytes only, with the handlers in the table's order: the high byte is the first handler's page, plus the carry of one compare against the place where the page turns, which the assembler works out.
+- **One routine for two codes.** `` `+ `` and `` `- `` differ only in what is added, `` `< `` and `` `> `` only in which of the two is kept. On the Z80 the carry tells them apart, from a rotated bit of the character or an `SCF` at the second entry; the table builds work it out from the character or its place in the table. On the 6502 one compare of that place gives both halves of what `` `+ `` and `` `- `` add: `SBC #0` on a cleared A leaves 0 with the carry set (add 1) or FFh with it clear (add −1).
 - **Signed compare from the borrow.** For `` `< `` and `` `> `` both values must survive the compare. Subtract, rotate the borrow into bit 7, and XOR the two high bytes into it: the sign bit is then "less than", with neither operand changed.
 - **Multiply by 261 with shifts.** 261 is 256 + 4 + 1, so the seed's step is two doublings, an add, and the low byte added into the high. Where the multiply routine is easier to reach than that, call it.
 - **Stir in the wait loop.** The loop of `n?` already counts milliseconds; adding 1 to the seed there is one increment.
-- **Console codes as tails of one another.** ESC `[` is a three-line routine. "Clear the screen" is ESC `[` `H` and then falls into "clear to the end of the line" with a `J` in place of the `K`.
+- **Console codes as tails of one another.** ESC `[` is a three-line routine. "Clear the screen" is ESC `[` `H` and then falls into "clear to the end of the line" with a `J` in place of the `K`. A build that already has a routine printing the text that follows its call (Windows has one for the report) just writes the sequences as text.
 - **Let the machine do it.** With the `ANSI` switch off the four console codes are calls of four machine routines, which is far smaller than the sequences (about 50 bytes on the Z80).
 
 **Checked builds**
@@ -1034,14 +1035,14 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 
 | Build | File | Bytes | Notes |
 |---|---|---|---|
-| Generic ROM | `b8s-z80-rom-0000.bin` | 958 | Starts at 0000h (reset); owns page zero |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,375 |  |
-| CP/M runner | `B8SZ80.COM` | 1,024 | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` | 1,455 |  |
-| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,681 | The suggested standard under [Environments](#environments); see the interpreters README |
-| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 2,008 |  |
-| CP/M with the line editor | `B8SZ80E.COM` | 1,856 | `B8SZ80E PROG.B8S`, or with no file |
-| The same, checked | `B8SZ80EC.COM` | 2,199 |  |
+| Generic ROM | `b8s-z80-rom-0000.bin` | 955 | Starts at 0000h (reset); owns page zero |
+| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,371 |  |
+| CP/M runner | `B8SZ80.COM` | 1,021 | `B8SZ80 PROG.B8S` |
+| CP/M runner, checked | `B8SZ80C.COM` | 1,451 |  |
+| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,678 | The suggested standard under [Environments](#environments); see the interpreters README |
+| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 2,004 |  |
+| CP/M with the line editor | `B8SZ80E.COM` | 1,853 | `B8SZ80E PROG.B8S`, or with no file |
+| The same, checked | `B8SZ80EC.COM` | 2,195 |  |
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), HL' is the return-stack pointer. A and DE are scratch.
 
@@ -1074,7 +1075,7 @@ Under CP/M the pages sit after the image and the heap limit is the BDOS. The bre
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (1,058 bytes), `b8s-8080-rom-checked-0000.bin` (1,526), `B8S8080.COM` (1,108), `B8S8080C.COM` (1,591).
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (1,054 bytes), `b8s-8080-rom-checked-0000.bin` (1,521), `B8S8080.COM` (1,104), `B8S8080C.COM` (1,586).
 
 The memory map, the break key, the console interface, the console codes, the random seed and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 0A7Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
 
@@ -1084,7 +1085,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
-| Bytes (unchecked, checked) | 1,452 and 2,018 | 1,378 and 1,938 |
+| Bytes (unchecked, checked) | 1,427 and 1,985 | 1,355 and 1,915 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
 | Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |
@@ -1106,7 +1107,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 ## Appendix D: 6809
 
-Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. Builds: `b8s-6809-rom-F000.bin` (1,042 bytes), `b8s-6809-rom-checked-F000.bin` (1,468). The image starts at F000h, with label `start`: point the reset vector at it.
+Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. Builds: `b8s-6809-rom-F000.bin` (1,035 bytes), `b8s-6809-rom-checked-F000.bin` (1,461). The image starts at F000h, with label `start`: point the reset vector at it.
 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|

@@ -807,11 +807,15 @@ dsk:
 
 ; ---- the grave
 ; The grave is a prefix: with the character after it, it is one command.
-; GTAB (after the three pages, with the handlers) holds each character with
-; its handler's address, less 1 for the RTS trick. A handler starts with the
-; carry SET and Y = three times its place in the table, and ends in RTS. A
-; character that is not in the table is unsafe: the unchecked build does
-; nothing, the checked build stops with W.
+; GCH (after the three pages, with the handlers) holds the characters and
+; GLO, beside it, the low byte of each one's handler, less 1 for the RTS
+; trick. The high byte is worked out: the handlers lie in the order of the
+; table and take up less than a page, so they start in one page or in two,
+; and GK is the place in the table where the second page begins (the
+; assembler works it out, and chktab6502.py checks it). A handler starts
+; with Y = its place in the table, and ends in RTS. A character that is not
+; in the table is unsafe: the unchecked build does nothing, the checked
+; build stops with W.
 h_grave:
         IF      CHECKED
         INC     PLACE           ; the place of anything that goes wrong in
@@ -820,11 +824,9 @@ h_grave:
 gr0:
         ENDIF
         JSR     getc
-        LDY     #GTABE-GTAB-3
-gr1:    CMP     GTAB,Y
+        LDY     #GLO-GCH-1
+gr1:    CMP     GCH,Y
         BEQ     gr2
-        DEY
-        DEY
         DEY
         BPL     gr1
         IF      1-CHECKED
@@ -833,21 +835,13 @@ gr1:    CMP     GTAB,Y
         IF      CHECKED
         JMP     eb1             ; no such code: W
         ENDIF
-gr2:    LDA     GTAB+2,Y
+gr2:    CPY     #GK             ; carry: the second page
+        LDA     #GQ0
+        ADC     #0
         PHA
-        LDA     GTAB+1,Y
+        LDA     GLO,Y
         PHA
         RTS                     ; to the handler
-
-; `! ( addr -- ): call the machine code at addr; see the contract in the
-; header.
-exec:   LDA     0,X
-        STA     T0
-        LDA     1,X
-        STA     T1
-        INX                     ; the address is consumed
-        INX
-        JMP     (T0)
 
 ; ---- '_' is the last handler: its body may leave the page
 ; '_' ( n -- addr ): the heap top moves by n, which is signed: a negative
@@ -922,9 +916,9 @@ chkst:  PHA
 
 ; =============================================================================
 ;  The grave's codes (h_grave, in the third page, is the dispatcher). Each
-;  starts with the carry SET and Y = three times its place in GTAB.
+;  starts with Y = its place in the table, GCH.
 ;
-;    `!  ( addr -- )        call the machine code at addr (exec)
+;    `!  ( addr -- )        call the machine code at addr
 ;    `$  ( addr -- addr' )  the hex loader: pairs of hex digits are stored
 ;                           from addr until a non-hex character; then a RTS
 ;                           (60h) is written and its address is left. An odd
@@ -941,33 +935,38 @@ chkst:  PHA
 ;    `^  ( -- )             clear the screen and home the cursor
 ;    `_  ( -- )             clear from the cursor to the end of the line
 ; =============================================================================
-GTAB:   DB      '!'
-        DW      exec-1
-        DB      '$'
-        DW      g_hex-1
-        DB      27h
-        DW      g_nl-1
-GPLUS:  DB      '+'
-        DW      g_inc-1
-        DB      ','
-        DW      g_rnd-1
-        DB      '-'
-        DW      g_inc-1
-        DB      '.'
-        DW      g_seed-1
-        DB      '<'             ; ('<' must have an odd place here, and '>'
-        DW      g_min-1         ;   an even one: see g_min)
-        DB      '>'
-        DW      g_min-1
-        DB      '?'
-        DW      g_cur-1
-        DB      '@'
-        DW      g_at-1
-        DB      '^'
-        DW      g_cls-1
-        DB      '_'
-        DW      g_eol-1
-GTABE:
+; (The order matters: '-' just before '+', '<' at an even place and '>' at
+; the odd one after it, and the handlers in the same order in memory.)
+GCH:    DB      '$',27h
+GMINUS: DB      '-','+','.',',','<','>','?','@','^','_','!'
+GLO:    DB      (g_hex-1) & 0FFh
+        DB      (g_nl-1) & 0FFh
+        DB      (g_inc-1) & 0FFh
+        DB      (g_inc-1) & 0FFh
+        DB      (g_seed-1) & 0FFh
+        DB      (g_rnd-1) & 0FFh
+        DB      (g_min-1) & 0FFh
+        DB      (g_min-1) & 0FFh
+        DB      (g_cur-1) & 0FFh
+        DB      (g_at-1) & 0FFh
+        DB      (g_cls-1) & 0FFh
+        DB      (g_eol-1) & 0FFh
+        DB      (g_exec-1) & 0FFh
+; The page of each handler, and GK: 13 less the table entries whose handler
+; is in the second page. (One division to a line: asm80 only rounds down
+; when it stores a value.)
+GQ0     EQU     (g_hex-1)/256
+GQ1     EQU     (g_nl-1)/256
+GQ2     EQU     (g_inc-1)/256
+GQ4     EQU     (g_seed-1)/256
+GQ5     EQU     (g_rnd-1)/256
+GQ6     EQU     (g_min-1)/256
+GQ8     EQU     (g_cur-1)/256
+GQ9     EQU     (g_at-1)/256
+GQ10    EQU     (g_cls-1)/256
+GQ11    EQU     (g_eol-1)/256
+GQ12    EQU     (g_exec-1)/256
+GK      EQU     13+12*GQ0-GQ1-GQ2-GQ2-GQ4-GQ5-GQ6-GQ6-GQ8-GQ9-GQ10-GQ11-GQ12
 
 ; `$ (never checked: the spec says so)
 g_hex:  JSR     rdhex
@@ -992,19 +991,18 @@ g_nl:   LDA     #13
         LDA     #10
         JMP     CONOUT
 
-; `+ and `-: one routine, which adds 1 or -1 (FFFFh): Y says which. The cell
-; is reached a byte at a time through the top cell, which moves on between.
+; `+ and `-: one routine. It adds 0000h with the carry set, or FFFFh with it
+; clear: SBC turns the carry into that 00 or FF and leaves the carry as it
+; was. The cell is reached a byte at a time through the top cell, which
+; moves on between.
 g_inc:
         IF      CHECKED
         JSR     chkst           ; each byte's address is tested, as for '!'
         ENDIF
-        CPY     #GPLUS-GTAB+3   ; carry: '-'
+        CPY     #GMINUS-GCH+1   ; carry: '+'
         LDA     #0
-        BCC     gi1
-        LDA     #0FFh
-gi1:    STA     T1              ; the high byte of 1 or -1,
-        ORA     #1              ;   and the low
-        CLC
+        SBC     #0
+        STA     T1
         ADC     (0,X)
         STA     (0,X)
         PHA
@@ -1047,9 +1045,8 @@ gr8:
         LDA     1,X
         STA     D1              ; D = n
         LDA     SEED
-        STA     0,X
-        LDA     SEED+1
-        STA     1,X             ; the seed in n's place,
+        LDY     SEED+1
+        JSR     setay           ; the seed in n's place,
         LDA     #05h            ;   and 261 (0105h) on top of it
         LDY     #01h
         JSR     pushay
@@ -1067,34 +1064,20 @@ gr8:
         JSR     h_swap
         JMP     drop            ; the remainder is TOS
 
-; `< and `>: one routine. scmp leaves the carry clear if a < b. Y is odd for
-; '<' and even for '>', so the low bit of Y plus the carry is set when a,
-; the cell below, is the one to keep.
+; `< and `>: one routine. scmp leaves the carry clear if a < b. Y is even
+; for '<' and odd for '>' (their places in the table), so the low bit of Y
+; plus the carry is clear when a, the cell below, is the one to keep.
 g_min:  JSR     scmp
         TYA
         ADC     #0
         LSR
-        BCS     gm1
+        BCC     gm1
         JSR     h_swap          ; b is wanted: a on top, to be dropped
 gm1:    JMP     drop
 
         IF      ANSI
-; `^: ESC [ H homes the cursor, and ESC [ J clears from there to the end of
-; the screen. `_: ESC [ K clears to the end of the line.
-g_cls:  JSR     csi
-        LDA     #'H'
-        JSR     CONOUT
-        LDA     #'J'
-        DB      2Ch             ; (BIT abs: hides the next instruction)
-g_eol:  LDA     #'K'
-        PHA
-        JSR     csi
-        PLA
-        JMP     CONOUT
-
 ; `? ( flag -- ): ESC [ ? 2 5 l hides the cursor, ESC [ ? 2 5 h shows it.
-g_cur:  JSR     csi
-        LDY     #2
+g_cur:  LDY     #4
 gc1:    LDA     GQ25,Y
         JSR     CONOUT
         DEY
@@ -1102,10 +1085,10 @@ gc1:    LDA     GQ25,Y
         JSR     flag
         BEQ     gc2
         LDA     #'h'
-        DB      2Ch
+        DB      2Ch             ; (BIT abs: hides the next instruction)
 gc2:    LDA     #'l'
         JMP     CONOUT
-GQ25:   DB      '5','2','?'     ; (printed from the end)
+GQ25:   DB      '5','2','?','[',27      ; (printed from the end)
 
 ; `@ ( row col -- ): ESC [ row+1 ; col+1 H. (ANSI counts from 1.)
 g_at:   JSR     csi
@@ -1125,12 +1108,21 @@ csi:    LDA     #27
         JSR     CONOUT
         LDA     #'['
         JMP     CONOUT
+
+; `^: ESC [ H homes the cursor, and ESC [ J clears from there to the end of
+; the screen. `_: ESC [ K clears to the end of the line.
+g_cls:  LDY     #'H'
+        JSR     csiy
+        LDY     #'J'
+        DB      2Ch             ; (BIT abs: hides the next instruction)
+g_eol:  LDY     #'K'
+; csiy: print ESC [ and the character in Y
+csiy:   JSR     csi
+        TYA
+        JMP     CONOUT
         ENDIF
         IF      1-ANSI
 ; With ANSI = 0 the machine's own routines do the work (see the equates).
-; CONCLS and CONEOL are jumped to straight from the table.
-g_cls   EQU     CONCLS
-g_eol   EQU     CONEOL
 g_cur:  JSR     flag            ; A = 0 and Z set: off
         JMP     CONCUR
 g_at:   LDY     2,X             ; Y = the row
@@ -1139,7 +1131,19 @@ g_at:   LDY     2,X             ; Y = the row
         INX
         INX
         JMP     drop
+g_cls:  JMP     CONCLS
+g_eol:  JMP     CONEOL
         ENDIF
+
+; `! ( addr -- ): call the machine code at addr; see the contract in the
+; header.
+g_exec: LDA     0,X
+        STA     T0
+        LDA     1,X
+        STA     T1
+        INX                     ; the address is consumed
+        INX
+        JMP     (T0)
 
         IF      CHECKED
 ; The checked build's inner loop, out of page 1, where it would not fit,

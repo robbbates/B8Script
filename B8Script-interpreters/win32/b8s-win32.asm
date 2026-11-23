@@ -554,7 +554,8 @@ h_key:  test    bh,bh
 
 ; ---- the grave --------------------------------------------------------------
 ; The grave is a prefix: with the character after it, it is one command.
-; gtab holds each character with its handler's distance from gbase. A
+; gtab holds each character with its handler's distance from that entry
+; of the table (so the search's own pointer is the base). A
 ; handler starts with AL = the character and EBX = TOS, and ends with JMP
 ; EBP. A character that is not in the table is unsafe: the unchecked build
 ; searches on through memory, the checked build stops with W.
@@ -590,8 +591,8 @@ grave1: lodsb
 %endif
         cmp     al,[edx]
         jne     .g1
-        movzx   edx,byte [edx+1]
-        add     edx,gbase
+        movzx   ecx,byte [edx+1]        ; the distance from this entry
+        add     edx,ecx
         jmp     edx
 
 ; (The table and the handlers are further down, after the routines: here
@@ -941,9 +942,8 @@ skip:
 
 ; ---- the grave's table and handlers (see grave1) ------------------------------
 %macro  GT 2
-        db      %1, (%2-gbase) & 0FFh
-        times   -((%2-gbase) > 255) db 0        ; (an error if it is out of reach)
-%endmacro
+%%e:    db      %1, (%2-%%e) & 0FFh             ; (the reach is checked after the
+%endmacro                                       ;   last handler, g_at)
 gtab:   GT '!', g_exec
         GT '$', g_hex
         GT 27h, g_nl
@@ -961,7 +961,6 @@ gtab:   GT '!', g_exec
         db      0
 %endif
 
-gbase:
 ; `$
 g_hex:  call    hexc
         jnc     .hx2
@@ -995,10 +994,8 @@ g_exec: call    ebx
         pop     ebx
         jmp     ebp
 
-g_nl:   mov     al,13
-        call    putc
-        mov     al,10
-gput:   call    putc
+g_nl:   call    pmsg                    ; (pmsg prints the text after the call,
+        db      '/M/J',22h              ;   decoding '/' as '$' does)
         jmp     ebp
 
 ; `+ and `-: the character less ',' is -1 or 1, which is taken off the cell.
@@ -1054,24 +1051,18 @@ gm8:    mov     bx,dx
 gm9:    jmp     ebp
 
 ; `^: ESC [ H homes the cursor, and ESC [ J clears from there to the end of
-; the screen. `_: ESC [ K clears to the end of the line.
-g_cls:  call    csi
-        mov     al,'H'
-        call    putc
-        mov     al,'J'
-        jmp     short ge1
-g_eol:  mov     al,'K'
-ge1:    call    csi                     ; (csi keeps EAX)
-        jmp     gput
+; the screen. `_: ESC [ K clears to the end of the line. (The sequences are
+; texts for pmsg, where /[ is ESC.)
+g_cls:  call    pmsg
+        db      '/[[H/[[J',22h
+        jmp     ebp
+g_eol:  call    pmsg
+        db      '/[[K',22h
+        jmp     ebp
 
 ; `? ( flag -- ): ESC [ ? 2 5 l hides the cursor, ESC [ ? 2 5 h shows it.
-g_cur:  call    csi
-        mov     al,'?'
-        call    putc
-        mov     al,'2'
-        call    putc
-        mov     al,'5'
-        call    putc
+g_cur:  call    pmsg
+        db      '/[[?25',22h
         test    bx,bx
         mov     al,'l'
         jz      gdrop
@@ -1080,7 +1071,8 @@ gdrop:  call    putc
         jmp     h_drop
 
 ; `@ ( row col -- ): ESC [ row+1 ; col+1 H. (ANSI counts from 1.)
-g_at:   call    csi
+g_at:   call    pmsg
+        db      '/[[',22h
         pop     eax                     ; the row
         call    .n
         mov     al,';'
@@ -1092,15 +1084,9 @@ g_at:   call    csi
 .n:     inc     eax                     ; print AX + 1, unsigned
         movzx   eax,ax
         jmp     pdec
-
-; csi: print ESC [, which starts every ANSI sequence. Keeps every register.
-csi:    push    eax
-        mov     al,27
-        call    putc
-        mov     al,'['
-        call    putc
-        pop     eax
-        ret
+        times   -((g_at-gtab) > 255) db 0       ; an error if the last handler is
+                                                ;   out of reach of the table's
+                                                ;   one-byte distances
 
 ; psgn: print the low word of EAX as a signed number. pdec: print EAX
 ; unsigned, by recursion on EAX / 10 (the stack holds the digits). Both use

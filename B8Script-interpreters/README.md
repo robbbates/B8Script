@@ -15,25 +15,25 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 | CPU | Generic | Generic, checked | CP/M | CP/M, checked |
 |---|---|---|---|---|
-| Z80 | 958 | 1,375 | 1,024 | 1,455 |
-| Z80 with the line editor | 1,681 | 2,008 | 1,856 | 2,199 |
-| 8080 | 1,058 | 1,526 | 1,108 | 1,591 |
-| 6502, stack in pages 2-3 | 1,452 | 2,018 | n/a | n/a |
-| 6502, stack in zero page | 1,378 | 1,938 | n/a | n/a |
-| 6809 | 1,042 | 1,468 | n/a | n/a |
+| Z80 | 955 | 1,371 | 1,021 | 1,451 |
+| Z80 with the line editor | 1,678 | 2,004 | 1,853 | 2,195 |
+| 8080 | 1,054 | 1,521 | 1,104 | 1,586 |
+| 6502, stack in pages 2-3 | 1,427 | 1,985 | n/a | n/a |
+| 6502, stack in zero page | 1,355 | 1,915 | n/a | n/a |
+| 6809 | 1,035 | 1,461 | n/a | n/a |
 
 | Windows .EXE | Unchecked | Checked | With the editor | Editor, checked |
 |---|---|---|---|---|
 | The file | 2,560 | 3,072 | 3,584 | 4,096 |
-| Of that: code and table | 1,574 | 2,128 | 2,586 | 3,040 |
+| Of that: code and table | 1,542 | 2,096 | 2,554 | 3,008 |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
-- A Windows file is a 512-byte header and then the code, the table and about 430 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 46, 4, 38 and 96 bytes to spare before their next step up.
+- A Windows file is a 512-byte header and then the code, the table and about 430 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 78, 36, 70 and 128 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
 - Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 60 to 80 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 280 to 470 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
-- What the grave's codes cost (2026-11-23): the eleven new ones, the search for the handler and the stirring of the seed add 193 bytes to the generic Z80 build, 204 to the 8080, 277 and 283 to the two 6502s and 217 to the 6809. About 50 to 70 of those are the ANSI sequences of the four console codes: built with `ANSI` = 0 the generic images are 908 (Z80), 1,005 (8080), 1,381 and 1,307 (6502) and 986 (6809) bytes, and 1,325, 1,473, 1,947, 1,867 and 1,412 checked. `ANSI` = 0 is for the generic builds: a CP/M build has no machine routines to call, so it always sends ANSI.
-- The Windows code grew by 288 bytes, which the files' slack took: none of the four changed size.
+- What the grave's codes cost (2026-11-23): the eleven new ones, the search for the handler and the stirring of the seed add 190 bytes to the generic Z80 build, 200 to the 8080, 252 and 260 to the two 6502s and 210 to the 6809. About 50 to 60 of those are the ANSI sequences of the four console codes: built with `ANSI` = 0 the generic images are 905 (Z80), 1,001 (8080), 1,367 and 1,295 (6502) and 979 (6809) bytes, and 1,321, 1,468, 1,925, 1,855 and 1,405 checked. `ANSI` = 0 is for the generic builds: a CP/M build has no machine routines to call, so it always sends ANSI.
+- The Windows code grew by 256 bytes (280 checked), which the files' slack took: none of the four changed size.
 
 ## Files
 
@@ -94,11 +94,14 @@ asm80 has some quirks the sources work around:
 To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6809 and the zero-page 6502 keep one byte per punctuation character and work the rest of the handler's address out from the character's place in the table. That puts rules on where handlers sit:
 
 - **Z80, 8080:** the handlers of the first `NPG1` characters (in code order) start in the image's second 256 bytes, the rest in its first. `NPG1` is worked out by the assembler from where `] \ [ @` landed, so the split moves by itself when code grows or shrinks.
-- **6809, unchecked:** the same idea with two 256-byte ranges after the table. The checked 6809 build is too big for that and keeps a table of whole addresses. The grave's table and `hexc` sit in the first range because the layout needs their bytes there, and the line reader of `-n?` is at the end of the image.
+- **6809, unchecked:** the same idea with two 256-byte ranges after the table. The checked 6809 build is too big for that and keeps a table of whole addresses. The line reader of `-n?` is a macro (`LINERD`): the unchecked build puts it in the first range, because the layout needs its bytes there, and the checked build at the end of the image, where its branches still reach.
 - **6502, zero page:** three pages. The handlers of `! " # $ % & ' (` start in the image's first 256 bytes, those of `) * + , - . / : ; < = > ?` in its second, and the rest in its third. The split is fixed (`N1`, `N2`), so code that grows may have to move; the source marks the stretches where no handler starts, which are the places to move it to. The image must be assembled at a multiple of 512.
 - **Z80, 8080:** the RST routines must sit at their vectors.
+- **The grave's handlers, Z80:** a ladder of tests with short jumps, all forward. The assembler stops if one is out of reach.
+- **The grave's handlers, 8080 and 6809:** the table of characters (`GTAB`) sits just before the handlers, and each entry holds its handler's distance from the entry itself. So every handler must start within 255 bytes after its own entry.
+- **The grave's handlers, both 6502s:** one byte per handler (`GLO`, the low byte of its address less 1). The high byte is the page of the first handler, plus 1 from place `GK` of the table onwards. So the handlers must lie in memory in the table's order and cross at most one page boundary; `GK` is worked out by the assembler, so the split moves by itself.
 
-`testing/chktab.py` (Z80, 8080), `testing/chktab09.py` (6809) and `testing/chktab6502.py` check all of this on the listings. Run them after any change; each says how many bytes are to spare. `b8s-6502.asm` has a table of whole addresses and no such rules.
+`testing/chktab.py` (Z80, 8080), `testing/chktab09.py` (6809) and `testing/chktab6502.py` check all of this on the listings. Run them after any change; each says how many bytes are to spare. `b8s-6502.asm` has a table of whole addresses for the punctuation, so only the grave's rule applies to it.
 
 ## Generic machine interface (edit the equates)
 
@@ -272,7 +275,7 @@ Rtn 0
 | Data stack | pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS in zero page | zero page $10-$EF, 112 cells, each cell two bytes side by side |
 | Zero page used | $00-$09 ($07 is the held key in the unchecked build, and with $06 the place of the character being run in the checked one) | $00, $01, $04-$06, $08, $09, and the stack ($0E-$0F are scratch when it is full). A checked build's report also uses $02, $03, $0A and $0B, after the program has stopped |
 | Dispatch table | whole addresses (64 bytes) | one byte each (32 bytes), with the layout rules above |
-| Size | 1,452 / 2,018 checked | 1,378 / 1,938 checked |
+| Size | 1,427 / 1,985 checked | 1,355 / 1,915 checked |
 
 The zero-page one is smaller because a cell that holds an address is used as the pointer where it lies (`(0,X)`), a drop is two `INX`, and the 16-bit operators work a byte at a time through one short routine called twice. Machine code written for one needs changing for the other: see the contracts below.
 

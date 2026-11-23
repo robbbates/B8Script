@@ -1063,7 +1063,9 @@ pdec:   LD      DE,10
 
 ; =============================================================================
 ;  The grave's other codes. h_grave comes here with A = the character minus
-;  27h, not zero; the tests carry on from there.
+;  27h, not zero; the tests carry on from there. The four characters from
+;  '+' to '.' follow one another, so one range test finds them and two
+;  rotates tell them apart.
 ;
 ;    `$  ( addr -- addr' )  the hex loader: pairs of hex digits are stored
 ;        from addr until a non-hex character; then a RET (C9h) is written
@@ -1082,7 +1084,140 @@ pdec:   LD      DE,10
 ;  Any other character is unsafe: the unchecked build takes it as '_', the
 ;  checked build stops with W.
 ; =============================================================================
-; (The console codes are here, before the tests, to be in reach of them.)
+grave2: SUB     '+'-27h         ; '+' ',' '-' '.' leave 0 to 3
+        CP      4
+        JR      NC,gv2
+        RRA                     ; carry: ',' or '.'; bit 0 of A: '-' or '.'
+        JR      C,gv3
+; `+ and `-: one routine.
+        IF      CHECKED
+        LD      D,A             ; (the checked build tests the address first,
+        CALL    chkst           ;   as '!' does: the test uses A, and under
+        LD      A,D             ;   CP/M E too)
+        ENDIF
+        LD      E,(HL)
+        INC     HL
+        LD      D,(HL)
+        RRA                     ; carry: '-'
+        JR      C,gi1
+        INC     DE
+        INC     DE
+gi1:    DEC     DE
+        LD      (HL),D
+        DEC     HL
+        LD      (HL),E
+        EX      DE,HL           ; the new value is TOS
+        RST     30h
+
+gv3:    RRA                     ; carry: '.'
+        JR      C,g_seed
+; `, ( n -- r ). The seed goes one step on: seed * 261 + 1, which takes
+; every 16-bit value in turn. The high bits of such a seed are the good ones
+; and the low ones repeat soon, so the high byte is folded into the low
+; (XOR) before the remainder of dividing by n is taken.
+; n must be 1 to 32767: the checked build stops with Z on anything less
+; than 1.
+g_rnd:
+        IF      CHECKED
+        DEC     HL
+        BIT     7,H             ; n - 1 negative: n is 0 or less
+        INC     HL
+        JP      NZ,e_zero
+        ENDIF
+        EX      DE,HL           ; DE = n
+        PUSH    BC
+        LD      HL,(SEED)
+        LD      B,H
+        LD      C,L
+        ADD     HL,HL
+        ADD     HL,HL
+        ADD     HL,BC           ; * 5
+        INC     HL              ; + 1
+        LD      A,H
+        ADD     A,C
+        LD      H,A             ; + * 256: * 261 + 1
+        LD      (SEED),HL
+        XOR     L               ; (A is still the high byte)
+        LD      L,A
+        CALL    udiv            ; DE = the remainder
+        EX      DE,HL
+        POP     BC
+        RST     30h
+
+; `. pushes the address of the random seed.
+g_seed: PUSH    HL
+        LD      HL,SEED
+        RST     30h
+
+gv2:    ADD     A,'+'-'$'       ; '$'
+        JR      NZ,gv4
+hx1:    CALL    hexc
+        JR      NC,hx2
+        LD      (HL),A          ; the high digit goes in first ...
+        CALL    hexc
+        JR      NC,hx2          ; odd digit: consumed, and the RET below
+        RLD                     ;   overwrites it
+        INC     HL              ; ... and RLD shifts it up under the low one
+        JR      hx1
+hx2:    LD      (HL),0C9h       ; (never range-checked: the spec says so)
+        RST     30h
+gv4:    SUB     '<'-'$'
+        JR      Z,g_min
+        SUB     '>'-'<'
+        JR      Z,g_max
+        DEC     A               ; '?'
+        JR      Z,g_cur
+        DEC     A               ; '@'
+        JR      Z,g_at
+        SUB     '^'-'@'         ; '^' leaves 0 and '_' leaves 1
+        IF      CHECKED
+        CP      2
+        JP      NC,e_brack      ; anything else: W. The place is the character
+        OR      A
+        ENDIF
+        IF      ANSI
+        JR      NZ,ge1
+        CALL    csi             ; '^': ESC [ H homes the cursor, and then
+        LD      A,'H'           ;   ESC [ J clears from there to the end of
+        RST     28h             ;   the screen
+        XOR     A
+ge1:    ADD     A,'J'           ; '_': ESC [ K clears to the end of the line
+        LD      E,A
+        CALL    csi
+        LD      A,E
+        RST     28h
+        RST     30h
+        ENDIF
+        IF      1-ANSI
+        JR      NZ,ge1
+        CALL    CONCLS
+        RST     30h
+ge1:    CALL    CONEOL
+        RST     30h
+        ENDIF
+
+; `< and `>. The carry says which: set for the larger. The two are put in
+; order, HL the smaller and DE the larger, and then swapped for '>'.
+; b < a (signed) is the borrow of b - a, turned round if the two signs
+; differ: RRA puts the borrow in bit 7, where the two XORs meet it.
+g_max:  SCF                     ; ('<' comes in with the carry clear)
+g_min:  POP     DE              ; DE = a, HL = b
+        PUSH    AF
+        LD      A,L
+        SUB     E
+        LD      A,H
+        SBC     A,D
+        RRA
+        XOR     H
+        XOR     D
+        RLA                     ; carry: b < a
+        JR      C,gm2
+        EX      DE,HL
+gm2:    POP     AF
+        JR      NC,gm3
+        EX      DE,HL
+gm3:    RST     30h
+
         IF      ANSI
 ; `? ( flag -- ): ESC [ ? 2 5 l hides the cursor, ESC [ ? 2 5 h shows it.
 g_cur:  CALL    csi
@@ -1135,150 +1270,6 @@ g_at:   POP     DE              ; DE = the row, HL = the column
         CALL    CONAT
         RST     18h
         ENDIF
-
-grave2: ADD     A,27h-'$'       ; '$'
-        JR      NZ,gv1
-hx1:    CALL    hexc
-        JR      NC,hx2
-        LD      (HL),A          ; the high digit goes in first ...
-        CALL    hexc
-        JR      NC,hx2          ; odd digit: consumed, and the RET below
-        RLD                     ;   overwrites it
-        INC     HL              ; ... and RLD shifts it up under the low one
-        JR      hx1
-hx2:    LD      (HL),0C9h       ; (never range-checked: the spec says so)
-        RST     30h
-gv1:    SUB     '+'-'$'
-        JR      Z,g_inc
-        DEC     A               ; ','
-        JR      Z,g_rnd
-        DEC     A               ; '-'
-        JR      Z,g_dec
-        DEC     A               ; '.'
-        JR      Z,g_seed
-        SUB     '<'-'.'
-        JR      Z,g_min
-        SUB     '>'-'<'
-        JR      Z,g_max
-        DEC     A               ; '?'
-        JR      Z,g_cur
-        DEC     A               ; '@'
-        JR      Z,g_at
-        SUB     '^'-'@'         ; '^' leaves 0 and '_' leaves 1
-        IF      CHECKED
-        CP      2
-        JP      NC,e_brack      ; anything else: W. The place is the character
-        OR      A
-        ENDIF
-        IF      ANSI
-        JR      NZ,ge1
-        CALL    csi             ; '^': ESC [ H homes the cursor, and then
-        LD      A,'H'           ;   ESC [ J clears from there to the end of
-        RST     28h             ;   the screen
-        XOR     A
-ge1:    ADD     A,'J'           ; '_': ESC [ K clears to the end of the line
-        LD      E,A
-        CALL    csi
-        LD      A,E
-        RST     28h
-        RST     30h
-        ENDIF
-        IF      1-ANSI
-        JR      NZ,ge1
-        CALL    CONCLS
-        RST     30h
-ge1:    CALL    CONEOL
-        RST     30h
-        ENDIF
-
-; `+ and `-. The carry says which: set to add.
-        IF      1-CHECKED
-g_dec:  DB      3Eh             ; (LD A,n: steps over the SCF, and '-' comes
-g_inc:  SCF                     ;   here with the carry clear)
-        ENDIF
-        IF      CHECKED
-; (The checked build tests the address first, as '!' does, and then looks at
-; the character again: the test has used the flags.)
-g_inc:
-g_dec:  CALL    chkst
-        DEC     BC
-        LD      A,(BC)
-        INC     BC
-        CP      ','             ; carry for '+'
-        ENDIF
-        LD      E,(HL)
-        INC     HL
-        LD      D,(HL)
-        JR      NC,gi1
-        INC     DE
-        INC     DE
-gi1:    DEC     DE
-        LD      (HL),D
-        DEC     HL
-        LD      (HL),E
-        EX      DE,HL           ; the new value is TOS
-        RST     30h
-
-; `. pushes the address of the random seed.
-g_seed: PUSH    HL
-        LD      HL,SEED
-        RST     30h
-
-; `, ( n -- r ). The seed goes one step on: seed * 261 + 1, which takes
-; every 16-bit value in turn. The high bits of such a seed are the good ones
-; and the low ones repeat soon, so the high byte is folded into the low
-; (XOR) before the remainder of dividing by n is taken.
-; n must be 1 to 32767: the checked build stops with Z on anything less
-; than 1.
-g_rnd:
-        IF      CHECKED
-        DEC     HL
-        BIT     7,H             ; n - 1 negative: n is 0 or less
-        INC     HL
-        JP      NZ,e_zero
-        ENDIF
-        EX      DE,HL           ; DE = n
-        PUSH    BC
-        LD      HL,(SEED)
-        LD      B,H
-        LD      C,L
-        ADD     HL,HL
-        ADD     HL,HL
-        ADD     HL,BC           ; * 5
-        LD      A,H
-        ADD     A,C
-        LD      H,A             ; + * 256: * 261
-        INC     HL
-        LD      (SEED),HL
-        LD      A,H
-        XOR     L
-        LD      L,A
-        CALL    udiv            ; DE = the remainder
-        EX      DE,HL
-        POP     BC
-        RST     30h
-
-; `< and `>. The carry says which: set for the larger. The two are put in
-; order, HL the smaller and DE the larger, and then swapped for '>'.
-; b < a (signed) is the borrow of b - a, turned round if the two signs
-; differ: RRA puts the borrow in bit 7, where the two XORs meet it.
-g_max:  SCF                     ; ('<' comes in with the carry clear)
-g_min:  POP     DE              ; DE = a, HL = b
-        PUSH    AF
-        LD      A,L
-        SUB     E
-        LD      A,H
-        SBC     A,D
-        RRA
-        XOR     H
-        XOR     D
-        RLA                     ; carry: b < a
-        JR      C,gm2
-        EX      DE,HL
-gm2:    POP     AF
-        JR      NC,gm3
-        EX      DE,HL
-gm3:    RST     30h
 
 ; =============================================================================
 ;  Dispatch table: the low byte of each handler's address, in code order

@@ -1,4 +1,4 @@
-"""Run every game in games/, both the stripped NAME.B8S and the commented
+"""Run every game in games/ (at the root of the repository), both the stripped NAME.B8S and the commented
 NAME.TXT, on every build under DIR for a short while and compare what it
 prints with the reference interpreter.
 
@@ -14,6 +14,7 @@ is the .TXT stripped.
 """
 import sys, os, glob
 here = os.path.dirname(os.path.abspath(__file__))
+GAMES = os.path.normpath(os.path.join(here, '..', '..', 'games'))   # games/ at the root of the repository
 sys.path.insert(0, here)
 from ref import Ref
 import harness_z80, harness_6502, harness_6809, harness_win32
@@ -31,7 +32,7 @@ for cpu in ('z80', '8080', '6502', '6809', 'win32'):
             continue
         cpm = '-cpm' in name
         short = []
-        for g in sorted(glob.glob(f'{here}/games/*.B8S') + glob.glob(f'{here}/games/*.TXT')):
+        for g in sorted(glob.glob(f'{GAMES}/*.B8S') + glob.glob(f'{GAMES}/*.TXT')):
             if os.path.basename(g) in DOCS_ONLY:
                 continue
             prog = open(g, 'rb').read()

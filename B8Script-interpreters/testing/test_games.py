@@ -1,4 +1,4 @@
-"""Scripted play tests for the games in games/, run on the reference interpreter.
+"""Scripted play tests for the games in games/ (at the root of the repository), run on the reference interpreter.
 
 usage: test_games.py [NAME...]      (run by hand, like the other test scripts)
 
@@ -20,6 +20,7 @@ stops it with a report, and must end without one.
 """
 import sys, os, re
 here = os.path.dirname(os.path.abspath(__file__))
+GAMES = os.path.normpath(os.path.join(here, '..', '..', 'games'))   # games/ at the root of the repository
 sys.path.insert(0, here)
 from ref import Ref, NeedKey
 from b8strip import strip
@@ -409,11 +410,11 @@ if __name__ == '__main__':
     want = [a.upper() for a in sys.argv[1:]]
     bad = 0
     # the stripped NAME.B8S of every game must hold the same code as its NAME.TXT
-    for txt in sorted(os.listdir(os.path.join(here, 'games'))):
+    for txt in sorted(os.listdir(GAMES)):
         name, ext = os.path.splitext(txt)
         if ext != '.TXT' or (want and name not in want):
             continue
-        a, b = (strip(open(os.path.join(here, 'games', name + e), 'rb').read()) for e in ('.TXT', '.B8S'))
+        a, b = (strip(open(os.path.join(GAMES, name + e), 'rb').read()) for e in ('.TXT', '.B8S'))
         ok = a == b
         bad += not ok
         print(f'{"PASS" if ok else "FAIL"}  {name:9} {name}.B8S is {name}.TXT stripped')
@@ -422,7 +423,7 @@ if __name__ == '__main__':
             continue
         # both versions: the stripped NAME.B8S and the commented NAME.TXT. They
         # hold the same code, so they must print exactly the same
-        paths = [os.path.join(here, 'games', game + ext) for ext in ('.B8S', '.TXT')
+        paths = [os.path.join(GAMES, game + ext) for ext in ('.B8S', '.TXT')
                  if game + ext not in DOCS_ONLY]
         runs = [play(p, keys) for p in paths if os.path.exists(p)]
         (r, out), (r2, out2) = runs[0], runs[-1]
@@ -439,6 +440,6 @@ if __name__ == '__main__':
         for t in miss:
             print('      missing:', t.decode('latin-1'))
     if not want or 'IDOL' in want:
-        bad += idol_saves(os.path.join(here, 'games', 'IDOL.B8S'))
+        bad += idol_saves(os.path.join(GAMES, 'IDOL.B8S'))
     print('games:', 'all pass' if not bad else f'{bad} FAILED')
     sys.exit(1 if bad else 0)

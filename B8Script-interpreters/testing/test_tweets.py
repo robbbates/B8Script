@@ -68,6 +68,28 @@ def kingdom(extra):
     return keys
 
 
+def maze(seed):
+    """Keys for Maze: the seed key, then the shortest way out, found by a
+    breadth-first search of the maze as the game printed it."""
+    from collections import deque
+    r, out = play('tweet280', 'MAZE', seed)
+    top = out.index(b'\x1b[H') + 3
+    m = out[top:top + 19 * 41]
+    prev, todo = {79: None}, deque([79])
+    while todo:
+        a = todo.popleft()
+        for step, key in ((1, b'l'), (-1, b'j'), (41, b'k'), (-41, b'i')):
+            b = a + step
+            if 0 <= b < len(m) and m[b] == 32 and b not in prev:
+                prev[b] = (a, key)
+                todo.append(b)
+    keys, a = b'', 697
+    while prev[a]:
+        a, key = prev[a]
+        keys = key + keys
+    return seed + keys
+
+
 def mash(seed, keys, n):
     rnd = random.Random(seed)
     return bytes(rnd.choice(keys) for _ in range(n))
@@ -150,6 +172,10 @@ TESTS = {'b8sms': [
     ('BREAKOUT', 'one brick, then the ball is lost', N * 200, [b'\x1b[4;31H#', b'\x1b[21;'], 'end'),
     ('HANGMAN', 'guess it', b'kbinary', [b'B_____ 0 ?', b'BINARY won'], 'end'),
     ('HANGMAN', 'six misses', b'kzqxjvw', [b'______ 5 ?', b'BINARY lost'], 'end'),
+    # Maze: walls hold, and the shortest way out (54 steps in every binary-tree maze) gets out
+    ('MAZE', 'walls hold', b'kiiii', [b'#######################################\r\n#', b'\x1b[2;39H@'], None),
+    ('MAZE', 'walk out', maze(b'k'), [b'\x1b[21HOut!'], 'end'),
+    ('MAZE', 'another maze', maze(b'\0\0\0\0\0k'), [b'\x1b[21HOut!'], 'end'),
 ]}
 
 

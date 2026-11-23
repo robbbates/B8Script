@@ -14,7 +14,7 @@ A postfix stack language for 64 KB 8-bit computers, by Robb Bates. Every instruc
 | [`docs/b8script.md`](docs/b8script.md) | The spec: the language, idioms, examples, how to implement it, and an appendix per CPU |
 | [`B8Script-interpreters/`](B8Script-interpreters/) | Interpreters for the Z80, 8080, 6502 and 6809 (generic ROM images and CP/M .COM files) and for the Windows command shell (32-bit .EXE files), checked and unchecked, with and without a line editor. Its README covers sizes and building |
 | [`B8Script-interpreters/testing/`](B8Script-interpreters/testing/) | The reference interpreter, the test suite, emulator harnesses, and the games used as tests |
-| [`docs/tweet-games.md`](docs/tweet-games.md) | Ten games of 160 characters or fewer, a game in a tweet, with how each one fits |
+| [`docs/b8sms.md`](docs/b8sms.md) | Thirty-one tiny games: ten that fit in a text message (B8SMS, 160 characters), the same ten in a 140-character tweet, and eleven more in 280, with how each one fits |
 | [`archive/1.0beta/`](archive/1.0beta/) | The original B8Script 1.0beta for CP/M (2025), kept for history |
 
 ## History

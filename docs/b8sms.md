@@ -1,6 +1,6 @@
 # B8SMS and tweet games
 
-Thirty-one B8Script games, in three sizes:
+Thirty-one B8Script games, in three sizes, and one that runs over:
 
 - **B8SMS**: 160 characters or fewer, the length of a text message. Ten games.
 - **Tweet 140**: the classic tweet. The same ten games, cut down.
@@ -8,7 +8,7 @@ Thirty-one B8Script games, in three sizes:
 
 Each one is a complete program, with no line breaks and nothing left out. Paste it into a runner and play.
 
-The files are in `B8Script-interpreters/testing/games/`: [`b8sms/`](../B8Script-interpreters/testing/games/b8sms/), [`tweet140/`](../B8Script-interpreters/testing/games/tweet140/) and [`tweet280/`](../B8Script-interpreters/testing/games/tweet280/). `test_tweets.py` in `testing/` checks each folder's limit and plays every game with scripted keys on the checked reference interpreter; `test_tweets.py --all` adds the check that Tic-tac-toe never loses, which plays all 201 legal games against it. All of them were developed and tested on `ref.py`. None has been run on a real CPU build yet: `gamecheck.py` covers only `games/*.B8S`.
+The files are in `B8Script-interpreters/testing/games/`: [`b8sms/`](../B8Script-interpreters/testing/games/b8sms/), [`tweet140/`](../B8Script-interpreters/testing/games/tweet140/) and [`tweet280/`](../B8Script-interpreters/testing/games/tweet280/), plus [`longer/`](../B8Script-interpreters/testing/games/longer/) for one over the limit. `test_tweets.py` in `testing/` checks each folder's limit and plays every game with scripted keys on the checked reference interpreter; `test_tweets.py --all` adds the check that Tic-tac-toe never loses, which plays all 201 legal games against it. All of them were developed and tested on `ref.py`. None has been run on a real CPU build yet: `gamecheck.py` covers only `games/*.B8S`.
 
 | Game | SMS | 140 | Kind | You press |
 |---|---|---|---|---|
@@ -346,11 +346,26 @@ A new 19 × 9 maze every game. You are `@`, in the gap at the top right; get out
 - **The keys are a table.** `key & 3` is 0–3 for l, i, j and k, so it indexes the string `"Q'Oy"`, whose characters minus 80 are the steps +1, −41, −1 and +41. A blocked move becomes a step of 0 (`32=&`), so moving and not moving are the same code.
 - **The catch.** A binary-tree maze has a bias: from any cell, north or east is always open. So the way out is always a staircase down and left of the same length (54 steps), and the maze's difficulty is all in its dead ends. Starting at the top right is what makes it a maze at all: from the bottom left, "always go up or right" would walk straight out. A less biased algorithm, such as sidewinder, doesn't fit in what's left.
 
+## Longer: MINE391
+
+Minesweeper, with the flood fill that opens blank areas. It doesn't fit in 280, and is here as an example of what a little more room buys. It is 390 characters. The repository's own Minesweeper, `MINES.B8S`, is the full-size version.
+
+```text
+[O"012:<DEF"+,59-a@+][Ca!0 8 1(1-:O,16&{%}+%:);16/;][Ea!8 1(1-:O:,32|%.:);][D"/[[H"$0c!11 1(:g@+,32&(c@1+c!0):10/%;:9=(13'10'0):9<%0>&(:g@+:,32&:{(:C:0=(%:E%0)48+%;'0)}0=(;35'0)0)1+:89<);c@]"MINES: row, column. Key"$0 1(1+1?0=)r!0_g!0m!0 1(:10/:9<%0>&%:9<%0>&&:r@75*74+:r!7168&0=16&&%0=96&|:16=m@+m!1_.1+:100<);1(0 1(D:{=0=}%)m@78+=\0?48- 10*0?48-+g@+:,16&:q!\:,32|%.1)" WIN"q@(;;" BOOM"0)$
+```
+
+An 8 × 8 board with about one mine in eight. Type a row digit, then a column digit, both 1–8. A number is how many of the eight cells around it hold a mine. Open every safe cell to win.
+
+- **The board is a 10 × 10 byte grid** with a border all round, so the eight neighbours of a cell are always at the same offsets (±1, ±9, ±10, ±11), and the index is just "row, column" as two decimal digits. Bit 16 is a mine, bit 32 is open, and the border is 96: open, but never shown or counted as a cell.
+- **One allocate-and-store loop lays out the board**: the border, and the mines (one cell in eight, from three bits of the generator). It also counts the mines, for the win test.
+- **Counts aren't stored.** `C` adds up the mine bits of the eight neighbours whenever a cell is drawn.
+- **The flood fill is the display.** `D` draws the board, and whenever it draws an open cell with a count of 0, it opens all eight neighbours (`E`). It returns how many cells are open. The game redraws until that number stops changing, so you can watch the flood spread. A recursive fill would be shorter to write, but on a 64-cell board it can need about 130 return-stack entries, and real builds have about 110.
+
 ## More ideas
 
 Most of the ideas from the first round became the 280 games: Nim 3-5-7, Hamurabi (Kingdom), the one-key game (Copter), and the three I had called out of reach at 160 (Snake, Tron against the computer, full Mastermind), and a maze. Ones still open:
 
-- **Minesweeper at 280.** The board, the counts and the display fit. The flood fill that opens empty areas is the problem: recursion would need about 130 return-stack entries on a 64-cell board, and real builds have about 110, so it has to be a repeated sweep. My estimate is about 350.
+- **Minesweeper at 280.** [MINE391](#longer-mine391) works at 390; getting it under 280 would take about 110 characters of new ideas.
 - **Bagels (Fermi/Pico) at 160.** Guess a 3-digit code and learn how many digits are in the right place. Simon's replay trick stores the code for free.
 - **Hurkle at 160.** Hi-Lo in 2D on a 10 × 10 grid, with hints like "NE".
 - **2048, Battleship, Sokoban.** Probably over 280 each, but untried.

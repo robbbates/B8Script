@@ -1,5 +1,6 @@
 """Scripted play tests for the tiny games: games/b8sms/ (an SMS, 160 characters),
-games/tweet140/ and games/tweet280/ (a tweet, old and new), on ref.py.
+games/tweet140/ and games/tweet280/ (a tweet, old and new), and games/longer/
+(an example of what fits in a few more), on ref.py.
 
 usage: test_tweets.py [--all] [NAME...]
 
@@ -16,7 +17,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, here)
 from ref import Ref, NeedKey
 
-LIMITS = {'b8sms': 160, 'tweet140': 140, 'tweet280': 280}
+LIMITS = {'b8sms': 160, 'tweet140': 140, 'tweet280': 280, 'longer': 391}
 
 
 class Play(Ref):
@@ -88,6 +89,16 @@ def maze(seed):
         a, key = prev[a]
         keys = key + keys
     return seed + keys
+
+
+def mines_safe(seed):
+    """Keys for MINE391: the seed key, then every cell without a mine, read
+    from the board the game laid out in memory (g, bit 16 is a mine)."""
+    r = Play(open(path('longer', 'MINE391'), 'rb').read(), seed, checked=True)
+    r.run(10**8)
+    g = r.r(r.let + 64 + 2 * (ord('g') - 97))
+    return seed + ''.join(f'{y}{x}' for y in range(1, 9) for x in range(1, 9)
+                          if not r.m[g + 10 * y + x] & 16).encode()
 
 
 def mash(seed, keys, n):
@@ -176,6 +187,11 @@ TESTS = {'b8sms': [
     ('MAZE', 'walls hold', b'kiiii', [b'#######################################\r\n#', b'\x1b[2;39H@'], None),
     ('MAZE', 'walk out', maze(b'k'), [b'\x1b[21HOut!'], 'end'),
     ('MAZE', 'another maze', maze(b'\0\0\0\0\0k'), [b'\x1b[21HOut!'], 'end'),
+], 'longer': [
+    # Minesweeper with flood fill. Seed 1 has 7 mines, one at row 2, column 3
+    ('MINE391', 'a blank cell floods open', b'k11', [b'01######\r\n01######\r\n012#####'], None),
+    ('MINE391', 'a mine', b'k23', [b'######## BOOM'], 'end'),
+    ('MINE391', 'every safe cell wins', mines_safe(b'k'), [b'12##1000 WIN'], 'end'),
 ]}
 
 

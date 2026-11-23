@@ -280,71 +280,78 @@ TESTS += [
 ]
 
 
-# Idol, seed 1 (n at once on the title starts a new game): home is Xeva (Industry, policed). The chart chooses the nearest
-# system in range; s steps to the next farther, Return jumps. Xeva makes
-# machinery (cheap) and Talo, the eighth system out, is agricultural and wants it
+# Idol, seed 0 (n at once on the title starts a new game: no key wait stirs the
+# seed): home is Xeorra (Mining, policed). The chart chooses the nearest system in
+# range; s steps to the next farther, Return jumps. Xeorra mines ore (cheap) and
+# Neon, the nearest system, is industrial and wants it, and has a shipyard
 TESTS += [
     ('IDOL', 'fly: step, jump, refuel', b'nss\rf',
-     [b'Docked at Xeva.', b'Docked at Kaxe.', b'Day 2', b'Fuel 4/7', b'Debt 5050',
+     [b'Docked at Xeorra.', b'Docked at Dada.', b'Day 2', b'Fuel 4/7', b'Debt 5050',
       b'Refuelled 3 units for 60.', b'Cr 940']),
-    ('IDOL', 'a profitable trade', b'nmsssb\rcsssssss\rmsssx\r',
-     [b'Buy Machinery: how many (Return for 20)? ', b'Bought 20 t of Machinery for 980.',
-      b'Docked at Talo.', b'Sold 20 t of Machinery for 1400.', b'Cr 1420']),
-    ('IDOL', 'an upgrade, then too little money', b'nysbsbr',
-     [b'Shield\x1b[5;17H0 of 2\x1b[5;46H  1000', b'Bought: Shield.',
+    ('IDOL', 'a profitable trade', b'nmssb\rc\rmssx\r',
+     [b'Buy Ore: how many (Return for 20)? ', b'Bought 20 t of Ore for 460.',
+      b'Docked at Neon.', b'Sold 20 t of Ore for 600.', b'Cr 1140']),
+    ('IDOL', 'an upgrade, then too little money', b'n\rysbsbr',
+     [b'Docked at Neon.', b'Shield\x1b[5;17H0 of 2\x1b[5;46H  1000', b'Bought: Shield.',
       b'Courier L1 S1 M0', b'Cr 0\x1b', b"You can't pay for that.", b'The hull needs no repair.']),
-    ('IDOL', 'ships at a high-tech system, at the trade-in price', b'nsss\rysssssssb',
-     [b'Docked at Orelma.', b'Freighter\x1b[12;17H50 t, tank 8, hull 50\x1b[12;46H  6500',
+    ('IDOL', 'ships at a high-tech system, at the trade-in price', b'ns\rysssssssb',
+     [b'Docked at Cexege.', b'Freighter\x1b[12;17H50 t, tank 8, hull 50\x1b[12;46H  6500',
       b'Clipper\x1b[14;17H70 t, tank 10, hull 80\x1b[14;46H 27500', b'You fly one already.']),
-    # two missiles bought at home win against the level 0 pirate at Bequon
-    ('IDOL', 'a duel won with missiles', b'nyssbbc' + b's' * 11 + b'\rmm',
+    # the ore sold at Neon pays for two missiles there, which win against the
+    # level 0 pirate at Nela
+    ('IDOL', 'a duel won with missiles', b'nmssb\rc\rmssx\ryssbbfc' + b's' * 22 + b'\rmm',
      [b'Bought: Missile.', b'Duel: pirate ship, level 0', b'Your missile hits for 15.',
-      b'You win. A bounty of 250.', b'You salvage 3 t of Ore.', b'Docked at Bequon.']),
-    ('IDOL', 'a duel lost: game over', b'n' + b's' * 16 + b'\rc' + b'l' * 30 + b'x',
+      b'You win. A bounty of 250.', b'You salvage 1 t of Medicine.', b'Docked at Nela.']),
+    ('IDOL', 'a duel lost: game over', b'n' + b's' * 20 + b'\rc' + b'l' * 30 + b'x',
      [b'Duel: pirate ship, level 1', b'You close in.', b'The pirate hits you for ',
       b'Your ship is destroyed, and you with it. Game over.', b'Press a key.', b'Bye.']),
-    # the police scan you on the way back home on day 3
-    ('IDOL', 'a police scan: submit', b'nmssssssb5\rc\r\rs',
+    # the police scan you at Neon on day 3, on the way back from Dada
+    ('IDOL', 'a police scan: submit', b'nmssssssb5\rcss\r\rs',
      [b'Bought 5 t of Narcotics for 730.', b'The police find 5 t of contraband. s submits, r resists.',
-      b'They take it and fine you 600.', b'Docked at Xeva.', b'Cr 0\x1b', b'Debt 5430']),
-    ('IDOL', 'a police scan: resist', b'nmssssssb5\rc\r\rrf',
-     [b'You resist the police!', b'Duel: police ship, level 3', b'Wanted 20']),
+      b'They take it and fine you 600.', b'Docked at Neon.', b'Cr 0\x1b', b'Debt 5430']),
+    ('IDOL', 'a police scan: resist', b'nmssssssb5\rcss\r\rrff',
+     [b'You resist the police!', b'Duel: police ship, level 3', b'You fail to get away.', b'You get away.',
+      b'Wanted 20']),
     ('IDOL', 'pay the loan', b'nl500\rl\rl',
      [b'Pay how much (Return for 1000)? ', b'You pay 500 off the loan.', b'Debt 4500',
       b'Debt 4000', b'You have no cash.']),
-    # the Heart of the idol lies at Usis, the 14th system out
-    ('IDOL', 'an idol part found, its price, then known', b'n' + b's' * 13 + b'\rtct\rt',
-     [b'Docked at Usis.', b"The Idol's Heart is here: 18 t of Medicine and 19 t of Textiles (t trades).",
-      b"The Idol's Heart wants 18 t of Medicine and 19 t of Textiles.",
-      b"The Idol's Heart lies at Usis: 18 t of Medicine and 19 t of Textiles."]),
-    # offers and rumours on docking; the second offer at Kaxe goes to Qucelo, by way of Rasoar
-    ('IDOL', 'offers and a rumour', b'n\rk\r',
-     [b'Docked at Xeva.', b"Rumour: the Idol's RHand lies at Damige.", b'Docked at Orbuso.',
-      b"Rumour: the Idol's LHand lies at Suelne.", b'Offer 1: 9 t of Food to Tixeta, by day 7, pay 880.',
-      b'Take which? ']),
-    ('IDOL', 'a contract delivered', b'nss\rk2fcsssssssssssss\rfcssssssssssssssssssssssssssss\r',
-     [b'Offer 2: 5 t of Ore to Qucelo, by day 9, pay 900.', b'Contract taken.', b'5 t Ore',
-      b'to Qucelo by day 9', b'Docked at Qucelo.', b'You deliver: 900.', b'Cr 840']),
-    ('IDOL', 'sealed cargo sold', b'nss\rk2mssssssssx',
-     [b'Sealed Ore', b'You sell the sealed cargo for 180. You are wanted, and owe more.',
-      b'Debt 5200', b'Wanted 20']),
+    # the Head of the idol lies at Zebe, the 12th system out (the rumour at home
+    # says so)
+    ('IDOL', 'an idol part found, its price, then known', b'n' + b's' * 11 + b'\rtct\rt',
+     [b'Docked at Zebe.', b"The Idol's Head is here: 23 t of Textiles and 11 t of Ore (t trades).",
+      b"The Idol's Head wants 23 t of Textiles and 11 t of Ore.",
+      b"The Idol's Head lies at Zebe: 23 t of Textiles and 11 t of Ore."]),
+    # offers and rumours on docking: the offer at home is shown again by k, which
+    # Return leaves untaken; Neon has none
+    ('IDOL', 'offers and a rumour', b'nk\r\rk',
+     [b'Docked at Xeorra.', b"Rumour: the Idol's Head lies at Zebe.",
+      b'Offer 1: 11 passengers to Elve, by day 9, pay 1620.', b'Take which? ',
+      b'Docked at Neon.', b"Rumour: the Idol's Base lies at Elve.", b'There are no offers here today.']),
+    # the first offer at Xean, passengers to Rielso, taken there by way of Dabe
+    ('IDOL', 'a contract delivered', b'nsss\rk1fc' + b's' * 12 + b'\rfc' + b's' * 6 + b'\r',
+     [b'Offer 1: 20 passengers to Rielso, by day 10, pay 1300.', b'Contract taken.', b'20 passengers',
+      b'to Rielso by day 10', b'Docked at Dabe.', b'Docked at Rielso.', b'You deliver: 1300.', b'Cr 840']),
+    ('IDOL', 'sealed cargo sold', b'nsss\rk2mssssssssx',
+     [b'Sealed Textiles', b'You sell the sealed cargo for 176. You are wanted, and owe more.',
+      b'Debt 5270', b'Wanted 20']),
     # a save code made, loaded back, and played on: the state cells and the stock
     # here are checked by idol_save() below; here the messages
-    ('IDOL', 'a save code', b'nmsssb\rcss\rv',
-     [b'Save code: cMIVd2vD-BP5q_XvytvjNOXj4es2fvBMuX4lS-LB8ucy1M6M']),
-    ('IDOL', 'a mistyped save code refused, then the right one', b'lcMIVd2vD-BP5q_XvytvjNOXj4es2fvBMuX4lS-LB8ucy1N6M\rlcMIVd2vD-BP5q_XvytvjNOXj4es2fvBMuX4lS-LB8ucy1M6M\r',
-     [b'That code is not right.', b'Docked at Kaxe.', b'Cr 20\x1b', b'Debt 5050', b'Fuel 4/7', b'Cargo 20/20']),
+    ('IDOL', 'a save code', b'nmssb\rc\rv',
+     [b'Save code: zwFTwUcguJLoCkL1w3mR07cTVIiIrrMuR_e7EUDTCcUzAGp9']),
+    ('IDOL', 'a mistyped save code refused, then the right one', b'lzwFTwUcguJLoCkL1w3mR07cTVIiIrrMuR_e7EUDTCcUzAHp9\rlzwFTwUcguJLoCkL1w3mR07cTVIiIrrMuR_e7EUDTCcUzAGp9\r',
+     [b'That code is not right.', b'Docked at Neon.', b'Cr 540\x1b', b'Debt 5050', b'Fuel 5/7', b'Cargo 20/20']),
 ]
 
 
 # Idol's save code must load back to exactly the state it was made from, and the
 # game must play on the same: (keys that end with v, keys to play on). The state
 # cells 0 to 33 and the stock where you are are compared, after loading and
-# again after playing on.
+# again after playing on. Only the stock where you are is saved, so the keys to
+# play on go nowhere whose stock was changed before the save.
 IDOL_SAVES = [
-    (b'nmsssb\rcss\rv', b'mb\rcs\r'),
-    (b'nss\rk2mssssssssbcs\rv', b'\rf\r'),
-    (b'n' + b's' * 13 + b'\rtv', b'sss\rf'),
+    (b'nmssb\rc\rv', b'mssx\rcss\r'),
+    (b'nsss\rk2mssssssssbc\rv', b'\rf\r'),
+    (b'n' + b's' * 11 + b'\rtv', b'sss\rf'),
 ]
 
 
@@ -359,11 +366,10 @@ def idol_code(cells, stock, salt=5):
     bits = '0001' + ''.join(format(v & (1 << w) - 1, f'0{w}b') for v, w in zip(cells, IDOL_WIDTHS))
     bits += ''.join(format(v, '07b') for v in stock)
     vals = [salt] + [int(bits[i:i + 6], 2) for i in range(0, len(bits), 6)]
-    r = (salt * 97 + 12345) & 0xFFFF
+    r = salt
     for i in range(1, len(vals)):
-        r = (r * 25173 + 13849) & 0xFFFF            # R, as in the program
-        q = int((r - 65536 if r > 32767 else r) / 256)
-        vals[i] ^= (q & 255) % 64
+        r = (r * 261 + 1) & 0xFFFF                  # 64R, the interpreter's `,
+        vals[i] ^= (r ^ r >> 8) % 64
     c = 0
     for v in vals:
         c = (c * 3 + v) & 63
@@ -371,33 +377,33 @@ def idol_code(cells, stock, salt=5):
 
 
 def idol_cells(**kw):
-    """the state of a new game on seed 1 (day 1, home, a new Courier), changed by kw"""
+    """the state of a new game on seed 0 (day 1, home, a new Courier), changed by kw"""
     names = ('seed day cashhi cashlo debt pos c0 c1 c2 c3 c4 c5 c6 c7 cls laser shield missiles pods '
              'tankup hull fuel escape hidden wanted held known ckind cdest cgood ctonnes cdead cpay cpass').split()
     cells = dict.fromkeys(names, 0)
-    cells.update(seed=1, day=1, cashlo=1000, debt=5000, laser=1, hull=30, fuel=7)
+    cells.update(seed=0, day=1, cashlo=1000, debt=5000, laser=1, hull=30, fuel=7)
     cells.update(kw)
     return [cells[n] for n in names]
 
 
-# seed 1: the Base of the idol (part 5) lies at system 43 and wants 26 t of
-# Medicine and 13 t of Machinery
-IDOL_BASE = dict(pos=43, c4=26, c3=13, pods=2, cashlo=3000, day=50)
+# seed 0: the Base of the idol (part 5) lies at system 9, Elve, and wants 18 t of
+# Luxuries and 15 t of Textiles
+IDOL_BASE = dict(pos=9, c5=18, c1=15, pods=2, cashlo=3000, day=50)
 TESTS += [
     ('IDOL', 'an idol part traded', b'l' + idol_code(idol_cells(**IDOL_BASE), [60] * 8) + b'\rt',
-     [b"The Idol's Base is here: 26 t of Medicine and 13 t of Machinery (t trades).",
+     [b"The Idol's Base is here: 18 t of Luxuries and 15 t of Textiles (t trades).",
       b"You trade for the Idol's Base: 1 of 6.", b'Idol 1/6', b'Cargo 0/40']),
     ('IDOL', 'the win', b'l' + idol_code(idol_cells(held=31, debt=0, **IDOL_BASE), [60] * 8) + b'\rt\r',
      [b"You trade for the Idol's Base: 6 of 6.", b' is whole and the loan is paid. You win in 50 days!',
       b'Press a key.', b'Bye.']),
     ('IDOL', 'the end at day 999', b'l' + idol_code(idol_cells(day=998, held=5), [60] * 8) + b'\r\r\r',
      [b'Day 999', b'Day 999: the end. You held 2 of the six parts of the Idol of ', b'Bye.']),
-    # a hull of 2 loses the first duel out (the 16th system): with an escape pod,
+    # a hull of 2 loses the first duel out (the 19th system): with an escape pod,
     # and without one
     ('IDOL', 'a duel lost with an escape pod', b'l' + idol_code(idol_cells(hull=2, escape=1, c0=10), [60] * 8)
-     + b'\r' + b's' * 16 + b'\rcl',
+     + b'\r' + b's' * 18 + b'\rcl',
      [b'Duel: pirate ship', b'Your ship is lost. The escape pod takes you home to a new Courier.',
-      b'Docked at Xeva.', b'Debt 10050', b'Cargo 0/20']),
+      b'Docked at Xeorra.', b'Debt 10050', b'Cargo 0/20']),
 ]
 
 

@@ -1,17 +1,21 @@
 ; =============================================================================
 ;  B8Script interpreter for the Intel 8080
-;  Spec: docs/b8script.md (2026-11-21).
+;  Spec: docs/b8script.md (2026-11-23).
 ;  Design follows the Z80 interpreter (z80/b8s-z80.asm), with 8080 opcodes
 ;  only.
 ;
-;  Two switches, set in the two EQU lines below:
+;  Three switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
 ;             1 = starts with every variable at 0 and every word undefined,
 ;                 and stops on every error in the spec's table (and Ctrl-C)
-;                 with a four-line report: the letter and the place as line
-;                 and column, the text there, and both stacks. See `error`.
+;                 with a three-line report: the letter and the place as
+;                 line and column, and both stacks. See `error`.
+;    ANSI     1 = the four console codes (`@ `^ `_ `?) send ANSI escape
+;                 sequences through CONOUT
+;             0 = they call four routines of the machine's own instead:
+;                 CONAT, CONCLS, CONEOL and CONCUR (see the equates)
 ;
 ;  In every build Ctrl-C stops a running program (an unchecked build stops
 ;  without a word): see the console layer for the rules, the held key and
@@ -22,6 +26,7 @@
 
 CPM     EQU     0               ; 1 = CP/M .COM build
 CHECKED EQU     0               ; 1 = checked build
+ANSI    EQU     1               ; 1 = the console codes send ANSI sequences
 
 ; -----------------------------------------------------------------------------
 ;  Register use, everywhere in the interpreter
@@ -103,6 +108,17 @@ PROG    EQU     8300h           ; where the loader puts the program text
 HEAPLIM EQU     0F0h            ; the heap must stay below F000h (a page)
 BASE    EQU     0000h           ; where the image starts
         ENDIF
+        IF      (1-CPM)*(1-ANSI)
+; ---- generic machine with ANSI = 0: the console codes call these ------------
+CONAT   EQU     0FF0Ch          ; `@  cursor to row E, column L, both from 0
+                                ;     (DE and HL hold the whole cells). May
+                                ;     change A, DE and HL
+CONCLS  EQU     0FF0Fh          ; `^  clear the screen and home the cursor
+CONEOL  EQU     0FF12h          ; `_  clear from the cursor to the end of the line
+CONCUR  EQU     0FF15h          ; `?  cursor off if A = 0 (the zero flag is set
+                                ;     to match), on if not. May change A, DE, HL
+;   All four must preserve BC; CONCLS and CONEOL also DE and HL.
+        ENDIF
 
 MSLOOP  EQU     40              ; n? inner loop count for about 1 ms (1-255;
                                 ; the wait for a second Ctrl-C uses it too):
@@ -116,7 +132,10 @@ RSP     EQU     LET+34h         ; gap after Z: the return stack pointer;
 BRKCNT  EQU     LET+36h         ;   the break check's countdown;
 NPEND   EQU     LET+38h         ;   minus the address of the program's end
                                 ;   (the heap's first byte), for the checked '_'
-KEYBUF  EQU     LET+7Ah         ; gap after z: a key read by the break check and
+SEED    EQU     LET+76h         ; gap after z: the random seed, the cell whose
+                                ;   address `. gives. Nothing sets it at the
+                                ;   start but the checked build's clearing;
+KEYBUF  EQU     LET+7Ah         ;   a key read by the break check and
                                 ;   held for the next '?' (0: none);
 BRKOFF  EQU     LET+7Bh         ;   the break-off cell: a program that stores a
                                 ;   non-zero byte here gets Ctrl-C as a key
@@ -346,29 +365,30 @@ rpushd: LHLD    RSP
         CZ      pollk
         RST     6
 
-; ---- machine code: the grave -----------------------------------------------
-; '`' plus a hex digit loads bytes: ( addr -- addr' ). Pairs of hex digits
-; are stored from addr until a non-hex character; then a RET (C9h) is
-; written and its address is left. An odd last digit is consumed and dropped.
-; '`' plus anything else calls the machine code at TOS: ( addr -- ). The
-; code is entered by CALL with the data stack above the return address; it
-; must keep BC, and on return the top cell becomes the new TOS.
-h_grave:CALL    hexc
-        JNC     exec
-hx1:    ADD     A
-        ADD     A
-        ADD     A
-        ADD     A
-        MOV     D,A             ; the high digit
-        CALL    hexc
-        JNC     hx2             ; odd digit: consumed and dropped
-        ORA     D
-        MOV     M,A
+; ---- the grave -------------------------------------------------------------
+; The grave is a prefix: with the character after it, it is one command.
+; GTAB holds each character with the place of its handler, as a byte to add
+; to that byte's own address (so the table sits just ahead of the handlers).
+; The handler starts with HL = TOS, A = the character and the carry clear. A character that is not in the table is unsafe: the unchecked
+; build searches on through memory, the checked build stops with W.
+h_grave:LDAX    B
+        INX     B
+        PUSH    H               ; TOS
+        LXI     H,GTAB-1
+gr1:    INX     H
+        IF      CHECKED
+        MOV     E,M
+        INR     E
+        JZ      gbad            ; FFh ends the table
+        ENDIF
+        CMP     M
         INX     H
-        CALL    hexc
-        JC      hx1
-hx2:    MVI     M,0C9h          ; (never range-checked: the spec says so)
-        RST     6
+        JNZ     gr1
+        MOV     E,M
+        MVI     D,0
+        DAD     D               ; the handler: this byte's address plus it
+        XTHL                    ; TOS back, and jump there
+        RET
 
 ; ---- where the two pages meet ----------------------------------------------
 ; The first page ends somewhere among the next four handlers, ] \ [ @ (they
@@ -681,6 +701,11 @@ kt2:    CALL    getk
         JNZ     kt3
         DCR     E
         JNZ     kt2
+        XCHG                    ; a millisecond with no key stirs the random
+        LHLD    SEED            ;   seed by one: how long a key takes to come
+        INX     H               ;   is the one thing here that is not the
+        SHLD    SEED            ;   same every time
+        XCHG
         MOV     A,H             ; 0? never counts down: it waits
         ORA     L
         JZ      kt1
@@ -884,6 +909,242 @@ udv2:   POP     PSW
         JNZ     udv1
         POP     PSW
         RET
+
+; =============================================================================
+;  The grave's codes (h_grave is the dispatcher). Each starts with HL = TOS,
+;  A = the character and the carry clear.
+;
+;    `!  ( addr -- )        call the machine code at addr (exec)
+;    `$  ( addr -- addr' )  the hex loader
+;    `'  ( -- )             new line: CR LF
+;    `+  ( addr -- n )      add 1 to the cell at addr and leave its new value
+;    `,  ( n -- r )         a random number from 0 to n-1 (n is 1 to 32767)
+;    `-  ( addr -- n )      subtract 1 from the cell at addr, the same way
+;    `.  ( -- addr )        the address of the random seed
+;    `<  ( a b -- n )       the smaller of the two (signed)
+;    `>  ( a b -- n )       the larger
+;    `?  ( flag -- )        the cursor off (0) or on
+;    `@  ( row col -- )     the cursor to that row and column, both from 0
+;    `^  ( -- )             clear the screen and home the cursor
+;    `_  ( -- )             clear from the cursor to the end of the line
+; =============================================================================
+; The table: a character, then its handler's distance from that second byte.
+GTAB:   DB      '!'
+        DB      g_exec-$
+        DB      '$'
+        DB      g_hex-$
+        DB      27h
+        DB      g_nl-$
+        DB      '+'
+        DB      g_inc-$
+        DB      ','
+        DB      g_rnd-$
+        DB      '-'
+        DB      g_inc-$
+        DB      '.'
+        DB      g_seed-$
+        DB      '<'
+        DB      g_min-$
+        DB      '>'
+        DB      g_min-$
+        DB      '?'
+        DB      g_cur-$
+        DB      '@'
+        DB      g_at-$
+        DB      '^'
+        DB      g_cls-$
+        DB      '_'
+        DB      g_eol-$
+        IF      CHECKED
+        DB      0FFh            ; the end
+        ENDIF
+
+g_exec: JMP     exec            ; (exec is up among the RST routines)
+
+; `$: pairs of hex digits are stored from addr until a non-hex character;
+; then a RET (C9h) is written and its address is left. An odd last digit is
+; consumed and dropped.
+g_hex:  CALL    hexc
+        JNC     hx2
+        ADD     A
+        ADD     A
+        ADD     A
+        ADD     A
+        MOV     D,A             ; the high digit
+        CALL    hexc
+        JNC     hx2             ; odd digit: consumed and dropped
+        ORA     D
+        MOV     M,A
+        INX     H
+        JMP     g_hex
+hx2:    MVI     M,0C9h          ; (never range-checked: the spec says so)
+        RST     6
+
+g_nl:   MVI     A,13
+        RST     5
+        MVI     A,10
+        RST     5
+        RST     6
+
+; `+ and `-: one routine. The character says which.
+g_inc:
+        IF      CHECKED
+        MOV     D,A             ; the address is tested first, as '!' does
+        CALL    chkst           ;   (the test uses A, and under CP/M E)
+        MOV     A,D
+        ENDIF
+        CPI     ','             ; carry for '+'
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        JNC     gi1
+        INX     D
+        INX     D
+gi1:    DCX     D
+        MOV     M,D
+        DCX     H
+        MOV     M,E
+        XCHG                    ; the new value is TOS
+        RST     6
+
+; `. pushes the address of the random seed.
+g_seed: PUSH    H
+        LXI     H,SEED
+        RST     6
+
+; `, ( n -- r ). The seed goes one step on: seed * 261 + 1, which takes
+; every 16-bit value in turn. The high bits of such a seed are the good ones
+; and the low ones repeat soon, so the high byte is folded into the low
+; (XOR) before the remainder of dividing by n is taken.
+; n must be 1 to 32767: the checked build stops with Z on anything less
+; than 1.
+g_rnd:
+        IF      CHECKED
+        DCX     H
+        MOV     A,H             ; n - 1 negative: n is 0 or less
+        INX     H
+        ORA     A
+        JM      e_zero
+        ENDIF
+        XCHG                    ; DE = n
+        PUSH    B
+        LHLD    SEED
+        MOV     B,H
+        MOV     C,L
+        DAD     H
+        DAD     H
+        DAD     B               ; * 5
+        INX     H               ; + 1
+        MOV     A,H
+        ADD     C
+        MOV     H,A             ; + * 256: * 261 + 1
+        SHLD    SEED
+        XRA     L               ; (A is still the high byte)
+        MOV     L,A
+        CALL    udiv            ; BC = the remainder
+        MOV     H,B
+        MOV     L,C
+        POP     B
+        RST     6
+
+; `< and `>: one routine. b < a (signed) is the borrow of b - a, turned
+; round if the two signs differ: RAR puts the borrow in bit 7, where the two
+; XRAs meet it. Then the character is read again, 3Ch or 3Eh: RAR leaves
+; 1Eh or 1Fh under the flag, and adding 61h carries into the flag for 1Fh
+; only. So the carry ends up saying "keep b" for either character.
+g_min:  POP     D               ; DE = a, HL = b
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        RAR
+        XRA     H
+        XRA     D
+        RAL                     ; carry: b < a
+        DCX     B
+        LDAX    B
+        INX     B
+        RAR
+        ADI     61h
+        RAL
+        JC      gm1
+        XCHG
+gm1:    RST     6
+
+        IF      ANSI
+; `^: ESC [ H homes the cursor, and ESC [ J clears from there to the end of
+; the screen. `_: ESC [ K clears to the end of the line.
+g_cls:  CALL    csi
+        MVI     A,'H'
+        RST     5
+        MVI     A,'J'
+        DB      11h             ; (LXI D: steps over the two bytes of g_eol)
+g_eol:  MVI     A,'K'
+        MOV     E,A
+        CALL    csi
+        MOV     A,E
+        RST     5
+        RST     6
+
+; `? ( flag -- ): ESC [ ? 2 5 l hides the cursor, ESC [ ? 2 5 h shows it.
+g_cur:  CALL    csi
+        MVI     A,'?'
+        RST     5
+        MVI     A,'2'
+        RST     5
+        MVI     A,'5'
+        RST     5
+        MOV     A,H
+        ORA     L
+        MVI     A,'l'
+        JZ      gc1
+        MVI     A,'h'
+gc1:    RST     5
+        RST     3
+
+; `@ ( row col -- ): ESC [ row+1 ; col+1 H. (ANSI counts from 1.)
+g_at:   POP     D               ; DE = the row
+        PUSH    B               ; (pdec uses BC)
+        PUSH    H               ; the column
+        XCHG
+        CALL    csi
+        INX     H
+        CALL    pdec
+        MVI     A,';'
+        RST     5
+        POP     H
+        INX     H
+        CALL    pdec
+        MVI     A,'H'
+        RST     5
+        POP     B
+        RST     3
+
+; csi: print ESC [, which starts every ANSI sequence. Keeps all but A.
+csi:    MVI     A,27
+        RST     5
+        MVI     A,'['
+        RST     5
+        RET
+        ENDIF
+        IF      1-ANSI
+; With ANSI = 0 the machine's own routines do the work (see the equates).
+g_cls:  CALL    CONCLS
+        RST     6
+g_eol:  CALL    CONEOL
+        RST     6
+g_cur:  MOV     A,H
+        ORA     L
+        CALL    CONCUR
+        RST     3
+g_at:   POP     D               ; DE = the row, HL = the column
+        CALL    CONAT
+        RST     3
+        ENDIF
+        IF      CHECKED
+gbad:   POP     H               ; no such code: W. The place is the character
+        JMP     e_brack
+        ENDIF
 
 ; psgn: print HL as a signed number. Uses BC.
 psgn:   MOV     A,H
@@ -1195,10 +1456,6 @@ prstr:  MOV     A,M
         ANI     0BFh
 prs1:   RST     5
         JMP     prstr
-e_dollar:POP    D               ; '$' ran into a NUL: drop the return address,
-        POP     H               ;   and put the string's address back in TOS
-        MVI     A,'Q'
-        JMP     error
 
 ; pmsg: print the text that follows the CALL, to its closing quote. Keeps HL.
 ; pnl: the same, on a new line.
@@ -1261,6 +1518,9 @@ e_hi:   INR     B
         JMP     error
 ; Error entries. Each loads its letter and then hides the next entry inside
 ; a 3-byte LXI D (the 11h), so they all fall through to `error`.
+e_dollar:POP    D               ; '$' ran into a NUL: drop prstr's return
+        POP     H               ;   address, put the string's address back in
+        DB      11h             ;   TOS, and step over the next two bytes: Q
 e_quote:MOV     B,H             ; an unclosed string: HL is its address, one
         MOV     C,L             ;   past the opening quote, which is the place
         MVI     A,'Q'
@@ -1278,7 +1538,6 @@ errp:   POP     D
 ; HL = TOS, and both stacks as the report is to show them:
 ;
 ;   Err X @ line,col
-;   up to 16 characters of the text from the place
 ;   Stk n: the top 8 cells at most, bottom to top
 ;   Rtn n
 error:  PUSH    H               ; now the whole data stack is in memory
@@ -1322,32 +1581,10 @@ er3:    PUSH    B
         RST     5
         POP     D
         POP     H
-        PUSH    H
         CALL    sub16
         INX     H
         CALL    pdec            ; the column
         CALL    pnl
-        DB      22h
-        POP     H               ; the text, as it is: 16 characters, or fewer
-        MVI     B,16            ;   if the line or the program ends first
-er4:    MOV     A,M
-        INX     H
-        ORA     A
-        JZ      er5
-        CPI     13
-        JZ      er5
-        CPI     10
-        JZ      er5
-        ENDIF
-        IF      CHECKED*CPM
-        CPI     1Ah             ; (the ^Z that pads a file's last record ends
-        JZ      er5             ;   the text too: some terminals clear the
-        ENDIF                   ;   screen on it)
-        IF      CHECKED
-        RST     5
-        DCR     B
-        JNZ     er4
-er5:    CALL    pnl
         DB      "Stk ",22h
         LXI     H,(2-DSTOP)&0FFFFh ; SP - (DSTOP-2) is minus twice the depth
         DAD     SP              ;   (the cell at DSTOP-2 was pushed with the
@@ -1362,7 +1599,8 @@ er5:    CALL    pnl
         CALL    pmsg
         DB      " ...",22h
         MVI     C,8
-er6:    MVI     H,0             ; C = the number of cells to show
+er6:    MOV     H,B             ; C = the number of cells to show (B is 0:
+                                ;   phal2 left the depth in BC)
         MOV     L,C
         DAD     H
         DAD     SP              ; HL -> just above the deepest of them

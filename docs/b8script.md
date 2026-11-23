@@ -1,6 +1,6 @@
 # B8Script Spec
 
-Nov 21, 2026 · @ROB8S
+Nov 23, 2026 · @ROB8S
 
 B8Script is a postfix stack language for 64 KB 8-bit computers. Every instruction is one ASCII character, and the source text runs directly, with no compile step.
 
@@ -13,6 +13,7 @@ B8Script is a postfix stack language for 64 KB 8-bit computers. Every instructio
 - [Memory, heap and machine code](#memory-heap-and-machine-code)
 - [Errors and checked builds](#errors-and-checked-builds)
 - [The break key](#the-break-key)
+- [Random numbers](#random-numbers)
 - [The console](#the-console)
 - [Idioms](#idioms)
 - [Tips and gotchas](#tips-and-gotchas)
@@ -130,12 +131,22 @@ Characters marked **†** have a catch, explained under *Marked characters* belo
 | `#` | Print signed decimal, with no space after | `( n -- )` |
 | `?` **†** | n > 0: wait up to about n ms for a key and return it, or 0 if none came. 0: wait until a key arrives. No echo. Negative: read a line (see `?` below) | `( n -- c )` or `( -n -- addr )` |
 
-**Machine code**
+**The grave** **†** is a prefix: a grave and the character after it are one command.
 
-| Char | Meaning | Effect |
+| Code | Meaning | Effect |
 |---|---|---|
-| `` ` `` + hex digit **†** | Hex loader | `( addr -- addr' )` |
-| `` ` `` + other **†** | Execute machine code | `( addr -- )` |
+| `` `+ `` | Add 1 to the cell at addr and leave the new value | `( addr -- n )` |
+| `` `- `` | Subtract 1 from the cell at addr and leave the new value | `( addr -- n )` |
+| `` `< `` `` `> `` | The smaller, the larger of the two (signed) | `( a b -- n )` |
+| `` `' `` | New line: CR LF | `( -- )` |
+| `` `@ `` | Cursor to row, column, both counted from 0 | `( row col -- )` |
+| `` `^ `` | Clear the screen and home the cursor | `( -- )` |
+| `` `_ `` | Clear from the cursor to the end of the line | `( -- )` |
+| `` `? `` | Cursor off (0) or on (anything else) | `( flag -- )` |
+| `` `, `` | Random number from 0 to n−1, for n from 1 to 32767 | `( n -- r )` |
+| `` `. `` | Address of the random seed | `( -- addr )` |
+| `` `$ `` | Hex loader | `( addr -- addr' )` |
+| `` `! `` | Call machine code | `( addr -- )` |
 
 **Marked characters**
 
@@ -156,7 +167,7 @@ Characters marked **†** have a catch, explained under *Marked characters* belo
   - the line lasts until the next -n?.
 
   The rest is implementation-defined, so that a platform's own line reader (BDOS 10, a monitor's routine) can be used as it is: how Backspace is echoed, what Delete and other control keys do, whether a full line ends by itself, and whether the CR is echoed. -1? reads one character confirmed with CR. A key that arrives while no ? is running may be lost on machines without a UART; a one-byte UART keeps only the newest.
-- `` ` `` **Two jobs, chosen by the next character.** A hex digit (`0`–`9`, `A`–`F` or `a`–`f`) loads bytes; anything else executes. Words `A`–`F` and variables `a`–`f` right after a grave count as hex, so to execute when one follows, put a space after the grave: `` x@` b@ ``.
+- `` ` `` **Never alone.** The character after a grave belongs to it, with nothing between: `` x`+ `` adds 1 to x, and the `+` is not an add. Only the thirteen codes in the table mean anything. Any other character there is unsafe (a checked build stops with `W`), and the letters are reserved for later use. `(` `)` `[` `]` and `"` will never follow a grave, so the skipper can go on counting them wherever it sees them. `` `+ `` and `` `- `` leave the new value, which is what a loop test wants: `` i`+ 10<) ``. Drop it with `;` when it isn't wanted. `` `< `` and `` `> `` compare as `<` and `>` do, signed. For `` `, `` and `` `. `` see [Random numbers](#random-numbers), for the four console codes [The console](#the-console), and for `` `$ `` and `` `! `` [Machine code](#memory-heap-and-machine-code).
 
 Besides digits, four characters look at the text after them: `"`, `-`, `[` and `` ` ``.
 
@@ -230,7 +241,7 @@ What the caller does with the closer:
 Two consequences are worth remembering:
 
 - **The two kinds are counted together.** For the skipper `(` and `[` are both "open", and `)` and `]` both "close". It never checks that they pair up by kind; that is the programmer's job (see the next paragraph).
-- **Only brackets and quotes matter.** Numbers, letters, other punctuation, and the digits read by the hex loader are passed over, and a hex load never contains a bracket or quote, so the skipper can never be misled by them. Brackets inside strings never count, which is why `"("` and `")"` are safe in skipped code. A `/` just before the closing quote escapes it, so the string goes on: write `//` to end a string with a slash.
+- **Only brackets and quotes matter.** Numbers, letters, other punctuation, and the digits read by the hex loader are passed over. A hex load never contains a bracket or quote, and neither is ever the character after a grave, so the skipper can never be misled by them. Brackets inside strings never count, which is why `"("` and `")"` are safe in skipped code. A `/` just before the closing quote escapes it, so the string goes on: write `//` to end a string with a slash.
 
 An example. Here a false `(` skips from just after itself:
 
@@ -271,16 +282,16 @@ Then `3#` runs and prints 3. Nothing else printed, and word A was never defined,
 
 Releasing works because the count is the difference between the mark and the current top, which is negative. A block larger than 32767 bytes takes two calls. Growing the heap past its limit, or releasing it below the program's end, is a heap collision: unsafe, and a checked build stops with `H`. The limit is implementation-defined (see the appendices).
 
-**The grave (`` ` ``)** does two jobs, chosen by the next character.
+**Machine code** is loaded and called with two of the grave's codes.
 
-| Next character | Action | Effect |
+| Code | Action | Effect |
 |---|---|---|
-| `0`–`9`, `A`–`F` or `a`–`f` | **Hex loader.** Reads digit pairs (mixed case freely) until any other character and stores them as bytes from addr. Then it writes the platform's RET byte and leaves the address of that RET. An odd last digit is consumed and dropped: `41A` stores 41h, and the A never runs as a word call. On a platform that cannot run machine code, this is still the way to put binary data, zero bytes included, into a program: strings hold text, the hex loader holds everything else | `( addr -- addr' )` |
-| Anything else | **Execute.** Calls the machine code at addr as a subroutine. Consumes nothing after the grave | `( addr -- )` |
+| `` `$ `` | **Hex loader.** Reads the digit pairs that follow it at once (`0`–`9`, `A`–`F` or `a`–`f`, mixed case freely) until any other character and stores them as bytes from addr. Then it writes the platform's RET byte and leaves the address of that RET. An odd last digit is consumed and dropped: `` `$41A `` stores 41h, and the A never runs as a word call. On a platform that cannot run machine code, this is still the way to put binary data, zero bytes included, into a program: strings hold text, the hex loader holds everything else | `( addr -- addr' )` |
+| `` `! `` | **Call.** Calls the machine code at addr as a subroutine | `( addr -- )` |
 
-Because a load leaves the address of its RET, the next load overwrites it, so code can be built over several lines: `` 16_:x! `3E2A `3C ; `` Allocate one byte more than the code for the RET. A load never contains `(`, `)`, `[`, `]` or `"`, so skips pass over it safely.
+Because a load leaves the address of its RET, the next load overwrites it, so code can be built over several lines: `` 16_:x! `$3E2A `$3C ; `` Allocate one byte more than the code for the RET. A load never contains `(`, `)`, `[`, `]` or `"`, so skips pass over it safely. A load ends at the first character that is not a hex digit, so put a space after it if a digit or one of the letters A–F or a–f comes next.
 
-**The hex loader and machine code are never checked.** The grave is how a program extends itself, including patching the OS or the interpreter, so a checked build does not range-check the loader's stores or what the code does. Making machine code behave is entirely the programmer's job.
+**The hex loader and machine code are never checked.** They are how a program extends itself, including patching the OS or the interpreter, so a checked build does not range-check the loader's stores or what the code does. Making machine code behave is entirely the programmer's job.
 
 **Machine-code contract.** Every platform defines, in its appendix: how the code is entered and returns, the RET byte the loader writes, how the code reaches the data stack, which registers and memory it must keep, and any interpreter routines it may call.
 
@@ -293,8 +304,8 @@ B8Script comes in two kinds of build. An **unchecked** build checks nothing, for
 | Category | Includes |
 |---|---|
 | Required | Everything in this spec, for programs that stay inside it |
-| Implementation-defined | Stack sizes, heap start and limit, memory layout, starting values of variables and words, how often the break key is polled, the -n? details listed under `?`, system addresses, the machine-code contract, and which environments a build offers |
-| Unsafe (anything may happen in an unchecked build) | Data or return stack underflow or overflow, heap collision, stores outside the program's space, calling an undefined word, unclosed strings, printing an address with no closing quote, `[` not followed by a letter or space, reserved bytes outside strings, dividing by zero, unbalanced or mismatched brackets, and anything machine code does |
+| Implementation-defined | Stack sizes, heap start and limit, memory layout, starting values of variables, words and the random seed, how a key wait stirs the seed, how often the break key is polled, the -n? details listed under `?`, system addresses, the machine-code contract, and which environments a build offers |
+| Unsafe (anything may happen in an unchecked build) | Data or return stack underflow or overflow, heap collision, stores outside the program's space, calling an undefined word, unclosed strings, printing an address with no closing quote, `[` not followed by a letter or space, a grave not followed by one of its codes, reserved bytes outside strings, dividing by zero, a random number of less than 1, unbalanced or mismatched brackets, and anything machine code does |
 
 ### What a checked build adds
 
@@ -318,12 +329,12 @@ B8Script comes in two kinds of build. An **unchecked** build checks nothing, for
 | `S` / `s` | Data stack overflow / underflow |
 | `R` / `r` | Return stack overflow / underflow |
 | `H` | Heap past its limit, or released below the program's end |
-| `O` | Store with `!` or `.` outside the program's space |
+| `O` | Store with `!`, `.`, `` `+ `` or `` `- `` outside the program's space |
 | `U` | Undefined word |
 | `Q` | Missing closing quote: an unclosed string, or `$` running into NUL |
-| `W` | `[` not followed by a letter or a space |
+| `W` | The wrong character after a prefix: `[` not followed by a letter or a space, or a grave not followed by one of its codes |
 | `X` | Reserved byte (80h–FFh) outside a string |
-| `Z` | Divide by zero |
+| `Z` | Divide by zero, or `` `, `` with a number less than 1 |
 | `N` | Unbalanced or mismatched brackets |
 | `B` | Break key |
 
@@ -333,16 +344,14 @@ B8Script comes in two kinds of build. An **unchecked** build checks nothing, for
 
 ```
 Err X @ 4,16
-d@:*n@>\
 Stk 3: 1 2 42
 Rtn 1
 ```
 
 - The report starts with CR LF, so it never lands in the middle of the program's output.
-- **Line 1:** `Err`, the code, `@`, then the line and column of the character that failed, both counted from 1. A line typed at a prompt or editor is line 0. Values up to 32767 are guaranteed; a build may print up to 65535. For `U` the place is the call; for `N` it is the opener where the skip started.
-- **Line 2:** up to 16 characters of the program text from that place, printed raw (escapes not decoded), stopping early at CR, LF or NUL.
-- **Line 3:** the data stack as it was when the error hit: `Stk`, the depth, then up to the top 8 values, bottom to top, so the top is last. More than 8 are shown as `…` and the top 8.
-- **Line 4:** `Rtn` and the return stack's depth.
+- **Line 1:** `Err`, the code, `@`, then the line and column of the character that failed, both counted from 1. A line typed at a prompt or editor is line 0. Values up to 32767 are guaranteed; a build may print up to 65535. For `U` the place is the call; for `N` it is the opener where the skip started; for anything that goes wrong in a grave's command it is the character after the grave.
+- **Line 2:** the data stack as it was when the error hit: `Stk`, the depth, then up to the top 8 values, bottom to top, so the top is last. More than 8 are shown as `…` and the top 8.
+- **Line 3:** `Rtn` and the return stack's depth.
 - The report goes to the console, or the platform's error channel where it has one, never into a program's redirected output.
 
 **After an error or a break,** a one-shot build returns to the OS or monitor. A build with a prompt or editor returns there, with both stacks cleared and words and variables kept.
@@ -364,9 +373,37 @@ Every build, checked or not, stops a running program on Ctrl-C (03h).
 
 [↑ Back to top](#b8script-spec)
 
+## Random numbers
+
+`` n`, `` gives a number from 0 to n−1. n is 1 to 32767; anything less than 1 is unsafe (a checked build stops with `Z`).
+
+```text
+6`,1+          "a die: 1 to 6";
+52`,           "a card: 0 to 51";
+100`,30<( ... 0)   "three times in ten";
+```
+
+**The seed** is one cell that the numbers are worked out from, and `` `. `` gives its address. Each number moves the seed one step on, and the same seed always gives the same numbers after it, on every implementation:
+
+1. seed = seed × 261 + 1 (16 bits: this takes every value from 0 to 65535 in turn before it repeats);
+2. x = seed with its high byte XORed into its low byte;
+3. the result is the remainder of x ÷ n, with x taken as unsigned.
+
+**Key waits stir the seed.** While `0?` or `n?` waits for a key, the implementation changes the seed with the one thing in the machine that is never the same twice: how long the key took to come. So a program needs no seed of its own and no loop that counts while it waits; any key wait before the first number is enough. How the seed is stirred is implementation-defined (the existing interpreters add 1 for every millisecond waited), and so is whether `-n?` stirs it. The seed's value when a program starts is undefined: a program that draws numbers before its first key wait may draw the same ones every time.
+
+**To draw the same numbers again,** set the seed: `` 1234`.! ``. A program that replays a sequence keeps its own copy of the seed, because every key wait in between changes the real one. This word restores the seed, draws a digit and saves the seed again, so the digits come out the same however long the player takes:
+
+```text
+[D s@`.! 10`, `.@s!]
+```
+
+The numbers are good enough for games and nothing more: there are only 65,536 seeds, and the low bits of a small range repeat sooner than the high ones.
+
+[↑ Back to top](#b8script-spec)
+
 ## The console
 
-Output is a stream of bytes: `'`, `$` and `#` write to it, and a line ends with CR LF (`13'10'`, or `/M/J` in a string). Input is raw bytes from `?`. What special keys (arrows, function keys) send is implementation-defined; on an ANSI terminal the arrows send ESC `[` and a letter.
+Output is a stream of bytes: `'`, `$` and `#` write to it, and a line ends with CR LF (`` `' ``, or `/M/J` in a string). Input is raw bytes from `?`. What special keys (arrows, function keys) send is implementation-defined; on an ANSI terminal the arrows send ESC `[` and a letter.
 
 **Control codes.** These act on the cursor rather than print:
 
@@ -376,32 +413,26 @@ Output is a stream of bytes: `'`, `$` and `#` write to it, and a line ends with 
 | LF (0Ah) | Cursor down one line; on the bottom line the screen scrolls up |
 | BS (08h) | Cursor left one place, without erasing |
 | BEL (07h) | A beep, or nothing |
-| ESC (1Bh) | Starts an escape sequence (below) |
 
-What the other control codes do (TAB among them) is implementation-defined: a machine may show them as glyphs. So is what happens after a character is written in the last column: the cursor may wrap to the next line or stay. Programs that draw to the edge of the screen should place the cursor themselves.
+What the other control codes do (TAB and ESC among them) is implementation-defined: a machine may show them as glyphs. So is what happens after a character is written in the last column: the cursor may wrap to the next line or stay. Programs that draw to the edge of the screen should place the cursor themselves.
 
-**Screen control.** B8Script has no screen commands of its own. Programs use a small subset of the ANSI (VT100) escape sequences, written as strings, and every environment should make that subset work:
+**Screen control** is four of the grave's codes, and every environment makes them work on its own console:
 
-| Sequence | In a string | Does |
+| Code | Does | Effect |
 |---|---|---|
-| ESC `[2J` | `"/[[2J"` | Clear the screen. The cursor may or may not move, so follow it with ESC `[H` |
-| ESC `[J` | `"/[[J"` | Clear from the cursor to the end of the screen |
-| ESC `[H` | `"/[[H"` | Cursor to the top left |
-| ESC `[`row`;`col`H` | `"/[[5;10H"` | Cursor to that row and column, counted from 1 |
-| ESC `[K` | `"/[[K"` | Clear from the cursor to the end of the line |
-| ESC `[2K` | `"/[[2K"` | Clear the whole line the cursor is on; the cursor stays where it is |
-| ESC `[?25l` | `"/[[?25l"` | Hide the cursor |
-| ESC `[?25h` | `"/[[?25h"` | Show the cursor |
+| `` `@ `` | Cursor to that row and column. Both count from 0: `0 0` is the top left | `( row col -- )` |
+| `` `^ `` | Clear the screen and put the cursor at the top left | `( -- )` |
+| `` `_ `` | Clear from the cursor to the end of the line. The cursor stays where it is | `( -- )` |
+| `` `? `` | Hide the cursor (0) or show it (anything else) | `( flag -- )` |
 
-- **Hiding the cursor.** Some terminals don't understand ESC `[?25l` and ESC `[?25h`. Put them at the very start and end of the program, each on its own line, so they are easy to delete or comment out for such a terminal (see *Screen* under Idioms). A program that hides the cursor must show it again before it ends, or the cursor stays hidden after it. After a break or an error the program can't, so an environment that goes back to a prompt or editor should show the cursor again itself, where its console understands the sequence.
-- **On an ANSI terminal or emulator** there is nothing to do: the bytes go straight out.
-- **Anywhere else** (a machine's own video, a non-ANSI terminal, or a console that needs a mode switch, as Windows does), the implementation or the machine's console driver translates the subset.
-- **Everything else is swallowed.** A translator must quietly swallow every other sequence of the ANSI shape (ECMA-48): ESC, `[`, any number of parameter bytes from 30h to 3Fh (digits, `;`, `<` `=` `>` `?`), any number of intermediate bytes from 20h to 2Fh, then one final byte from 40h to 7Eh. A program that uses more of ANSI (colours, say) then loses only the effect, and prints no garbage. ESC followed by anything other than `[` is implementation-defined.
-- **The existing builds:** the Z80, 8080, 6502 and 6809 interpreters send bytes unchanged, so on those machines the subset needs an ANSI terminal, or a console output routine (`CONOUT` or the machine's own) that translates it. The Windows builds switch the console into its ANSI mode (Appendix G).
-- **Screen size** is implementation-defined and given in the appendix; 80 × 24 is the usual. Programs that assume a size should say so.
-- **More than the subset** (colours, reverse video, scrolling regions) works only on real ANSI terminals. Keep it optional in a program.
+- **A program needs no escape sequences,** and should print none: a console is no longer expected to understand ANSI. A program that prints ESC `[` sequences itself works only on a terminal that obeys them.
+- **To clear a whole line,** go to its first column and clear from there: `` 5 0`@ `_ ``.
+- **Hiding the cursor.** A program that hides the cursor must show it again before it ends, or the cursor stays hidden after it. After a break or an error the program can't, so an environment that goes back to a prompt or editor should show the cursor again itself. A console with no way to hide its cursor ignores `` `? ``.
+- **How an implementation does it** is its own business. On a terminal it sends that terminal's sequences; with its own video it moves its own cursor. The existing interpreters have a build switch, `ANSI`: on, they send ANSI (VT100) sequences for the four codes; off, they call four routines that the machine supplies, as it supplies the routine that prints a character. The appendices give each one's interface.
+- **Screen size** is implementation-defined and given in the appendix; 80 × 24 is the usual. Programs that assume a size should say so. A row or column off the screen is unsafe to rely on: the cursor may stop at the edge or wrap.
+- **More than this** (colours, reverse video, scrolling regions) is not part of B8Script. A program for one particular terminal can still print that terminal's sequences; it is then tied to it.
 
-Keep a program's screen control in a few words at the top (see *Screen* under Idioms). Moving the program to a machine with some other console then means rewriting those words and nothing else.
+Keep a program's screen control in a few words at the top where it is used often (see *Screen* under Idioms): a code used more than about six times is shorter behind a one-letter word.
 
 [↑ Back to top](#b8script-spec)
 
@@ -429,14 +460,17 @@ Every idiom here runs as shown in the reference interpreter. A word in this sect
 | Negate | `-1*` |  |
 | Absolute value | `:0<(-1*0)` |  |
 | Sign | `:0<%0>-` | −1, 0 or 1 |
-| Min | `{:}%{:}%>(%0);` | `( a b -- min )` |
-| Max | `{:}%{:}%<(%0);` | `( a b -- max )` |
+| Min | `` `< `` | `( a b -- min )` |
+| Max | `` `> `` | `( a b -- max )` |
+| Clamp to lo…hi | `` lo`>hi`< `` | `( n -- n )` |
 | Quotient | `/;` | `( a b -- q )` |
 | Remainder | `/%;` | `( a b -- r )`; takes a's sign |
 | Modulo word | `[M/%;]` | `( n d -- n mod d )` |
 | Double | `:+` | Faster than `2*` everywhere |
 | Halve (toward zero) | `2/;` | Fast everywhere |
-| Increment variable | `[I:@1+%!]` | `xI` adds 1 to x |
+| Add 1 to a variable | `` x`+; `` | Without the `;` the new value stays on the stack |
+| Count a loop up | `` 0i! 1( ... i`+ 10<) `` | Runs with i from 0 to 9 |
+| Add 1 to an array cell | `` a@i@:++`+; `` | Any address will do |
 | Flag to 1/0 | `0=1+` |  |
 | Branchless select | `flag n&` | n if true, else 0 |
 | Logical not of a flag | `0=` | Same as `~` on a flag; also right on any value |
@@ -455,9 +489,9 @@ Every idiom here runs as shown in the reference interpreter. A word in this sect
 | Print a cell in hex | `[H:-4096&4096/;15&D:3840&256/;D:240&16/;D15&D]` | Uses D; always four digits |
 | Hex constant, from text | `[P0%1(:,32\|48-:9>(39- 0):-16&\{%}%:+:+:+:++%1+1);;]` | `"F000"P` pushes F000h; stops at the first non-hex character |
 | Hex from the keyboard | `-8?P` | Uses P |
-| Hex constant, by bytes | `3_h!` once, then `` h@:`3412;@ `` | Pushes 1234h, with no text to parse |
+| Hex constant, by bytes | `3_h!` once, then `` h@:`$3412;@ `` | Pushes 1234h, with no text to parse |
 
-The shift-right idioms work because `/` leaves the remainder with the dividend's sign: adding a negative remainder turns truncation into rounding down. In D the flag `9>` is all ones, so `7&` adds 7 for A–F with no branch. H masks each nibble in place and divides it down. For the top nibble the division gives −8 to −1 on negative cells, which is why it is masked again with `15&`. P folds case with `32|`, turns `a`–`f` into 10–15 by subtracting 39 more, and stops when the value has any bit outside 0–15 (`-16&`). Parsing costs time, so in a loop keep the value in a variable. In the by-bytes form, bytes are written little-endian and the third byte absorbs the RET; it reaches any bit pattern, such as 8000h (`` `0080 ``).
+The shift-right idioms work because `/` leaves the remainder with the dividend's sign: adding a negative remainder turns truncation into rounding down. In D the flag `9>` is all ones, so `7&` adds 7 for A–F with no branch. H masks each nibble in place and divides it down. For the top nibble the division gives −8 to −1 on negative cells, which is why it is masked again with `15&`. P folds case with `32|`, turns `a`–`f` into 10–15 by subtracting 39 more, and stops when the value has any bit outside 0–15 (`-16&`). Parsing costs time, so in a loop keep the value in a variable. In the by-bytes form, bytes are written little-endian and the third byte absorbs the RET; it reaches any bit pattern, such as 8000h (`` `$0080 ``).
 
 **Control**
 
@@ -538,7 +572,7 @@ These assume you know your nesting depth: inside a block, the top of the return 
 | Allocate | `n_a!` |
 | Mark the heap | `0_m!` |
 | Release to the mark | `m@0_-_;` |
-| Clear n bytes at a | `0i! 1( 0a@i@+. i@1+:i! n@<)` |
+| Clear n bytes at a | `` 0i! 1( 0a@i@+. i`+ n@<) `` |
 | Array cell i | `a@i@:++` (cell address), then `@` or `!` |
 
 **Input and output**
@@ -546,22 +580,26 @@ These assume you know your nesting depth: inside a block, the top of the return 
 | Name | Code |
 |---|---|
 | Comment | `"any text";` |
-| New line | `13'10'` |
+| New line | `` `' `` |
 | Wait for a key | `0?` |
-| Random seed from key timing | `0r! [K0 1(;r@1+r!1?:0=)]` |
+| A die: 1 to 6 | `` 6`,1+ `` |
+| Three times in ten | `` 10`,3<( ... 0) `` |
+| Shuffle n bytes at a | `` n@i! 1( i`-1+`,j! a@i@+,a@j@+,a@i@+.a@j@+. i@) `` |
 | Read a number | `[N0v!1(0?:48<\48-:#v@10*+v!1);v@]` |
 | Read a line | `-72?a!` (the text at a ends with CR, 13) |
 | Run a typed line | `[X{] -72?:{1(:,13=\1+1)93%.}X` (writes `]` over the CR, then runs it) |
 
-**Screen** (the console subset; see [The console](#the-console))
+**Screen** (see [The console](#the-console))
 
 | Name | Code | Effect |
 |---|---|---|
-| Clear the screen | `[C"/[[2J/[[H"$]` | Clears and homes the cursor |
-| Clear to the end of the line | `[K"/[[K"$]` |  |
-| Clear the whole line | `"/[[2K"$` | The cursor stays put; send CR after it to start the line again |
-| Hide the cursor, show it again | `"/[[?25l"$` first, `"/[[?25h"$` last | Each on its own line at the start and end of the program, so it can be deleted for a terminal that doesn't know it |
-| Cursor to row, column | `[Y27'91'%#59'#72']` | `( row col -- )`, counted from 1: `5 10Y` sends ESC `[5;10H` |
+| Clear the screen | `` `^ `` | Clears and homes the cursor |
+| Clear to the end of the line | `` `_ `` |  |
+| Clear a whole line | `` 5 0`@ `_ `` | Row 5; the cursor is left at its start |
+| Hide the cursor, show it again | `` 0`? `` first, `` 1`? `` last |  |
+| Cursor to row, column | `` 4 9`@ `` | The fifth row and tenth column: both count from 0 |
+| Print at a place | `` [P{`@}$] `` | `( row col addr -- )`: `` 2 30"Score"P `` |
+| A code behind a word | `` [Y`@] `` | Worth it for a code used more than about six times |
 
 **Debugging**
 
@@ -579,7 +617,8 @@ If anything leaked, the top of the stack at the end isn't the sentinel. Add it w
 
 - **Subtract before a number needs a space.** `5- 3` subtracts; `5-3` pushes −3. It applies after any operator: `7*- 48` multiplies, subtracts, then pushes 48, but `7*-48` multiplies, then pushes −48.
 - **Watch `-` before `0)`.** `39-0)` is 39, then −0, then a close: write `39- 0)`.
-- **Store before you read.** Variables start with garbage. Seed a random counter with `0r!`.
+- **Store before you read.** Variables start with garbage.
+- **A grave takes the next character, whatever it is.** `` x`-5 `` subtracts 1 from x and then pushes 5: the `-` is the grave's, not a minus. And a space after a grave is not one of its codes.
 - **Prefer the stack to variables inside reusable words.** A word that stores into `n` or `d` clobbers any caller using them. The stack-only modulo `M` avoids this.
 - **Keep `{` and `}` paired inside a block** unless you mean a return-stack trick: `)` jumps to whatever is on top.
 - **Loop instead of recursing forever.** Each call grows the return stack; use a block or a tail call (`G`).
@@ -588,14 +627,15 @@ If anything leaked, the top of the stack at the end isn't the sentinel. Add it w
 - **Build machine code in pieces.** Save the start with `:` or `{` before the first load, and drop the final address with `;`.
 - **Take both results of `/` when you need both.** `i@40/ x! y!` splits a cell index into column and row with one division.
 - **Double with `:+`, halve with `2/;`.** Both are fast on every implementation; a multiply or divide by any other number runs the full routine.
-- **Spaces and line breaks cost time where they run.** Each one is read and dispatched like a command, every time that spot runs, so keep hot loops tight and comments (a string dropped with `;`) out of them. A stripper can remove comments and whitespace from a finished program, keeping only the spaces that separate (`12 34`, `5- 3`, a grave before a hex letter).
+- **Spaces and line breaks cost time where they run.** Each one is read and dispatched like a command, every time that spot runs, so keep hot loops tight and comments (a string dropped with `;`) out of them. A stripper can remove comments and whitespace from a finished program, keeping only the spaces that separate (`12 34`, `5- 3`, a hex load before a hex character).
 - **Keep constants that run hot in variables.** A long number literal is read digit by digit every time it runs; `m@` is one fetch.
 - **Use `0?` to wait for a key and `-n?` for typed text,** which it echoes and edits for you.
 - **Time real-time programs with the wait, not with a count of tiny waits.** Make each frame one `n?` with n about the frame you want (`20?` for 50 frames a second), act on the key if one came, and count frames for slower events such as gravity. A frame then lasts about n ms on every machine. A loop of `1?` with a large count to make a second runs at a different speed on every machine: each pass also costs the time its own code takes to run, which differs from machine to machine, and on some hosts the shortest wait is far longer than 1 ms (15.6 ms on Windows without a high-resolution timer). Keep each frame's work short, and remember that a key ends the wait early, so a frame with a key in it is shorter.
 - **`1?` is a quick look for a key**, for checking a break key in a long computation, not a clock. Look every few hundred steps rather than every step, as each look costs up to a millisecond.
 - **Reading addresses.** `#` prints signed, so an address above 7FFFh prints as a negative number: F000h prints as −4096. A decimal literal wraps, so `61440` and `-4096` are the same address. Every appendix lists its addresses in hex, unsigned and signed.
 - **Slashes in strings.** Write `//` for a slash: `"n/s/e/w"` would print `n3%7`.
-- **Keep screen control in words.** Put every escape sequence in a few words such as C, K and Y above, so a program moves to another console by rewriting only them.
+- **Put a code you use a lot behind a word.** A grave's command is two characters, a word call one: `` [Y`@] `` pays for itself at the seventh use.
+- **Wait for a key before the first random number.** The wait is what stirs the seed. A title screen with "Press a key" does it; so does the first move of a game that draws nothing before it.
 - **Develop on a checked build, run on an unchecked one.** Then test once on the unchecked build too, for the reasons under Don't rely on.
 - **System values live in the appendices.** Heap limit, free memory, the break-off address and similar values are per build. A program that uses them is tied to that build.
 
@@ -608,7 +648,8 @@ These differ between builds or environments, so a portable program must not depe
 - keys typed while a program runs, other than through the held key;
 - how -n? echoes and treats keys other than Backspace and CR;
 - the result of dividing by 0;
-- where the cursor is after a clear screen, what happens after the last column, what control codes other than CR, LF, BS, BEL and ESC do, the screen's size, and any escape sequence outside the console subset;
+- what happens after the last column or with a row or column off the screen, what control codes other than CR, LF, BS and BEL do, the screen's size, and any escape sequence;
+- the random seed's value when the program starts, how much a key wait stirs it, and so which numbers are drawn after a key wait;
 - memory layout, stack sizes and the heap limit.
 
 [↑ Back to top](#b8script-spec)
@@ -620,40 +661,38 @@ Every program here runs as shown in the reference interpreter. Programs that nee
 | Program | Chars | Code |
 |---|---|---|
 | Hello | 20 | `"Hello, world!/M/J"$` |
-| 1 to 10 | 28 | `1i! 1( i@# " "$ i@1+:i! 11<)` |
+| 1 to 10 | 24 | `` 1i! 1( i@# " "$ i`+ 11<) `` |
 | Factorial of 7 | 21 | `[F :1>( :1-F* 0)] 7F#` |
 | Fibonacci to 28657 | 39 | `0a!1b!1(a@#" "$b@20000>\b@:a@+b!a!1)b@#` |
-| Sierpinski, 32 × 32 | 65 | `0y!1(0x!1(x@y@&0=("*"$0)x@y@&(" "$0)x@1+:x!32<)"/M/J"$y@1+:y!32<)` |
+| Sierpinski, 32 × 32 | 52 | `` 0y!1(0x!1(x@y@&0=("*"$0)x@y@&(" "$0)x`+32<)`'y`+32<) `` |
 | Collatz from 27 | 59 | `[M/%;]27n!1(n@#" "$n@2M:{(n@3*1+n!0)}0=(n@2/;n!0)n@1=0=)n@#` |
-| 10 × 10 times table | 72 | `1r!1(1c!1(r@c@*:10<(" "$0):100<(" "$0)#" "$c@1+:c!11<)"/M/J"$r@1+:r!11<)` |
-| Primes under 1000 | 73 | `[M/%;]2n!1(1p!2d!1(d@:*n@>\n@d@M0=(0p!0)d@1+d!1)p@(n@#" "$0)n@1+:n!1000<)` |
-| FizzBuzz 1–100 | 78 | `[M/%;]1i!1(0f!i@3M0=("Fizz"$1f!0)i@5M0=("Buzz"$1f!0)f@0=(i@#0)" "$i@1+:i!101<)` |
+| 10 × 10 times table | 59 | `` 1r!1(1c!1(r@c@*:10<(" "$0):100<(" "$0)#" "$c`+11<)`'r`+11<) `` |
+| Primes under 1000 | 67 | `` [M/%;]2n!1(1p!2d!1(d@:*n@>\n@d@M0=(0p!0)d`+;1)p@(n@#" "$0)n`+1000<) `` |
+| FizzBuzz 1–100 | 74 | `` [M/%;]1i!1(0f!i@3M0=("Fizz"$1f!0)i@5M0=("Buzz"$1f!0)f@0=(i@#0)" "$i`+101<) `` |
 
-**Guess the number.** The computer picks 1–99 and answers higher or lower.
+**Guess the number.** The computer picks 1–99 and answers higher or lower. The wait for the first key stirs the random seed, so the number is a new one every time.
 
 ```plain
-[M/%;]
-0r! [K 0 1( ; r@1+ 100M r! 1? :0=)]
-[N 0v! 1( K :48<\ 48- :# v@10*+v! 1) ; v@]
-"Guess my number from 1 to 99. Press a key to start./M/J"$ K;
-r@99M1+s! 0t!
-1( "/M/JYour guess: "$ N g! t@1+t!
+[N 0v! 1( 0? :48<\ 48- :# v@10*+v! 1) ; v@]
+"Guess my number from 1 to 99. Press a key to start."$`' 0?;
+99`,1+s! 0t!
+1( `'"Your guess: "$ N g! t`+;
    g@s@<( "  higher"$ 0)
    g@s@>( "  lower"$ 0)
    g@s@=0=)
-"/M/JGot it in "$ t@# " tries!/M/J"$
+`'"Got it in "$ t@# " tries!"$`'
 ```
 
-**Machine code with the grave** (Z80 and 8080). Load once, call as often as needed. Each load needs one byte more than its code, for the RET.
+**Machine code** (Z80 and 8080). Load once, call as often as needed. Each load needs one byte more than its code, for the RET.
 
 Double TOS: `pop de` (the return address), `pop hl`, `add hl,hl`, `push hl`, `push de`. Prints 42:
 
 ```text
-8_:d! `D1E129E5D5 ;
-21 d@` #
+8_:d! `$D1E129E5D5 ;
+21 d@`! #
 ```
 
-The grave right after `d@` is followed by a space, so it executes. Conway's Life and Star Trek are under Programs at the end.
+Conway's Life and Star Trek are under Programs at the end.
 
 [↑ Back to top](#b8script-spec)
 
@@ -671,10 +710,12 @@ This chapter is for anyone writing an interpreter. The first part lists what the
 - **`/`.** Truncates toward zero, remainder on top with the dividend's sign; fast for 2 and −2.
 - **`_`.** Signed count; `0_` reads the top.
 - **`?`.** The guarantees listed under `?`, and a -n? cap of at least 127.
+- **The grave.** A prefix with thirteen codes, as in the Character reference. `(` `)` `[` `]` and `"` are never given a meaning after a grave, and the letters are kept free for later.
 - **The hex loader.** Mixed case, an odd last digit dropped, the platform's RET byte written, its address left.
+- **Random numbers.** The generator exactly as under [Random numbers](#random-numbers), so that one seed gives the same numbers everywhere; and a key wait must stir the seed.
 - **The break key.** Ctrl-C stops every build, polled as described under The break key.
 - **Reserved bytes.** Ignored by unchecked builds, `X` in checked builds.
-- **The console.** The control codes and the console subset should work in every environment, translated where the console is not ANSI, with every other ANSI-shaped sequence swallowed (see [The console](#the-console)). An appendix says how its build meets this, and gives the screen size.
+- **The console.** The control codes and the four console codes work in every environment, on whatever console it has (see [The console](#the-console)). An appendix says how its build does it, and gives the screen size.
 - **Checked builds.** The startup state, the error codes, the report format and the behaviour after an error, as in [Errors and checked builds](#errors-and-checked-builds).
 - **An appendix.** Each implementation documents its memory map, stack sizes, heap limit, machine-code contract, RET byte, system addresses (in hex, unsigned and signed decimal) and build options.
 
@@ -711,6 +752,17 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 - **Use addresses where they lie.** The zero-page 6502 uses a cell on the data stack as the pointer itself (`(0,X)`), so `@` and `!` need no copying, and a drop is two `INX`.
 - **One routine, called twice.** The zero-page 6502 does 16-bit operations a byte at a time through one short routine called for each half.
 
+**The grave**
+
+- **Find the handler with a ladder or a small table.** The thirteen characters are scattered, so a second full table would be mostly holes. The Z80 tests them one after another, each `SUB` taking off only the step from the one before, so adjacent characters cost a `DEC A` and a short jump. Four that are neighbours (`+ , - .`) are found by one range test and told apart by rotating the low bits into the carry. The 8080, 6502 and 6809 have no short jump, or a dear one, and search a table of characters instead.
+- **A table that needs no base address.** On the 8080 and 6809 each character in the table is followed by its handler's distance from that byte itself, and the table sits just before the handlers: the search already points there, so the distance is added to the pointer and nothing is loaded. On the 6502 the table holds low bytes only, with the handlers in the table's order: the high byte is the first handler's page, plus the carry of one compare against the place where the page turns, which the assembler works out.
+- **One routine for two codes.** `` `+ `` and `` `- `` differ only in what is added, `` `< `` and `` `> `` only in which of the two is kept. On the Z80 the carry tells them apart, from a rotated bit of the character or an `SCF` at the second entry; the table builds work it out from the character or its place in the table. On the 6502 one compare of that place gives both halves of what `` `+ `` and `` `- `` add: `SBC #0` on a cleared A leaves 0 with the carry set (add 1) or FFh with it clear (add −1).
+- **Signed compare from the borrow.** For `` `< `` and `` `> `` both values must survive the compare. Subtract, rotate the borrow into bit 7, and XOR the two high bytes into it: the sign bit is then "less than", with neither operand changed.
+- **Multiply by 261 with shifts.** 261 is 256 + 4 + 1, so the seed's step is two doublings, an add, and the low byte added into the high. Where the multiply routine is easier to reach than that, call it.
+- **Stir in the wait loop.** The loop of `n?` already counts milliseconds; adding 1 to the seed there is one increment.
+- **Console codes as tails of one another.** ESC `[` is a three-line routine. "Clear the screen" is ESC `[` `H` and then falls into "clear to the end of the line" with a `J` in place of the `K`. A build that already has a routine printing the text that follows its call (Windows has one for the report) just writes the sequences as text.
+- **Let the machine do it.** With the `ANSI` switch off the four console codes are calls of four machine routines, which is far smaller than the sequences (about 50 bytes on the Z80).
+
 **Checked builds**
 
 - **Test the stacks once per character, not in every handler.** Give each stack its own page, so an overrun is simply the pointer's high byte leaving that page, and put a guard band below each stack to absorb the cell or two before the test runs.
@@ -726,7 +778,7 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 
 ### Build options
 
-An implementation may offer its variants as assembly switches. The existing sources use `CPM` (a CP/M .COM file or a generic ROM image), `CHECKED` and `EDITOR`. Which environments a build offers is up to the implementation; the smallest builds for vintage and homebrew machines are typically unchecked runners, with the loader left to the machine.
+An implementation may offer its variants as assembly switches. The existing sources use `CPM` (a CP/M .COM file or a generic ROM image), `CHECKED`, `EDITOR` and `ANSI` (the four console codes send ANSI sequences, or call routines that the machine supplies). Which environments a build offers is up to the implementation; the smallest builds for vintage and homebrew machines are typically unchecked runners, with the loader left to the machine.
 
 [↑ Back to top](#b8script-spec)
 
@@ -739,7 +791,7 @@ An environment is what surrounds the interpreter: how a program gets in, how it 
 | Runner | Loads one program, runs it and exits: `B8SZ80 PROG.B8S` |
 | Prompt | Runs each typed line at once. Words, variables and the data stack carry over from line to line |
 | Line editor | A prompt plus stored, counted lines |
-| Screen editor | Full-screen editing on an ANSI terminal |
+| Screen editor | Full-screen editing, drawn with the console codes |
 
 ### The line editor: suggested standard
 
@@ -763,7 +815,6 @@ This section is a suggestion, so that line editors on different machines feel al
 | ^R, `name`^R | Read | Load. With storage, from the named file. Without, by paste: raw text until ^Z or ^@ replaces the program |
 | ^W, `name`^W | Write | Save. With storage, to the current or named file. Without, print the raw text for the terminal to capture |
 | ^N ^N | New | Clear the program (pressed twice in a row) |
-| ^V | View | Show both stacks, the program size, free memory, the line count, and the build's name and version |
 | ^X | eXit | Leave to the OS or monitor |
 | Esc (^[) | — | Cancel the line being typed |
 | ^B, ^F, ← → | Back, Forward | Move the cursor in the line, with insert and delete mid-line |
@@ -792,8 +843,8 @@ Two longer programs, written as files with comments. Comments are strings droppe
 "Each grid has a border of dead cells (34 x 18 bytes), so the eight";
 "neighbours of a cell are always at fixed offsets from its address.";
 
-"Hide the cursor while it runs: delete the next line for a terminal without ESC [?25l.";
-"/[[?25l"$
+"Hide the cursor while it runs.";
+0`?
 
 "Variables";
 "  g h  addresses of the current and next grids (one byte per cell, 0 or 1)";
@@ -815,34 +866,34 @@ Two longer programs, written as files with comments. Comments are strings droppe
 [R j@34*g@+a!]
 
 "P: print grid g at the top of the screen";
-[P "/[[H"$
-   1j! 1( R 32 1( a@1+:a!, ".O"+,' 1-: ); 13'10' j@1+:j! 17<)
+[P 0 0`@
+   1j! 1( R 32 1( a`+, ".O"+,' 1-: ); `' j`+ 17<)
    "Generation "$ k@#]
 
 "G: compute the next generation into h, then swap the grids. A cell is";
 "   alive next exactly when (neighbours OR itself) = 3: 3 neighbours, or";
 "   alive with 2. No comments inside the loop: they would run every time";
 [G 1j! 1( R 32 1(
-      a@1+a!  N a@,| 3= 1&  a@g@-h@+.
-   1-: ); j@1+:j! 17<)
+      a`+ N %,| 3= 1&  a@g@-h@+.
+   1-: ); j`+ 17<)
    g@h@g!h!]
 
 "Main program";
 
 "Allocate both grids, side by side, and clear them, borders included";
 612_g! 612_h!
-0a! 1( 0g@a@+. a@1+:a! 1224<)
+0a! 1( 0g@a@+. a`+ 1224<)
 
 "An R-pentomino near the middle and a glider near a corner";
 17 8S 18 8S 16 9S 17 9S 17 10S
 3 2S 4 3S 2 4S 3 4S 4 4S
 
 "Clear the screen, then run until a key is pressed or 200 generations pass";
-"/[[2J"$ 0k!
-1( P G k@1+k! 1?0= k@200<&)
+`^ 0k!
+1( P G 1?0= k`+ 200<&)
 
-"Show the cursor again: delete the next line too if the one at the start was deleted.";
-"/[[?25h"$
+"Show the cursor again.";
+1`?
 ```
 
 **Star Trek** (`TREK.B8S`). A short version of the classic: one quadrant of 8 × 8 sectors, Klingons to destroy, a starbase to dock at.
@@ -860,7 +911,6 @@ Two longer programs, written as files with comments. Comments are strings droppe
 "  d  stardates left";
 "  q  quit flag; the main loop ends when it is nonzero";
 "  m  command key typed this turn";
-"  r  random number state";
 "  u o  direction step in x and y (-1, 0 or 1), set by D";
 "  a b  target sector x and y, used by P, V, I and T";
 "  c  contents of the target sector";
@@ -873,14 +923,8 @@ Two longer programs, written as files with comments. Comments are strings droppe
 "M: n d -- n mod d";
 [M/%;]
 
-"R: n -- random 0..n-1, from a linear congruential generator in r";
-[R r@75*74+:r! 256/;255& %M]
-
-"K: wait for a key, stirring r while waiting";
-[K0 1(;r@1+r!1?:0=)]
-
 "L: new line";
-[L13'10']
+[L`']
 
 "B: absolute value";
 [B:0<(-1*0)]
@@ -889,7 +933,7 @@ Two longer programs, written as files with comments. Comments are strings droppe
 [C8*+g@+]
 
 "P: v -- put v in a random empty cell";
-[P v! 1( 8R 8R C a! a@, ) v@a@.]
+[P v! 1( 8`, 8`, C a! a@, ) v@a@.]
 
 "D: key -- set direction u,o from n s e w";
 [D 0u!0o!
@@ -902,7 +946,7 @@ Two longer programs, written as files with comments. Comments are strings droppe
 [I a@8<a@-1>& b@8<& b@-1>&]
 
 "S: short-range scan";
-[S L 0j! 1( 0i! 1( 32' i@j@C, ".*KBE"+,' i@1+:i! 8<) L j@1+:j! 8<)]
+[S L 0j! 1( 0i! 1( 32' i@j@C, ".*KBE"+,' i`+ 8<) L j`+ 8<)]
 
 "V: move one sector in direction u,o";
 [V x@u@+a! y@o@+b!
@@ -915,43 +959,43 @@ Two longer programs, written as files with comments. Comments are strings droppe
 "H: phasers. Each Klingon is hit if a roll of 0-11 beats its distance";
 [H e@150-e! "Phasers fire!"$ L
    0i! 1( g@i@+,2=(
-            i@8M x@-B i@8/; y@-B+ 12R%>(
-              "Klingon destroyed!"$ L 0g@i@+. k@1-k! 0)
+            i@8M x@-B i@8/; y@-B+ 12`,%>(
+              "Klingon destroyed!"$ L 0g@i@+. k`-; 0)
           0)
-   i@1+:i! 64<)]
+   i`+ 64<)]
 
 "T: photon torpedo, flies in a straight line until it hits something";
-[T t@1<:( "No torpedoes left."$ L 0)\ t@1-t!
-   "Direction (n//s//e//w)? "$ K:' L D x@a! y@b!
+[T t@1<:( "No torpedoes left."$ L 0)\ t`-;
+   "Direction (n//s//e//w)? "$ 0?:' L D x@a! y@b!
    1( a@u@+a! b@o@+b! 0c! I f!
       f@( a@b@C,c! 0)
       f@0=( "Torpedo missed."$ L 0)
-      c@2=( "Klingon destroyed!"$ L 0a@b@C. k@1-k! 0)
+      c@2=( "Klingon destroyed!"$ L 0a@b@C. k`-; 0)
       c@1=( "A star absorbs the torpedo."$ L 0)
       c@3=( "You hit the starbase!"$ L 0)
    f@c@0=&)]
 
 "F: every Klingon fires at the Enterprise";
 [F 0i! 1( g@i@+,2=(
-            100R20+ "Klingon fires: "$ :# " units."$ L e@%-e!
+            100`,20+ "Klingon fires: "$ :# " units."$ L e@%-e!
           0)
-   i@1+:i! 64<)]
+   i`+ 64<)]
 
 "Main program";
 
-"Clear the random state and the quit flag";
-0r! 0q!
+"Clear the quit flag";
+0q!
 
-"Print the instructions; the key wait seeds the random state";
+"Print the instructions; the key wait stirs the random seed";
 "STAR TREK"$ L L
 "Destroy the Klingons before your energy or stardates run out."$ L
-"Dock at a starbase (B) to refuel. Press any key to begin."$ L K;
+"Dock at a starbase (B) to refuel. Press any key to begin."$ L 0?;
 
 "Allocate the grid and clear it";
-64_g! 0i! 1( 0g@i@+. i@1+:i! 64<)
+64_g! 0i! 1( 0g@i@+. i`+ 64<)
 
 "Place the Enterprise at a random sector";
-8R x! 8R y! 4x@y@C.
+8`, x! 8`, y! 4x@y@C.
 
 "Place 3 Klingons, 8 stars and a starbase in empty sectors";
 3k! 3 1( 2P 1-: );
@@ -965,13 +1009,13 @@ Two longer programs, written as files with comments. Comments are strings droppe
 "let the Klingons fire, use up a stardate, then check for the end";
 1( S
    "Energy "$ e@# "  Torpedoes "$ t@# "  Klingons "$ k@# "  Stardates "$ d@# L
-   "Command: n s e w move, p phasers, t torpedo, q quit? "$ K:' L m!
+   "Command: n s e w move, p phasers, t torpedo, q quit? "$ 0?:' L m!
    m@112=( H 0)
    m@116=( T 0)
    m@113=( 1q! 0)
    m@110= m@115=| m@101=| m@119=|( m@D V 0)
    k@( F 0)
-   d@1-d!
+   d`-;
    k@0=( L "All Klingons destroyed. The Federation is saved!"$ L 1q! 0)
    e@1<( L "The Enterprise has been destroyed."$ L 1q! 0)
    d@1<( L "Out of time. The Klingons have won."$ L 1q! 0)
@@ -982,20 +1026,20 @@ q@0=)
 
 ## Appendix A: Z80
 
-Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`.
+Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`, `ANSI`.
 
 **Builds**
 
 | Build | File | Bytes | Notes |
 |---|---|---|---|
-| Generic ROM | `b8s-z80-rom-0000.bin` | 765 | Starts at 0000h (reset); owns page zero |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,163 |  |
-| CP/M runner | `B8SZ80.COM` | 831 | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` | 1,243 |  |
-| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,488 | The suggested standard under [Environments](#environments); see the interpreters README |
-| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,796 |  |
-| CP/M with the line editor | `B8SZ80E.COM` | 1,663 | `B8SZ80E PROG.B8S`, or with no file |
-| The same, checked | `B8SZ80EC.COM` | 1,987 |  |
+| Generic ROM | `b8s-z80-rom-0000.bin` | 955 | Starts at 0000h (reset); owns page zero |
+| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,340 |  |
+| CP/M runner | `B8SZ80.COM` | 1,021 | `B8SZ80 PROG.B8S` |
+| CP/M runner, checked | `B8SZ80C.COM` | 1,416 |  |
+| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,480 | The suggested standard under [Environments](#environments); see the interpreters README |
+| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,869 |  |
+| CP/M with the line editor | `B8SZ80E.COM` | 1,645 | `B8SZ80E PROG.B8S`, or with no file |
+| The same, checked | `B8SZ80EC.COM` | 2,046 |  |
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), HL' is the return-stack pointer. A and DE are scratch.
 
@@ -1012,28 +1056,33 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 | Heap pointer cell | 827Ch | 33404 | −32132 |
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 827Ah | 33402 | −32134 |
+| Random seed | 8276h | 33398 | −32138 |
 
-Under CP/M the pages sit after the image and the heap limit is the BDOS. The break-off cell is still at offset 7Bh of the letter page, which is the page below the program text: 077Bh (1915) in `B8SZ80.COM`, 087Bh (2171) in `B8SZ80C.COM`, 0A7Bh (2683) in `B8SZ80E.COM` and 0B7Bh (2939) in `B8SZ80EC.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
+Under CP/M the pages sit after the image and the heap limit is the BDOS. The break-off cell is still at offset 7Bh of the letter page, which is the page below the program text: 077Bh (1915) in `B8SZ80.COM`, 097Bh (2427) in `B8SZ80C.COM`, 0B7Bh (2939) in `B8SZ80E.COM` and 0C7Bh (3195) in `B8SZ80EC.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
 
 **The break key.** The keyboard is looked at on every word call, block entry, true `)` and `{`, one time in 256. A program that stores a non-zero byte in the break-off cell gets Ctrl-C as key 3; two within about 250 ms still stop it. An unchecked build prints nothing when it is stopped.
 
 **Console interface (generic build).** `KEY` returns a waiting key in A, or A = 0 if none is waiting, with the zero flag matching A. `CONOUT` prints A. Both must keep BC, DE, HL and HL'. `EXIT` is jumped to when the program ends; in a build with the editor a program that ends goes back to the editor, and `LEAVE` is where ^X goes. `MSLOOP` sets the loop passes per millisecond for `n?`. `KEY` is also called while a program runs, for the break key, so it must not wait.
 
+**The console codes.** With `ANSI` = 1 (the default) the four console codes send ANSI sequences through `CONOUT` (or the BDOS): ESC `[` row+1 `;` col+1 `H`, ESC `[H` ESC `[J`, ESC `[K`, and ESC `[?25l` or ESC `[?25h`. With `ANSI` = 0 a generic build calls four routines of the machine's instead, at addresses set next to `KEY` and `CONOUT`: `CONAT` (the row in DE, the column in HL, both from 0; it may change A, DE and HL), `CONCLS`, `CONEOL` (both keep DE and HL), and `CONCUR` (the cursor off if A = 0, with the zero flag set to match; it may change A, DE and HL). All four must keep BC and HL'. That build is about 50 bytes smaller. The screen is the terminal's: 80 × 24 is assumed by nothing in the interpreter.
+
+**Random numbers.** The seed is stirred by 1 for every millisecond that `0?` or `n?` waits without a key; `-n?` does not stir it. Nothing sets the seed at the start, except that a checked build clears it with the rest of the letter page: so an unchecked build carries on from whatever the last program left there.
+
 **Machine-code contract.** Entered by CALL, with the return address on top of the stack and the data cells above it. The code must keep BC and must leave 0008h–0033h intact (all of page zero on a generic build). A, DE, HL, IX, IY and the alternate registers may change; the interpreter saves HL' itself. It returns with RET (C9h), which the loader writes. On return, the cell on top of the stack becomes the new TOS. `RST 28h` prints the character in A and keeps BC, DE, HL and HL', on every Z80 build.
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`. Builds: `b8s-8080-rom-0000.bin` (854 bytes), `b8s-8080-rom-checked-0000.bin` (1,299), `B8S8080.COM` (904), `B8S8080C.COM` (1,364).
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (1,054 bytes), `b8s-8080-rom-checked-0000.bin` (1,487), `B8S8080.COM` (1,104), `B8S8080C.COM` (1,547).
 
-The memory map, the break key, the console interface and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 077Bh in `B8S8080.COM` and 097Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
+The memory map, the break key, the console interface, the console codes, the random seed and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 0A7Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
 
 ## Appendix C: 6502
 
-Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-6502-zp.asm` is smaller and keeps it in zero page. Switch: `CHECKED`. The image starts at E000h; point the reset vector at label `start`.
+Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-6502-zp.asm` is smaller and keeps it in zero page. Switches: `CHECKED`, `ANSI`. The image starts at E000h; point the reset vector at label `start`.
 
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
-| Bytes (unchecked, checked) | 1,175 and 1,706 | 1,095 and 1,628 |
+| Bytes (unchecked, checked) | 1,427 and 1,958 | 1,355 and 1,888 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
 | Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |
@@ -1042,8 +1091,11 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 | Heap pointer cell | $047C | $047C |
 | Break-off cell | $047B (1147, the same signed) | Same |
 | Held key | $07 in zero page (unchecked), $047A (1146) (checked) | $047A (1146) |
+| Random seed | $0476 (1142) | Same |
 
 **The break key.** The keyboard is looked at on every word call, block entry and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
+
+**The console codes and the random seed** work as on the Z80. With `ANSI` = 0 the four routines are `CONAT` (the row in Y, the column in A, both from 0: one byte of each), `CONCLS`, `CONEOL` and `CONCUR` (the cursor off if A = 0, with the Z flag set to match). All four must keep X.
 
 **Machine-code contract.** Entered as a subroutine (`JMP (T0)`, with a return address on the stack), ending in RTS (60h, written by the loader). The address has been dropped. The code must keep the reading position at $00/$01 and leave the hardware stack balanced.
 
@@ -1052,7 +1104,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 ## Appendix D: 6809
 
-Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switch: `CHECKED`. Builds: `b8s-6809-rom-F000.bin` (825 bytes), `b8s-6809-rom-checked-F000.bin` (1,220). The image starts at F000h, with label `start`: point the reset vector at it.
+Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. Builds: `b8s-6809-rom-F000.bin` (1,035 bytes), `b8s-6809-rom-checked-F000.bin` (1,436). The image starts at F000h, with label `start`: point the reset vector at it.
 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|
@@ -1064,8 +1116,11 @@ Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switch: `CHECKED`. Builds: `b
 | Heap pointer cell (little-endian) | 827Ch | 33404 | −32132 |
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 8234h | 33332 | −32204 |
+| Random seed (little-endian) | 8276h | 33398 | −32138 |
 
 **The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. The unchecked build prints nothing when it is stopped.
+
+**The console codes and the random seed** work as on the Z80. With `ANSI` = 0 the four routines are `CONAT` (the row in X, the column in D, both from 0), `CONCLS`, `CONEOL` and `CONCUR` (the cursor off if D = 0, with the Z flag set to match). They may change A, B, X and CC, and must keep Y, U and DP.
 
 **Machine-code contract.** Entered by a jump, with the dispatcher's return address on S, so the code ends in RTS (39h, written by the loader). U points at the top data cell, which becomes TOS on return. Cells on the data stack are big-endian (6809 order); cells in memory stay little-endian, as the spec says. The code may change A, B, X, CC and U (consistently). It must keep Y (the reading position) and DP, and leave S balanced.
 
@@ -1097,6 +1152,7 @@ Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`,
 | Unused, all zero (undefined words point here) | 0000h | 0 | 0 |
 | Letter page: A–Z at +00h, a–z at +40h | 0100h | 256 | 256 |
 | Held key | 017Ah | 378 | 378 |
+| Random seed | 0176h | 374 | 374 |
 | Break-off cell | 017Bh | 379 | 379 |
 | Heap pointer cell | 017Ch | 380 | 380 |
 | -n? line buffer (127 characters and CR) | 0180h | 384 | 384 |
@@ -1105,7 +1161,9 @@ Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`,
 
 The stacks are outside the 64 KB. The data stack is the program's own Windows stack, one 32-bit slot per cell: 127 cells in a checked build, as much as Windows gives (1 MB) in an unchecked one. The return stack holds 112 entries in a checked build. Memory starts as zeros in every build.
 
-**Console.** Output goes to standard output, and a checked build's report to standard error. Keys come from the console unechoed, Ctrl-C among them; when input is redirected, bytes are read from it instead, by `?`, `-n?` and the editor only. `-n?` is the plain line read of the generic builds. At startup the output's console mode is set to 7 (processed output, wrap at the end of a line, and virtual terminal processing), so the console subset and the rest of ANSI work in the Windows 10 and later console as on a terminal. On older Windows, or when the output is redirected, the call fails and the bytes go out unchanged. The mode is left on at the end, which does no harm.
+**Console.** Output goes to standard output, and a checked build's report to standard error. Keys come from the console unechoed, Ctrl-C among them; when input is redirected, bytes are read from it instead, by `?`, `-n?` and the editor only. `-n?` is the plain line read of the generic builds. The four console codes send ANSI sequences, as the other interpreters do with `ANSI` = 1 (there is no such switch here). At startup the output's console mode is set to 7 (processed output, wrap at the end of a line, and virtual terminal processing), so the Windows 10 and later console obeys them as a terminal does. On older Windows, or when the output is redirected, the call fails and the bytes go out unchanged. The mode is left on at the end, which does no harm.
+
+**Random numbers.** The program's memory is all zeros at the start, so the seed starts as the system's tick count (milliseconds since Windows started). A wait that ends with no key adds the milliseconds waited to the seed; a key that `?` or `-n?` waited for adds the tick count.
 
 **The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
 

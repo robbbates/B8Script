@@ -12,7 +12,7 @@ for hexf in sorted(glob.glob(d + '/*.hex')):
     if only and not any(base.endswith(o) for o in only):
         continue
     cpm = '-cpm' in base
-    checked = base.endswith('-chk')
+    checked = '-chk' in base
     def runner(p, i, timed=None, base=base, cpm=cpm):
         r = Run(base + '.hex', base + '.lst', p, i, cpu='8080', mode='cpm' if cpm else 'generic', timed=timed or ())
         o = r.run()

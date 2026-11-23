@@ -1,13 +1,18 @@
-"""Reference B8Script interpreter, written from docs/b8script.md (2026-11-21).
+"""Reference B8Script interpreter, written from docs/b8script.md (2026-11-23).
 
 Used only to produce expected output for the test suite. It models memory, the
-letter cells (packed layout: A at LET, a at LET+64), the heap pointer (a cell
-of the interpreter's own, in the letter page), the line buffer, and console
-input as a byte queue.
+letter cells (packed layout: A at LET, a at LET+64), the heap pointer and the
+random seed (cells of the interpreter's own, in the letter page), the line
+buffer, and console input as a byte queue.
+
+The console codes (`@ `^ `_ `?) print what a build with ANSI = 1 sends: the
+ANSI sequences. The seed is stirred as the builds stir it under test: a timed
+wait that runs out adds its count (one for every millisecond waited), and a
+key that is there at once adds nothing.
 
 With checked=True it behaves as a checked build: variables start at 0, words
 start undefined, and every error in the spec's table stops the program with
-the four-line report (see report() for what the stack lines show).
+the three-line report (see report() for what the stack lines show).
 """
 import sys
 
@@ -30,7 +35,8 @@ DS_MAX, RS_MAX = 250, 120      # only so that a runaway test ends: the real
 
 class Ref:
     def __init__(self, prog, inp=b'', prog_at=0x9000, let=0x8000, linebuf=0x8100,
-                 heaplim=0xE000, retbyte=0xC9, cpm=False, checked=False, filepad=None):
+                 heaplim=0xE000, retbyte=0xC9, cpm=False, checked=False, filepad=None,
+                 seed=None):
         self.m = bytearray(65536)
         if cpm if filepad is None else filepad:
             # the program is a CP/M file: its last record is padded with ^Z,
@@ -49,6 +55,7 @@ class Ref:
         self.cpm = cpm
         self.checked = checked
         self.heapcell = let + 0x7C
+        self.seedcell = let + 0x76 if seed is None else seed   # the random seed: `.
         self.progend = prog_at + len(prog) + 1      # the first byte after the NUL
         self.w(self.heapcell, self.progend)
         self.undef = set(range(0x41, 0x5B)) if checked else set()
@@ -191,11 +198,7 @@ class Ref:
         flag or pushed its address; and a break comes when it comes."""
         o = self.out
         line, col = self.linecol(place)
-        o += b'\r\nErr %c @ %d,%d\r\n' % (ord(code), line, col)
-        for a in range(place, place + 16):
-            if self.m[a & 0xFFFF] in (0, 10, 13) or (self.cpm and self.m[a & 0xFFFF] == 26):
-                break
-            o.append(self.m[a & 0xFFFF])
+        o += b'\r\nErr %c @ %d,%d' % (ord(code), line, col)
         o += b'\r\nStk %d:' % len(self.ds)
         if len(self.ds) > 8:
             o += b' ...'
@@ -388,27 +391,78 @@ class Ref:
                 if n == 0:
                     P(self.key())
                 else:
-                    P(self.inp.pop(0) if self.inp else 0)
+                    k = self.inp.pop(0) if self.inp else 0
+                    if k == 0:      # the wait ran out: a millisecond stirs the seed by one
+                        self.w(self.seedcell, self.r(self.seedcell) + n)
+                    P(k)
             else:
                 P(self.readline(-n))
         elif C == '`':
-            nx = chr(self.m[self.ip])
-            if nx in '0123456789ABCDEFabcdef':
-                a = p()
-                while True:
-                    h = chr(self.m[self.ip])
-                    if h not in '0123456789ABCDEFabcdef':
-                        break
-                    self.ip += 1
-                    l = chr(self.m[self.ip])
-                    if l not in '0123456789ABCDEFabcdef':
-                        break
-                    self.ip += 1
-                    self.m[a] = int(h + l, 16); a += 1
-                self.m[a] = self.retbyte
-                P(a)
-            else:
-                raise RuntimeError('machine code execute: not modelled')
+            self.grave()
+
+    def grave(self):
+        """The grave is a prefix: with the character after it, it is one
+        command. A character with no meaning there is unsafe: a checked build
+        stops with W at that character, and this model of an unchecked one
+        does nothing. The place of any error in a grave command is the
+        character after the grave."""
+        P, p = self.push, self.pop
+        HEX = '0123456789ABCDEFabcdef'
+        c = self.m[self.ip]
+        C = chr(c)
+        if C not in "$!+-@^_?,.'<>":
+            if self.checked:
+                raise Err('W', self.ip)
+            if c:
+                self.ip += 1
+            return
+        self.ip += 1
+        if C == '$':                                # the hex loader
+            a = p()
+            while True:
+                h = chr(self.m[self.ip])
+                if h not in HEX:
+                    break
+                self.ip += 1
+                l = chr(self.m[self.ip])
+                if l not in HEX:
+                    break
+                self.ip += 1
+                self.m[a] = int(h + l, 16); a += 1
+            self.m[a] = self.retbyte
+            P(a)
+        elif C == '!':
+            raise RuntimeError('machine code execute: not modelled')
+        elif C in '+-':                             # ( addr -- n )
+            if self.ds and not self.store_ok(self.ds[-1], 2):
+                raise Err('O', self.ip - 1)
+            a = p()
+            self.w(a, self.r(a) + (1 if C == '+' else -1))
+            P(self.r(a))
+        elif C == '@':                              # ( row col -- ), from 0
+            col = p(); row = p()
+            self.out += b'\x1b[%d;%dH' % ((row + 1) & 0xFFFF, (col + 1) & 0xFFFF)
+        elif C == '^':
+            self.out += b'\x1b[H\x1b[J'
+        elif C == '_':
+            self.out += b'\x1b[K'
+        elif C == '?':                              # ( flag -- )
+            self.out += b'\x1b[?25h' if p() else b'\x1b[?25l'
+        elif C == ',':                              # ( n -- r ), 0 to n-1
+            if self.checked and self.ds and (self.ds[-1] - 1) & 0x8000:
+                raise Err('Z', self.ip - 1)
+            n = p()
+            x = (self.r(self.seedcell) * 261 + 1) & 0xFFFF
+            self.w(self.seedcell, x)
+            x ^= x >> 8
+            P(x % n if n else 0)                    # 0: undefined in the interpreters
+        elif C == '.':
+            P(self.seedcell)
+        elif C == "'":
+            self.out += b'\r\n'
+        elif C in '<>':                             # min, max
+            b = self.s(p()); a = self.s(p())
+            P(min(a, b) if C == '<' else max(a, b))
 
 
 def run(prog, inp=b'', **kw):

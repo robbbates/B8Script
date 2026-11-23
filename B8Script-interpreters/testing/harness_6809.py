@@ -32,6 +32,8 @@ GAP = 1000           # instructions: two looks at the keyboard closer than this
 IDLE = 20000         # empty looks in a row before a run counts as waiting
 
 
+from harness_z80 import CONHOOKS, CONCLS, CONEOL, conat, concur
+
 class Cfg(BaseConfig):
     RAM_START = 0x8000
     RAM_END = 0xEFFF
@@ -102,6 +104,10 @@ class Run:
         pc = cpu.program_counter
         a = cpu.accu_a
         traps = {sy['KEY']: 'key', sy['CONOUT']: 'out', sy['EXIT']: 'exit'}
+        # a build with ANSI = 0 calls four routines of the machine's for the
+        # console codes: each is answered with what a build with ANSI = 1 prints
+        traps.update((sy[k], k) for k in CONHOOKS if k in sy)
+        d, x = cpu.accu_d, cpu.index_x
         n = 0
         idle = 0
         while n < self.maxops:
@@ -113,6 +119,14 @@ class Run:
                 continue
             if t == 'out':
                 self.out.append(a.value); idle = 0; self.rts()
+            elif t == 'CONAT':              # the row in X, the column in D
+                self.out += conat(x.value, d.value); idle = 0; self.rts()
+            elif t == 'CONCLS':
+                self.out += CONCLS; idle = 0; self.rts()
+            elif t == 'CONEOL':
+                self.out += CONEOL; idle = 0; self.rts()
+            elif t == 'CONCUR':             # off if D = 0
+                self.out += concur(d.value); idle = 0; self.rts()
             elif t == 'key':
                 a.set(self.key())
                 if a.value or self.inp or self.timed or self.pressed:

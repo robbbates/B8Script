@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  B8Script interpreter for 32-bit Windows (x86, console subsystem)
-;  Spec: docs/b8script.md (2026-11-21).
+;  Spec: docs/b8script.md (2026-11-23).
 ;
 ;  Assembler: NASM 2.16, flat binary output: the PE header is laid out by
 ;  hand at the top of this file, so the output IS the .EXE:
@@ -14,7 +14,7 @@
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
 ;             1 = starts with every variable at 0 and every word undefined,
 ;                 and stops on every error in the spec's table (and Ctrl-C)
-;                 with the four-line report, on the standard error handle.
+;                 with the three-line report, on the standard error handle.
 ;    EDITOR   0 = a runner: B8SWIN PROG.B8S loads the file, runs it, exits
 ;             1 = the line editor of the spec's suggested standard (the same
 ;                 editor as the Z80's, key for key); the file named on the
@@ -91,6 +91,10 @@ HELD    equ     LET+7Ah         ; a key read by the break check, held for the
                                 ;   next '?' (0: none)
 BRKOFF  equ     LET+7Bh         ; the break-off cell: a non-zero byte here
                                 ;   makes Ctrl-C a key like any other
+SEED    equ     LET+76h         ; the random seed (a cell): the one whose
+                                ;   address `. gives. It starts as the tick
+                                ;   count, and a key that '?' waits for adds
+                                ;   the tick count again
 HEAP    equ     LET+7Ch         ; the heap pointer (a cell)
 LINEBUF equ     LET+80h         ; the -n? line buffer
 PROG    equ     0200h           ; the program text
@@ -216,6 +220,10 @@ start:  mov     ebp,next
         call    [V(iat_CreateWaitableTimerExW)]
         mov     [V(v_htm)],eax
         ; The command line: the program's own name, then the file's.
+        ; The random seed starts as the time: this memory is always zero at
+        ; the start, so without it every run would draw the same numbers.
+        call    [V(iat_GetTickCount)]
+        mov     [ARENA+SEED],ax
         call    [V(iat_GetCommandLineA)]
         xchg    eax,esi
         call    token
@@ -544,45 +552,51 @@ h_key:  test    bh,bh
         call    getk
         jmp     kt3
 
-; ---- machine code: the grave -----------------------------------------------
-; '`' plus a hex digit loads bytes: ( addr -- addr' ). Pairs of hex digits
-; are stored from addr until a non-hex character; then a RET (C3h) is
-; written and its address is left. An odd last digit is consumed and its
-; byte is overwritten by the RET. (Never range-checked: the spec says so.)
-; '`' plus anything else calls the machine code at TOS: ( addr -- ).
+; ---- the grave --------------------------------------------------------------
+; The grave is a prefix: with the character after it, it is one command.
+; gtab holds each character with its handler's distance from that entry
+; of the table (so the search's own pointer is the base). A
+; handler starts with AL = the character and EBX = TOS, and ends with JMP
+; EBP. A character that is not in the table is unsafe: the unchecked build
+; searches on through memory, the checked build stops with W.
 ;
-; The machine-code contract: the code is entered by CALL, with the return
-; address at [ESP] and the data stack above it: [ESP+4] is the top cell
-; (the one under the address, which was consumed), [ESP+8] the next, one
-; dword per cell, the cell in the low word. EBX holds the code's own
-; address (ARENA + addr), and its high word is the arena's (0041h): a
-; B8Script address a is the byte at ARENA + a. The code may push and pop
-; dwords, and may change EAX, EBX, ECX, EDX and the flags; it must keep
-; ESI, EDI and EBP, leave the direction flag clear, and return with RET
-; (C3h, which the loader writes). On return the dword on top of the stack
-; becomes TOS. Only the low word of each cell counts: the interpreter puts
-; the arena's high word back into every cell on the stack.
-grave1: call    hexc
-        jnc     .ex
-.hx1:   mov     [ebx],al                ; the high digit goes in first ...
-        call    hexc
-        jnc     .hx2                    ; odd digit: consumed, and the RET
-        shl     byte [ebx],4            ;   overwrites it
-        or      [ebx],al                ; ... and the low one joins it
-        inc     ebx
-        call    hexc
-        jc      .hx1
-.hx2:   mov     byte [ebx],0C3h
-        jmp     ebp
-.ex:    call    ebx
-        mov     eax,esp                 ; (the stack holds one cell at least,
-.ex1:   mov     word [eax+2],ARENA>>16  ;   the one that stands for TOS)
-        add     eax,4
-        cmp     eax,[V(v_dstop)]
-        jb      .ex1
-        pop     ebx
-        jmp     ebp
+;   `!  ( addr -- )        call the machine code at addr (the contract is below)
+;   `$  ( addr -- addr' )  the hex loader: pairs of hex digits are stored
+;                          from addr until a non-hex character; then a RET
+;                          (C3h) is written and its address is left. An odd
+;                          last digit is consumed and its byte is
+;                          overwritten by the RET. (Never range-checked.)
+;   `'  ( -- )             new line: CR LF
+;   `+  ( addr -- n )      add 1 to the cell at addr and leave its new value
+;   `,  ( n -- r )         a random number from 0 to n-1 (n is 1 to 32767)
+;   `-  ( addr -- n )      subtract 1 from the cell at addr, the same way
+;   `.  ( -- addr )        the address of the random seed
+;   `<  ( a b -- n )       the smaller of the two (signed)
+;   `>  ( a b -- n )       the larger
+;   `?  ( flag -- )        the cursor off (0) or on
+;   `@  ( row col -- )     the cursor to that row and column, both from 0
+;   `^  ( -- )             clear the screen and home the cursor
+;   `_  ( -- )             clear from the cursor to the end of the line
+;
+; The four console codes send ANSI escape sequences: the startup has put
+; the console in its virtual terminal mode, so it obeys them as a terminal
+; does.
+grave1: lodsb
+        mov     edx,gtab-2
+.g1:    inc     edx
+        inc     edx
+%if CHECKED
+        cmp     byte [edx],0            ; the end of the table: W. The place
+        je      e_brack                 ;   is the character
+%endif
+        cmp     al,[edx]
+        jne     .g1
+        movzx   ecx,byte [edx+1]        ; the distance from this entry
+        add     edx,ecx
+        jmp     edx
 
+; (The table and the handlers are further down, after the routines: here
+; they would push the bodies of '[' and '_' out of reach of their stubs.)
 
 ; '_' ( n -- addr ): the heap pointer moves by n, a signed count; TOS is
 ; the old pointer. The checked build stops with H if the new top is not
@@ -727,7 +741,6 @@ e_brack:mov     al,'W'                  ; bad character after [
 ; place, EBX = TOS, and both stacks as the report is to show them:
 ;
 ;   Err X @ line,col
-;   up to 16 characters of the text from the place
 ;   Stk n: the top 8 cells at most, bottom to top
 ;   Rtn n
 ;
@@ -772,20 +785,7 @@ error:  push    ebx                     ; now the whole data stack is in memory
         movzx   eax,ax
         inc     eax
         call    pdec                    ; the column
-        call    pmsg
-        db      '/M/J',22h
-        push    16                      ; the text, as it is: 16 characters,
-        pop     ecx                     ;   or fewer if the line or the
-.er4:   lodsb                           ;   program ends first
-        test    al,al
-        jz      .er5
-        cmp     al,13
-        je      .er5
-        cmp     al,10
-        je      .er5
-        call    putc
-        loop    .er4
-.er5:   call    pstk
+        call    pstk
         call    pmsg
         db      '/M/J',22h
  %if EDITOR
@@ -925,6 +925,154 @@ skip:
 %else
         ret
 %endif
+
+; ---- the grave's table and handlers (see grave1) ------------------------------
+%macro  GT 2
+%%e:    db      %1, (%2-%%e) & 0FFh             ; (the reach is checked after the
+%endmacro                                       ;   last handler, g_at)
+gtab:   GT '!', g_exec
+        GT '$', g_hex
+        GT 27h, g_nl
+        GT '+', g_inc
+        GT ',', g_rnd
+        GT '-', g_inc
+        GT '.', g_seed
+        GT '<', g_min
+        GT '>', g_max
+        GT '?', g_cur
+        GT '@', g_at
+        GT '^', g_cls
+        GT '_', g_eol
+%if CHECKED
+        db      0
+%endif
+
+; `$
+g_hex:  call    hexc
+        jnc     .hx2
+        mov     [ebx],al                ; the high digit goes in first ...
+        call    hexc
+        jnc     .hx2                    ; odd digit: consumed, and the RET
+        shl     byte [ebx],4            ;   overwrites it
+        or      [ebx],al                ; ... and the low one joins it
+        inc     ebx
+        jmp     g_hex
+.hx2:   mov     byte [ebx],0C3h
+        jmp     ebp
+
+; `! The machine-code contract: the code is entered by CALL, with the return
+; address at [ESP] and the data stack above it: [ESP+4] is the top cell
+; (the one under the address, which was consumed), [ESP+8] the next, one
+; dword per cell, the cell in the low word. EBX holds the code's own
+; address (ARENA + addr), and its high word is the arena's (0041h): a
+; B8Script address a is the byte at ARENA + a. The code may push and pop
+; dwords, and may change EAX, EBX, ECX, EDX and the flags; it must keep
+; ESI, EDI and EBP, leave the direction flag clear, and return with RET
+; (C3h, which the loader writes). On return the dword on top of the stack
+; becomes TOS. Only the low word of each cell counts: the interpreter puts
+; the arena's high word back into every cell on the stack.
+g_exec: call    ebx
+        mov     eax,esp                 ; (the stack holds one cell at least,
+.ex1:   mov     word [eax+2],ARENA>>16  ;   the one that stands for TOS)
+        add     eax,4
+        cmp     eax,[V(v_dstop)]
+        jb      .ex1
+        pop     ebx
+        jmp     ebp
+
+g_nl:   call    pmsg                    ; (pmsg prints the text after the call,
+        db      '/M/J',22h              ;   decoding '/' as '$' does)
+        jmp     ebp
+
+; `+ and `-: the character less ',' is -1 or 1, which is taken off the cell.
+g_inc:
+%if CHECKED
+        call    chkst2                  ; the address is tested first, as '!' does
+        mov     al,[esi-1]              ; (the test used EAX: the character again)
+%endif
+        sub     al,','
+        cbw
+        sub     [ebx],ax
+        mov     bx,[ebx]                ; the new value is TOS
+        jmp     ebp
+
+g_seed: push    ebx
+        mov     ebx,ARENA+SEED
+        jmp     ebp
+
+; `, The seed goes one step on: seed * 261 + 1, which takes every 16-bit
+; value in turn. The high bits of such a seed are the good ones and the low
+; ones repeat soon, so the high byte is folded into the low (XOR) before the
+; remainder of dividing by n is taken.
+; n must be 1 to 32767: the checked build stops with Z on anything less
+; than 1; the unchecked one leaves a 0 alone, which DIV would fault on.
+g_rnd:
+%if CHECKED
+        lea     eax,[ebx-1]
+        test    ah,80h                  ; n - 1 negative: n is 0 or less
+        jnz     e_zero
+%else
+        test    bx,bx
+        jz      .z
+%endif
+        imul    ax,[ARENA+SEED],261
+        inc     eax
+        mov     [ARENA+SEED],ax
+        xor     al,ah
+        xor     edx,edx
+        div     bx
+        mov     bx,dx                   ; the remainder
+.z:     jmp     ebp
+
+; `< and `>: b is in BX; a is popped, and takes b's place if it is the one
+; wanted.
+g_max:  pop     edx
+        cmp     bx,dx
+        jge     gm9
+        jmp     short gm8
+g_min:  pop     edx
+        cmp     bx,dx
+        jle     gm9
+gm8:    mov     bx,dx
+gm9:    jmp     ebp
+
+; `^: ESC [ H homes the cursor, and ESC [ J clears from there to the end of
+; the screen. `_: ESC [ K clears to the end of the line. (The sequences are
+; texts for pmsg, where /[ is ESC.)
+g_cls:  call    pmsg
+        db      '/[[H/[[J',22h
+        jmp     ebp
+g_eol:  call    pmsg
+        db      '/[[K',22h
+        jmp     ebp
+
+; `? ( flag -- ): ESC [ ? 2 5 l hides the cursor, ESC [ ? 2 5 h shows it.
+g_cur:  call    pmsg
+        db      '/[[?25',22h
+        test    bx,bx
+        mov     al,'l'
+        jz      gdrop
+        mov     al,'h'
+gdrop:  call    putc
+        jmp     h_drop
+
+; `@ ( row col -- ): ESC [ row+1 ; col+1 H. (ANSI counts from 1.)
+g_at:   call    pmsg
+        db      '/[[',22h
+        pop     eax                     ; the row
+        call    .n
+        mov     al,';'
+        call    putc
+        xchg    eax,ebx                 ; the column
+        call    .n
+        mov     al,'H'
+        jmp     gdrop
+.n:     inc     eax                     ; print AX + 1, unsigned
+        movzx   eax,ax
+        jmp     pdec
+        times   -((g_at-gtab) > 255) db 0       ; an error if the last handler is
+                                                ;   out of reach of the table's
+                                                ;   one-byte distances
 
 ; psgn: print the low word of EAX as a signed number. pdec: print EAX
 ; unsigned, by recursion on EAX / 10 (the stack holds the digits). Both use
@@ -1119,7 +1267,15 @@ getk:   xor     eax,eax
         jnz     .gk1
         dec     eax                     ; (-1: INFINITE)
 .gk1:   call    waitk
-        jnz     pk1                     ; Ctrl-C? If not, that is the key
+        jnz     .gk2
+        add     [ARENA+SEED],cx         ; no key came: the milliseconds waited
+        xor     eax,eax                 ;   stir the random seed (and the zero
+        ret                             ;   flag is set again)
+.gk2:   pushad                          ; a key came: when it came stirs the
+        call    [V(iat_GetTickCount)]   ;   seed, since that is the one thing
+        add     [ARENA+SEED],ax         ;   here that is not the same every
+        popad                           ;   time
+        jmp     short pk1               ; Ctrl-C? If not, that is the key
 gk9:    ret
 ; pollk: the break check (see rpoll).
 pollk:  xor     eax,eax
@@ -1180,7 +1336,7 @@ endprog:
 %endif
 
 
-%if CHECKED+EDITOR
+%if CHECKED
 ; pstk: the two stack lines:  Stk n: the top 8 cells at most, bottom to top
 ;                             Rtn n
 ; TOS must be in memory with the rest (pushed), and pstk is called: so the
@@ -1245,8 +1401,6 @@ pstk:   call    pmsg
 ;              one from the command line, or the last one typed)
 ;    name ^W   write the program to that file (no name: the current one)
 ;    ^N ^N     new: no program (the key twice in a row)
-;    ^V        view: the build, both stacks, and the program's size, lines
-;              and free memory
 ;    ^X        leave
 ;
 ;  In the line: ^B and ^F, or the left and right arrow keys, move the cursor;
@@ -1411,10 +1565,9 @@ ekey:   or      eax,-1
 ; The command keys, and where each goes (after fin). REPNE SCASB leaves ECX
 ; = the number of keys after the one found, so the table is backwards. (The
 ; addresses are kept as RVAs, which fit in a word.)
-ckeys:  db      13, 7, 12, 5, 18, 23, 14, 22, 24
+ckeys:  db      13, 7, 12, 5, 18, 23, 14, 24
 NCMD    equ     $-ckeys
 ctabr:  dw      exit-IB                 ; ^X
-        dw      cview-IB                   ; ^V
         dw      cnew-IB                 ; ^N
         dw      cwrite-IB                  ; ^W
         dw      cread-IB                   ; ^R
@@ -1556,37 +1709,6 @@ clist:  call    rdnum                   ; DX = n, or 0 if there was none:
         inc     edx
         call    prl                     ;   and the line
         jmp     .li1
-
-; ^V: view.
-cview:  call    pmsg
- %if CHECKED
-        db      'B8SWINEC 2026-11-21',22h
- %else
-        db      'B8SWINE 2026-11-21',22h
- %endif
-        call    pstk                    ; both stacks
-        mov     edi,ARENA+PROG
-        or      ecx,-1
-.cv1:   inc     ecx                     ; count the lines, and find the end
-        call    nxl
-        jnz     .cv1
-        push    ecx
-        call    pmsg
-        db      '/M/JProg ',22h
-        lea     eax,[edi-(ARENA+PROG)]
-        call    pdec                    ; the program's size
-        call    pmsg
-        db      '/M/JLines ',22h
-        pop     eax
-        call    pdec
-        call    pmsg
-        db      '/M/JFree ',22h
-        mov     eax,ARENA+LIMIT-1
-        sub     eax,edi
-        call    pdec                    ; the room left for text and heap
-        call    pmsg
-        db      '/M/J',22h
-        jmp     gedit
 
 ; delln: take line EAX out: copy everything after it down over it. Keeps ESI.
 delln:  push    esi
@@ -1741,6 +1863,7 @@ ptab:   PT h_store      ; !
         IMP     CreateWaitableTimerExW
         IMP     SetWaitableTimer
         IMP     ReadConsoleInputA
+        IMP     GetTickCount
         IMP     ExitProcess
 %endmacro
         align   4, db 0

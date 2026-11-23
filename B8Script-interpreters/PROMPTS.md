@@ -13,7 +13,9 @@ minimum-size B8Script interpreters:
 
 - z80/, 8080/, 6502/, 6809/ each hold a commented source, b8s-<cpu>.asm,
   with switches at the top: CPM EQU 0/1 (Z80 and 8080), CHECKED EQU 0/1
-  (all), EDITOR EQU 0/1 (Z80: a built-in line editor). 6502/ holds a
+  (all), EDITOR EQU 0/1 (Z80: a built-in line editor), ANSI EQU 1/0 (all
+  but Windows: 0 makes the four console codes call the machine's own
+  routines instead of sending ANSI sequences). 6502/ holds a
   second, smaller interpreter, b8s-6502-zp.asm, with its data stack in
   zero page.
 - The language is in ../docs/b8script.md, which the builds follow; its
@@ -44,7 +46,25 @@ Read README.md and testing/README.md first. Things that are easy to break:
   every change.
 - asm80 accepts some out-of-range 6502 branches. Run testing/chkbr6502.py.
 - On the 6502 every punctuation handler starts with the carry clear, and
-  several handlers count on it (the comments say where).
+  several handlers count on it (the comments say where). The grave's
+  handlers start with it clear too, and with Y = their place in GCH:
+  `+ `- and `< `> tell themselves apart by that place, so the order of
+  the table matters (the comment above it says how).
+- The grave's handlers. Z80: a ladder of SUB and JR, all forward, so every
+  handler must stay in reach of its test; the first two tests sit in the
+  first page as filler the layout needs. 8080 and 6809: a table of
+  characters (GTAB) just before the handlers, each with the one-byte
+  distance from that entry to its handler, so every handler must start
+  within 255 bytes after its entry. Both 6502s: low bytes only (GLO), so
+  the handlers must lie in memory in the table's order and cross at most
+  one page boundary. The 6809's -n? line reader is a macro (LINERD): the
+  unchecked build needs it in its first range as filler, the checked one
+  at the end of the image. Windows: one-byte distances from each entry of
+  gtab, and the assembler stops if the last handler is out of reach. chktab.py, chktab09.py and
+  chktab6502.py check the others.
+- ref.py and the harnesses agree on how the random seed is stirred (a key
+  that is there at once: nothing; a timed wait that runs out: its count).
+  Change one and the games stop matching.
 - asm80 quirks are listed in README.md (no nested IF, no ELSE, division
   only rounds down in an EQU, and more).
 
@@ -73,32 +93,57 @@ bytes, one CPU at a time. Ideas not yet tried:
   but this interpreter's handlers lean on each other more (falling into
   each other, sharing `fin`), and the jumps needed to split them into
   three groups leave only about 11 bytes of the 32.
-- 6502, b8s-6502-zp.asm: 1095 bytes. Its page layout has 68, 66 and 41
-  bytes to spare in its three pages (46, 69 and 25 in the checked build,
+- 6502, b8s-6502-zp.asm: 1355 bytes. Its page layout has 68, 62 and 49
+  bytes to spare in its three pages (46, 65 and 25 in the checked build,
   whose inner loop and skipper live after the third page).
 - 6809, checked: it keeps a whole-address table because its code is bigger
   than the two ranges of the one-byte scheme (its handlers need about 550
   bytes). A three-range split was worked out on paper: it would save 13
   to 20 bytes, but needs a handler order the unchecked build can't share.
 - Z80/8080: the first 256 bytes are packed by hand around the RST vectors.
-- Z80 with EDITOR = 1: 1488 bytes, 723 of them the editor (four builds:
-  with or without CPM and CHECKED). It was written for the spec's
-  suggested standard and has had one light size pass. What is left needs
-  a decision or a redesign: the key dispatch (seven compares and a
-  27-byte table: a chain of SUB and JR would be about 10 bytes smaller if
-  every unknown control key may drop the line), ^V (about 170 bytes in an
-  unchecked build, since it brings in the stack listing), the paste's
-  care with LF-only text (about 14 bytes), the CP/M file code (about
-  135 bytes).
-- Every checked build: the report (about 200 bytes on the Z80, 300 on the
-  6502) was written once and not squeezed. The line and column count is
-  the biggest part of it.
+- Z80 with EDITOR = 1: 1480 bytes, 525 of them the editor (four builds:
+  with or without CPM and CHECKED). Every Z80 build is meant to fit 2048
+  bytes, and the CP/M checked editor is 2046: any growth there has to be
+  paid for. ^V (the view of stacks and sizes) was dropped for that on
+  2026-11-23. What is left needs a decision or a redesign: the key
+  dispatch (seven compares and a 24-byte table: a chain of SUB and JR
+  would be about 10 bytes smaller if every unknown control key may drop
+  the line), the cursor inside the line (about 105 bytes: ^B ^F, the
+  arrow keys, insert and delete mid-line; the arrow keys alone are 31),
+  ^E (about 60), names typed for ^R and ^W (46), the paste's care with
+  LF-only text (about 14 bytes), the CP/M file code (about 190 bytes).
+  Two more bytes without a change in behaviour: scan the line buffer for
+  line 0 the way the program is scanned (1), and one routine for "find
+  the program's NUL" in the CP/M editor (1).
+- Every checked build: the report lost its line of program text on
+  2026-11-23, and the Z80's and 8080's were squeezed a little (the '$'
+  error joins the chain of hidden entries; the Z80 takes the return
+  stack's depth from one byte). The line and column count is the biggest
+  part left (about 50 bytes on the Z80); a CPIR version, worked out on
+  paper, is a byte bigger. Untried: the zero-page 6502 copies the place
+  to $02-$03 for its line count, and may be able to use it where it lies
+  (about 8 bytes).
 - Every build: the break-off cell and its 250 ms wait for a second Ctrl-C
   is about 30 bytes.
 - Windows: a file only shrinks in steps of 512 bytes. The four builds are
-  1690, 2220, 2722 and 3152 bytes past their headers, so the next steps
-  down are 154, 172, 162 and 80 bytes away. Each has 358, 340, 350 and
-  432 bytes to spare before the next step up.
+  1970, 2488, 2750 and 3284 bytes past their headers, so the next steps
+  down are 434, 440, 190 and 212 bytes away. Each has 78, 72, 322 and 300
+  bytes to spare before the next step up.
+- The grave (2026-11-23), every CPU: the new codes have had one size pass
+  (3 bytes on the Z80, 4 on the 8080, 7 on the 6809, 25 and 23 on the
+  6502s, 32 on Windows). Tried or worked out there, and not worth it:
+  on the Z80 a table, a CPIR search or a hash of the character in place
+  of the ladder (from 1 byte more to 5 less, but every handler must then
+  start in one page and "clear the screen" can no longer fall into
+  "clear the line"); one swap in place of two in `< `> (which of the two
+  codes it is must outlive the compare); the ANSI sequences as text after
+  a call on the Z80, 6809 and 6502 (the printer costs more than the
+  sequences save; a checked build already has one, but using it there
+  means a second copy of the four handlers); on the 6502 a base address
+  plus an offset in place of the low-byte table, and the 261 multiply
+  written out; a short branch to the 6809's line reader.
+  Decided against, not for size: an 8-bit stir of the seed (3 to 5 bytes
+  a CPU, but 256 possible games after one key instead of thousands).
 
 Report a table of bytes before and after for every variant, the techniques
 that paid off, and the ones you tried that didn't.

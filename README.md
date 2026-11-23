@@ -24,7 +24,7 @@ B8Script began as B8SCRIPT.COM, a 2 KB CP/M program for the Z80 with a built-in 
 
 The language was then redesigned into the one in the spec, and the interpreters were rewritten for size. The plugin system was dropped: machine code is loaded and called with the grave (`` ` ``) instead.
 
-In November 2026 the grave became a prefix: a grave and one more character are one command. That gave the language its own codes for the cursor and the screen (so a console no longer has to understand ANSI), random numbers, a new line, minimum and maximum, and adding or subtracting 1 in place. The fifty-four games came out about a tenth shorter, and the smallest interpreters, which had been under 800 bytes, are now under 1,000.
+In November 2026 the grave became a prefix: a grave and one more character are one command. That gave the language its own codes for the cursor and the screen (so a console no longer has to understand ANSI), random numbers, a new line, minimum and maximum, and adding or subtracting 1 in place. The fifty-four games came out 4,104 bytes shorter between them (7 per cent), and the smallest interpreters, which had been under 800 bytes, are now under 1,000.
 
 > There once was a game small and sweet
 > That Mr. Bates crammed in a tweet

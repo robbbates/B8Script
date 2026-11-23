@@ -42,28 +42,30 @@ class Play(Ref):
 TESTS = []     # (game, what it shows, keys, texts that must all be printed)
 
 
-# Hunt the Wumpus. Seed 1: you in room 1, the Wumpus in 4, pits in 5 and 14,
-# bats in 6 and 16
+# Hunt the Wumpus. Seed 0 (ref.py's start; the keys stir nothing): you in room 2,
+# the Wumpus in 4, pits in 17 and 19, bats in 11 and 18. Room 2 leads to 1, 3 and 10
 TESTS += [
-    ('WUMPUS', 'shoot it from room 3', b'nm2\rm3\rs1\r4\rq',
+    ('WUMPUS', 'shoot it from room 3', b'nm3\rs1\r4\rq',
      [b'I smell a Wumpus!', b'Aha! You got the Wumpus!', b"Hee hee hee - the Wumpus'll getcha next time!!", b'Bye.']),
-    ('WUMPUS', 'a pit', b'nm5\rq', [b'I feel a draft!', b'fell in a pit!', b'Ha ha ha - you lose!']),
-    ('WUMPUS', 'walk into it, it moves off', b'nm2\rm3\rm4\rq', [b'Bumped a Wumpus!', b'You are in room 4']),
-    ('WUMPUS', 'bats, crooked arrows', b'nm8\rm7\rm6\rs3\r2\r3\r2\r',
+    ('WUMPUS', 'a pit', b'nm1\rm8\rm7\rm17\rq', [b'I feel a draft!', b'fell in a pit!', b'Ha ha ha - you lose!']),
+    ('WUMPUS', 'walk into it, it moves off', b'nm3\rm4\rq', [b'Bumped a Wumpus!', b'You are in room 4']),
+    # the bats in 11 drop you in room 3
+    ('WUMPUS', 'bats, crooked arrows', b'nm10\rm11\rs3\r2\r3\r2\r',
      [b'Bats nearby!', b'Super bat snatch!', b"Arrows aren't that crooked"]),
     ('WUMPUS', 'five misses', b'n' + b's1\r8\r' * 5 + b'q',
      [b'Missed.', b'You have no arrows left.', b'you lose!']),
     ('WUMPUS', 'not a tunnel', b'nm7\r', [b'Not possible - ']),
-    # Seed 9: you in room 3, the Wumpus in 1
-    ('WUMPUS', 'walk into it, eaten', b'\0' * 8 + b'nm2\rm1\rq', [b'Bumped a Wumpus!', b'the Wumpus got you!']),
+    # two misses wake the Wumpus, and it comes to room 3: walk in and it stays
+    ('WUMPUS', 'walk into it, eaten', b'n' + b's1\r8\r' * 2 + b'm3\rq', [b'Bumped a Wumpus!', b'the Wumpus got you!']),
 ]
 
 
-# Robots, seed 1. Waiting and teleporting clears the first wave; standing still
-# is fatal
+# Robots, seed 0 (ref.py's start; the keys stir nothing). Waiting and teleporting
+# clears the first wave (found by a search on the game itself, deep-copying the
+# interpreter to try each key); standing still is fatal
 TESTS += [
-    ('ROBOTS', 'wave 2', b'x' + b' t' * 40 + b'Qn', [b'Wave   2', b'Robots 20', b'Bye.']),
-    ('ROBOTS', 'caught', b'x' + b's' * 13 + b'n', [b'Score  20', b'AARRrrgghhhh....  Score 20, wave 1.', b'Bye.']),
+    ('ROBOTS', 'wave 2', b'x t t t t t t tt t t t t t t t Qn', [b'Wave   2', b'Robots 20', b'Bye.']),
+    ('ROBOTS', 'caught', b'x' + b's' * 16 + b'n', [b'Score  40', b'AARRrrgghhhh....  Score 40, wave 1.', b'Bye.']),
 ]
 
 

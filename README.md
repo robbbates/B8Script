@@ -17,6 +17,7 @@ A postfix stack language for 64 KB 8-bit computers, by Robb Bates. Every instruc
 | [`games/`](games/) | Fifty-four games, from Star Trek and Klondike to thirty-one that each fit in a tweet and one in 390 characters. Its README says how to run and play each one |
 | [`B8Script-interpreters/testing/`](B8Script-interpreters/testing/) | The reference interpreter, the test suite and emulator harnesses, which also run the games |
 | [`docs/b8sms.md`](docs/b8sms.md) | Thirty-one tiny games: ten that fit in a text message (B8SMS, 160 characters), the same ten in a 140-character tweet, and eleven more in 280, with how each one fits |
+| [`editors/vscode-b8script/`](editors/vscode-b8script/) | Syntax highlighting for Visual Studio Code: words, variables, numbers, strings and their escapes, comments, and the command groups each in their own color |
 | [`archive/1.0beta/`](archive/1.0beta/) | The original B8Script 1.0beta for CP/M (2025), kept for history |
 
 ## History

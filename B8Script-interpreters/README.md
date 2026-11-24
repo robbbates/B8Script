@@ -19,9 +19,9 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 | CPU | Before | `ANSI = 0` | `ANSI = 1` | Checked, before | Checked, `ANSI = 0` | Checked, `ANSI = 1` |
 |---|---|---|---|---|---|---|
-| Z80 | 765 | 827 | 876 | 1,163 | 1,230 | 1,279 |
-| Z80 with the line editor | 1,488 | 1,358 | 1,407 | 1,796 | 1,765 | 1,814 |
-| 8080 | 854 | 925 | 980 | 1,299 | 1,377 | 1,432 |
+| Z80 | 765 | 825 | 876 | 1,163 | 1,228 | 1,279 |
+| Z80 with the line editor | 1,488 | 1,361 | 1,411 | 1,796 | 1,768 | 1,818 |
+| 8080 | 854 | 923 | 977 | 1,299 | 1,376 | 1,430 |
 | 6502, stack in pages 2-3 | 1,175 | 1,208 | 1,265 | 1,706 | 1,748 | 1,791 |
 | 6502, stack in zero page | 1,095 | 1,155 | 1,217 | 1,628 | 1,698 | 1,746 |
 | 6809 | 825 | 873 | 934 | 1,220 | 1,284 | 1,333 |
@@ -31,8 +31,8 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | CPU | Before | Now | Checked, before | Checked, now |
 |---|---|---|---|---|
 | Z80 | 831 | 957 | 1,243 | 1,374 |
-| Z80 with the line editor | 1,663 | 1,593 | 1,987 | 2,012 |
-| 8080 | 904 | 1,049 | 1,364 | 1,516 |
+| Z80 with the line editor | 1,663 | 1,594 | 1,987 | 2,013 |
+| 8080 | 904 | 1,046 | 1,364 | 1,514 |
 
 **Windows .EXE files** (always ANSI):
 
@@ -41,13 +41,13 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | The file, before | 2,560 | 3,072 | 3,584 | 4,096 |
 | The file, now | 2,560 | 3,072 | 3,072 | 3,584 |
 | Code and table, before | 1,286 | 1,816 | 2,298 | 2,728 |
-| Code and table, now | 1,319 | 1,845 | 2,009 | 2,539 |
+| Code and table, now | 1,319 | 1,853 | 2,029 | 2,575 |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
-- A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 357, 343, 155 and 137 bytes to spare before their next step up.
+- A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 357, 335, 135 and 101 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
-- Where the bytes went with the escapes: on the Z80 the escapes cost an unchecked generic build 62 bytes with `ANSI = 0` and 111 with `ANSI = 1`, and the checked one 67 and 116. The CP/M builds also read `-n?` themselves now (15 bytes on the Z80, 19 on the 8080; see The language). The editor builds lost ^V, which saved about 170 bytes in the unchecked ones (the stack listing was there only for it) and 100 in the checked ones.
+- Where the bytes went with the escapes: on the Z80 the escapes cost an unchecked generic build 60 bytes with `ANSI = 0` and 111 with `ANSI = 1`, and the checked one 65 and 116. The CP/M builds also read `-n?` themselves now (15 bytes on the Z80, 19 on the 8080; see The language). The editor builds lost ^V, which saved about 170 bytes in the unchecked ones (the stack listing was there only for it) and 100 in the checked ones.
 - Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 60 to 80 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 280 to 470 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
 
 ## Files
@@ -195,7 +195,7 @@ A command key ends the line too, and takes what was typed before it as its argum
 - A program that is stopped, by an error or by Ctrl-C, prints its report and comes back to the editor, with both stacks empty.
 - A line typed at the editor is line 0 in the report; the column is the place in the line.
 
-The editor adds 531 bytes to the unchecked generic build and 636 to the CP/M one (535 and 638 to the checked ones). It has no ^V (view): taking it out saved about 170 bytes in an unchecked build, which needed the stack listing only for it, and kept the CP/M checked editor inside 2,048 bytes. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
+The editor adds 536 bytes to the unchecked generic build and 637 to the CP/M one (540 and 639 to the checked ones). It has no ^V (view): taking it out saved about 170 bytes in an unchecked build, which needed the stack listing only for it, and kept the CP/M checked editor inside 2,048 bytes. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
 
 ## The Windows builds (`win32/`)
 

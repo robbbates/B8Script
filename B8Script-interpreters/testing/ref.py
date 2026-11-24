@@ -1,4 +1,4 @@
-"""Reference B8Script interpreter, written from docs/b8script.md (2026-11-21).
+"""Reference B8Script interpreter, written from docs/b8script.md (2026-11-24).
 
 Used only to produce expected output for the test suite. It models memory, the
 letter cells (packed layout: A at LET, a at LET+64), the heap pointer (a cell
@@ -203,6 +203,27 @@ class Ref:
             o += b' %d' % self.s(v)
         o += b'\r\nRtn %d\r\n' % len(self.rs)
 
+    # What the console escapes send. A build with ANSI = 0 calls the
+    # machine's own routines instead; the harnesses model those as sending
+    # these same bytes.
+    CLS, EOL, SHOW, HIDE = b'\x1b[H\x1b[J', b'\x1b[K', b'\x1b[?25h', b'\x1b[?25l'
+
+    def escape(self, c):
+        """$ met / and a character from 60h to 7Eh. a-z print that variable
+        as # does, read now; the rest are the console escapes. /~ takes the
+        row and the column from under the string's address: a stack too
+        shallow for them is a data-stack underflow (s)."""
+        if 0x61 <= c <= 0x7A:
+            self.pnum(self.r(self.cell(c)))
+        elif c == 0x7E:
+            if self.checked and len(self.ds) < 3:
+                self.ds = []
+                raise Err('s', self.at)
+            col = self.ds.pop(-2); row = self.ds.pop(-2)
+            self.out += b'\x1b[%d;%dH' % ((row + 1) & 0xFFFF, (col + 1) & 0xFFFF)
+        else:
+            self.out += {0x60: self.HIDE, 0x7B: self.CLS, 0x7C: self.SHOW, 0x7D: self.EOL}[c]
+
     def run(self, maxsteps=5_000_000):
         self.error = None
         try:
@@ -373,7 +394,10 @@ class Ref:
                     break
                 if c == ord('/'):
                     c = self.m[a]; a += 1
-                    c &= 0xBF                       # the escape: clear bit 6
+                    if 0x60 <= c <= 0x7E:
+                        self.escape(c)
+                        continue
+                    c &= 0xBF                       # the others: clear bit 6
                 elif c == 0 and self.checked:
                     raise Err('Q', self.at)
                 self.emit(c)

@@ -22,7 +22,7 @@ echo "$variants" | while read cpm chk ed; do
   [ "$ed" = 1 ] && { [ "$cpm" = 1 ] && kind=cpm-ed || kind=ed; }
   n=$(basename $src .asm)-$kind$([ $chk = 1 ] && echo -chk)
   sed -e "s/^CPM     EQU     0 /CPM     EQU     $cpm /" -e "s/^CHECKED EQU     0 /CHECKED EQU     $chk /" \
-      -e "s/^EDITOR  EQU     0 /EDITOR  EQU     ${ed:-0} /" $src > $out/$n.asm
+      -e "s/^EDITOR  EQU     0 /EDITOR  EQU     ${ed:-0} /" -e "s/^ANSI    EQU     0 /ANSI    EQU     ${ANSI:-0} /" $src > $out/$n.asm
   : > $out/$n.hex
   (cd $out && node $A -m $cpu -t hex -o $n.hex $n.asm > $n.log 2>&1) || { echo "FAIL $n"; tail -5 $out/$n.log; }
 done

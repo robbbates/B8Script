@@ -1,8 +1,8 @@
 ; =============================================================================
 ;  B8Script interpreter for the Z80
-;  Spec: docs/b8script.md (2026-11-21).
+;  Spec: docs/b8script.md (2026-11-24).
 ;
-;  Three switches, set in the EQU lines below:
+;  Four switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
 ;    EDITOR   1 = with the line editor built in (see the end of this file):
@@ -13,6 +13,10 @@
 ;                 and stops on every error in the spec's table (and Ctrl-C)
 ;                 with a four-line report: the letter and the place as line
 ;                 and column, the text there, and both stacks. See `error`.
+;    ANSI     what the console escapes of '$' (/{ /} /| /` /~) do:
+;             1 = send ANSI (VT100) sequences through CONOUT
+;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
+;                 CONAT (see the equates). The CP/M builds always send ANSI.
 ;
 ;  In every build Ctrl-C stops a running program (an unchecked build stops
 ;  without a word): see the console layer for the rules, the held key and
@@ -24,6 +28,9 @@
 CPM     EQU     0               ; 1 = CP/M .COM build
 CHECKED EQU     0               ; 1 = checked build
 EDITOR  EQU     0               ; 1 = with the line editor
+ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
+ANS     EQU     ANSI+CPM-ANSI*CPM ; (CP/M: always ANSI)
+PRSUB   EQU     CHECKED+EDITOR-CHECKED*EDITOR ; (1: '$' is the routine prstr)
 EDGEN   EQU     EDITOR*(1-CPM)  ; (the generic build with the editor)
                                 ; (IF takes any value but 0 as true, so
                                 ;  IF CHECKED+EDITOR means "either")
@@ -96,6 +103,18 @@ KEY     EQU     0FF06h          ; a waiting key in A, or A = 0 if none is
                                 ;   (end the routine with OR A / RET).
 CONOUT  EQU     0FF03h          ; print the character in A
 ;   KEY and CONOUT must preserve BC, DE, HL and HL'.
+        ENDIF
+        IF      1-ANS
+; With ANSI = 0 the console escapes call these. All four must keep BC and
+; HL'; CONCLS, CONEOL and CONCUR also DE and HL.
+CONCLS  EQU     0FF0Ch          ; /{  clear the screen, the cursor to the top left
+CONEOL  EQU     0FF0Fh          ; /}  clear from the cursor to the end of the line
+CONCUR  EQU     0FF12h          ; /| and /`  show the cursor if A is not 0, hide
+                                ;     it if A = 0
+CONAT   EQU     0FF15h          ; /~  the cursor to row HL, column DE, both
+                                ;     counted from 0. May change A, DE and HL
+        ENDIF
+        IFN     CPM
 RSPAGE  EQU     80h             ; 8000h return stack
 DSPAGE  EQU     81h             ; 8100h data stack
 LETPAGE EQU     82h             ; 8200h letter cells and line buffer
@@ -129,7 +148,8 @@ MSLOOP  EQU     40              ; n? inner loop count for about 1 ms (1-255):
 LET     EQU     LETPAGE*256
 HEAP    EQU     LET+7Ch         ; the heap pointer
 RSAVE   EQU     LET+34h         ; gap after Z: return stack pointer, saved
-                                ;   around machine code;
+                                ;   around machine code (and in the checked
+                                ;   build the address '$' prints from);
 NPEND   EQU     LET+38h         ;   minus the address of the program's end
                                 ;   (the heap's first byte), for the checked '_';
 EDLN    EQU     LET+3Ah         ;   the editor: the number of the line that ^E
@@ -308,6 +328,7 @@ p3a:    ADD     A,5             ; 3Ah-40h: index 15-21
         DB      h_fromr & 0FFh  ; }
         DB      h_not & 0FFh    ; ~
 .endm
+
 
 ; Punctuation: A = the PTAB index. The handler starts with HL = TOS,
 ; untouched, and A, DE free.
@@ -676,7 +697,6 @@ h_div:
         JP      Z,e_zero
         ENDIF
         POP     DE              ; DE = a, HL = b
-        PUSH    BC              ; free BC for udiv
         PUSH    DE              ; a, for r's sign
         LD      A,D
         XOR     H
@@ -693,7 +713,6 @@ h_div:
         POP     AF              ; A = a's high byte
         OR      A
         CALL    M,neg16         ; r's sign
-        POP     BC
         PUSH    DE              ; q under r
         RST     30h
 
@@ -739,10 +758,11 @@ h_str:  PUSH    HL
         ENDIF
         RST     30h
 
-; '$' prints the string at TOS, decoding escapes: '/' plus a character
-; clears that character's bit 6 (/M is CR, /` is space; '/' and '"' have no
-; bit 6, so // and /" give themselves).
-        IF      (1-CHECKED)*(1-EDITOR)
+; '$' prints the string at TOS, decoding escapes: '/' plus a character from
+; 60h to 7Eh is one of the escapes at pesc; '/' plus any other character
+; clears that character's bit 6 (/M is CR, /? is DEL's '?'; '/' and '"' have
+; no bit 6, so // and /" give themselves).
+        IF      1-PRSUB
 h_print:LD      A,(HL)
         INC     HL
         CP      22h
@@ -751,22 +771,28 @@ h_print:LD      A,(HL)
         JR      NZ,pr1
         LD      A,(HL)
         INC     HL
-        AND     0BFh
+        CP      60h
+        JR      C,pr0
+        CP      7Fh
+        JR      C,pesc
+pr0:    AND     0BFh
 pr1:    RST     28h
         JR      h_print
+PRLOOP  EQU     h_print         ; (where the escapes go back to)
+PRAGAIN EQU     h_print         ; (and where /~ goes back to)
         ENDIF
         IF      CHECKED
 ; (The checked build has the loop as a routine, prstr, which the error
-; report uses too. The address is kept on the stack meanwhile: a report
-; shows the stack as it was before the '$'.)
-h_print:PUSH    HL
-        CALL    prstr
-        POP     DE
+; report uses too. The address is kept meanwhile, for a report: it shows
+; the stack as it was before the '$'. /~ comes back to hp1.)
+h_print:LD      (RSAVE),HL
+hp1:    CALL    prstr
         RST     18h
         ENDIF
         IF      (1-CHECKED)*EDITOR
 ; (With the editor the loop is a routine, prstr, which ^V uses too.)
-h_print:CALL    prstr
+h_print:
+hp1:    CALL    prstr
         RST     18h
         ENDIF
 
@@ -775,9 +801,7 @@ h_emit: LD      A,L             ; "'"
 pr9:    RST     18h
 
 ; '#' prints TOS as a signed decimal number, with no space after it.
-h_num:  PUSH    BC
-        CALL    psgn
-        POP     BC
+h_num:  CALL    psgn
         RST     18h
 
 ; '?' ( n -- c ) or ( -n -- addr )
@@ -866,9 +890,162 @@ ln5:    LD      (HL),A          ; the CR
 ;  More routines (no handler starts past this point)
 ; =============================================================================
 
+        IF      CHECKED+EDITOR
+; prstr: print the string at HL, to its closing quote, decoding '/' (this is
+; '$', and the texts of the report and the editor). In the checked build a
+; NUL first is an error: Q.
+prstr:  LD      A,(HL)
+        INC     HL
+        CP      22h
+        RET     Z
+        ENDIF
+        IF      CHECKED
+        OR      A
+        JR      Z,e_dollar
+        ENDIF
+        IF      CHECKED+EDITOR
+        CP      '/'
+        JR      NZ,prs1
+        LD      A,(HL)
+        INC     HL
+        CP      60h
+        JR      C,prs0
+        CP      7Fh
+        JR      C,pesc
+prs0:   AND     0BFh
+prs1:   RST     28h
+        JR      prstr
+PRLOOP  EQU     prstr           ; (where the escapes go back to)
+PRAGAIN EQU     hp1             ; (and where /~ goes back to)
+
+; pmsg: print the text that follows the CALL, to its closing quote. Keeps HL.
+; pnl: the same, on a new line.
+pnl:    LD      A,13
+        RST     28h
+        LD      A,10
+        RST     28h
+pmsg:   EX      (SP),HL
+        CALL    prstr
+        EX      (SP),HL
+        RET
+        ENDIF
+        IF      CHECKED
+e_dollar:POP    DE              ; '$' ran into a NUL: drop the return address,
+        LD      HL,(RSAVE)      ;   and put the string's address back in TOS
+        LD      A,'Q'
+        JP      error
+        ENDIF
+
+; pesc: the escapes of '$'. A = the character after the '/', 60h to 7Eh, and
+; HL points past it. Each goes back into the loop that prints the string
+; (PRLOOP), but /~ has the stack to see to, and goes back by PRAGAIN.
+;    /a-/z   print the variable, as '#' does
+;    /{      clear the screen, the cursor to the top left
+;    /}      clear from the cursor to the end of the line
+;    /|  /`  show the cursor, hide it
+;    /~      ( row col -- ) the cursor to that row and column, from 0
+pesc:   CP      7Eh
+        JR      Z,pat
+        LD      DE,PRLOOP       ; the others return into the loop
+        PUSH    DE
+        SUB     7Bh             ; { 0, | 1, } 2, and no borrow
+        JR      NC,pcon
+        ADD     A,1Ah           ; a-z: 0-25, and a carry; `: FFh, and none
+        JR      NC,phide
+        ADD     A,A             ; the variable's cell
+        ADD     A,40h
+        PUSH    HL
+        LD      L,A
+        LD      H,LETPAGE
+        LD      A,(HL)
+        INC     L
+        LD      H,(HL)
+        LD      L,A
+        CALL    psgn
+        POP     HL
+        RET
+
+; /~ ( row col addr -- ): the two cells under the string's address go. Where
+; '$' is the routine prstr, its own return address goes first, and hp1
+; calls it again afterwards. (The checked build looks first, through
+; chkstk, that there is a column at least: with less, it is s. With a
+; column but no row it is s after the '$', as for any other character; the
+; spare bytes above the stack take what is written meanwhile.)
+pat:
+        IF      PRSUB
+        POP     DE
+        ENDIF
+        IF      CHECKED
+        CALL    chkstk
+        ENDIF
+        POP     DE              ; DE = the column
+        EX      (SP),HL         ; HL = the row; the text pointer is kept
+        IF      1-ANS
+        CALL    CONAT
+        POP     HL
+        JP      PRAGAIN
+
+; With ANSI = 0 the machine's routines do the rest.
+phide:  XOR     A               ; /`  (A = 0: hide)
+        JP      CONCUR
+pcon:   JP      Z,CONCLS        ; /{
+        CP      2
+        JP      Z,CONEOL        ; /}
+        JP      CONCUR          ; /|  (A = 1: show)
+        ENDIF
+        IF      ANS
+        PUSH    DE
+        CALL    csi             ; ESC [ row+1 ; col+1 H (ANSI counts from 1)
+        INC     HL
+        CALL    pdec
+        LD      A,';'
+        RST     28h
+        POP     HL
+        INC     HL
+        CALL    pdec
+        LD      A,'H'
+        RST     28h
+        POP     HL
+        JP      PRAGAIN
+
+; With ANSI = 1 they are sequences. The carry is clear on the way in.
+pcon:   DEC     A
+        JR      Z,pshow         ; /|
+        LD      A,'K'
+        JP      P,csia          ; /}  ESC [ K
+        LD      A,'H'           ; /{  ESC [ H ESC [ J
+        CALL    csia
+        LD      A,'J'
+        JR      csia
+pshow:  LD      E,'h'           ; /|  ESC [ ? 2 5 h
+        DB      0DAh            ; (JP C,nn: with no carry it steps over two bytes)
+phide:  LD      E,'l'           ; /`  ESC [ ? 2 5 l
+        LD      A,'?'
+        CALL    csia
+        LD      A,'2'
+        RST     28h
+        LD      A,'5'
+        RST     28h
+        LD      A,E
+        RST     28h
+        RET
+
+; csia: ESC [ and then A. csi: ESC [. Both keep all but A.
+csia:   PUSH    AF
+        CALL    csi
+        POP     AF
+        RST     28h
+        RET
+csi:    LD      A,27
+        RST     28h
+        LD      A,'['
+        RST     28h
+        RET
+        ENDIF
+
 ; udiv: unsigned HL / DE (DE <= 8000h). Returns HL = quotient, DE = remainder.
-; Uses A, BC; the caller saves the IP. The dividend shifts up through A:C
-; while the quotient bits arrive at the bottom of C.
+; Uses A; keeps BC (the IP) itself. The dividend shifts up through A:C while
+; the quotient bits arrive at the bottom of C.
 ; Dividing by 2 is one shift (the spec wants that fast).
 udiv:   LD      A,E
         XOR     2
@@ -879,7 +1056,8 @@ udiv:   LD      A,E
         ADC     A,A
         LD      E,A             ; the remainder: the bit that fell out (D is 0)
         RET
-udv0:   LD      A,H
+udv0:   PUSH    BC
+        LD      A,H
         LD      C,L
         LD      HL,0
         LD      B,16
@@ -895,6 +1073,7 @@ udv2:   INC     C               ; a quotient bit
         EX      DE,HL           ; DE = remainder
         LD      H,A
         LD      L,C             ; HL = quotient
+        POP     BC
         RET
 
 ; rdnum: read decimal digits at IP into HL; IP is left on the first
@@ -1012,14 +1191,14 @@ sk7:    PUSH    IX              ; N. The place is the opener
         JP      errp            ; (errp drops skip's return address)
         ENDIF
 
-; psgn: print HL as a signed number. Uses BC.
+; psgn: print HL as a signed number. Keeps BC.
 psgn:   BIT     7,H
         JR      Z,pdec
         LD      A,'-'
         RST     28h
         RST     20h
 ; pdec: print HL unsigned, by recursion on HL / 10 (the stack holds digits).
-; Uses BC.
+; Keeps BC.
 pdec:   LD      DE,10
         CALL    udiv            ; HL = HL / 10, E = the last digit
         LD      A,E
@@ -1420,12 +1599,10 @@ er7:    DEC     C
         DEC     HL
         LD      E,(HL)
         PUSH    HL
-        PUSH    BC
         LD      A,' '
         RST     28h
         EX      DE,HL
         CALL    psgn
-        POP     BC
         POP     HL
         JR      er7
 er8:    CALL    pnl
@@ -1459,44 +1636,6 @@ phalf:  SRL     H
         CALL    pdec
         POP     BC
         RET
-
-; prstr: print the string at HL, to its closing quote, decoding '/' (this is
-; '$', and the texts of the report and the editor). In the checked build a
-; NUL first is an error: Q.
-prstr:  LD      A,(HL)
-        INC     HL
-        CP      22h
-        RET     Z
-        ENDIF
-        IF      CHECKED
-        OR      A
-        JR      Z,e_dollar
-        ENDIF
-        IF      CHECKED+EDITOR
-        CP      '/'
-        JR      NZ,prs1
-        LD      A,(HL)
-        INC     HL
-        AND     0BFh
-prs1:   RST     28h
-        JR      prstr
-
-; pmsg: print the text that follows the CALL, to its closing quote. Keeps HL.
-; pnl: the same, on a new line.
-pnl:    LD      A,13
-        RST     28h
-        LD      A,10
-        RST     28h
-pmsg:   EX      (SP),HL
-        CALL    prstr
-        EX      (SP),HL
-        RET
-        ENDIF
-        IF      CHECKED
-e_dollar:POP    DE              ; '$' ran into a NUL: drop the return address,
-        POP     HL              ;   and put the string's address back in TOS
-        LD      A,'Q'
-        JP      error
         ENDIF
 
 ; =============================================================================

@@ -11,7 +11,20 @@ SUITE = [
     ('times', b'1r!1(1c!1(r@c@*:10<(" "$0):100<(" "$0)#" "$c@1+:c!11<)"/M/J"$r@1+:r!11<)', b''),
     ('primes', b'[M/%;]2n!1(1p!2d!1(d@:*n@>\\n@d@M0=(0p!0)d@1+d!1)p@(n@#" "$0)n@1+:n!1000<)', b''),
     ('fizz', b'[M/%;]1i!1(0f!i@3M0=("Fizz"$1f!0)i@5M0=("Buzz"$1f!0)f@0=(i@#0)" "$i@1+:i!101<)', b''),
-    ('escapes', b'"/@/A/[/`/a/~/b>///""$ "x/"y"$ "a>b<c"$ "/o/O"$', b''),
+    ('escapes', b'"/@/A/[/_/ /0/?/\x7f>///""$ "x/"y"$ "a>b<c"$ "/O/_"$', b''),
+    ('eschigh', b'"/\xc1/\x80/\xe0"$', b''),
+    # /a to /z print a variable as # does, read when the string is printed
+    ('escvar', b'5a! -7b! 0c! -32768d! 32767z! "a=/a b=/b c=/c d=/d z=/z."$ "v/x;"g! 1x! g@$ 2x! g@$', b''),
+    ('escvar2', b'[P "[/i]"$] 0i! 1( P i@1+:i! 4<) 12345 7k! "/k/k"$ 12345=#', b''),
+    # the console escapes
+    ('esccon', b'"a/{b/}c/|d/`e"$', b''),
+    # /~ ( row col addr -- ): the stack is balanced afterwards
+    ('escat', b'12345 3 4 "/~x"$ 12345=# 7 1 2"/~a"$ #', b''),
+    ('escat2', b'9 0 0 23 79"/~a/~b"$ #', b''),
+    ('escat3', b'[P "/~*/i"$] 0i! 1( i@ :P i@1+:i! 3<) 77#', b''),
+    ('escat4', b'5 6 [X{] "1 2 7a! 3 4]"X "/~/a/~"$ #', b''),
+    # the skipper steps over / and the next character, whatever it is
+    ('escskip2', b'0( "/~/{/a/"(" ) 1# 0( "/~"/~ 2#) 3#', b''),
     ('escskip', b'0( "a/"b)" 1#) 2# 0( "c//" 3#) 4# 1("//"$0) [A"/"]"$] A', b''),
     ('codestr', b'[X{] "9 2/;#]"X " "$ "7 2/%;#]"X', b''),
     ('divs', b'[P%#" "$#" "$] -7 2/P 7 2/P 7 -2/P -7 -2/P 100 7/P -32768 -1/P -100 7/P 32767 -3/P 1 2/P -1 2/P 0 5/P 0 -5/P 5 1/P -5 1/P 5 -1/P 9 9/P 3 9/P -3 9/P 30000 -30000/P -32768 2/P 32767 32767/P 12345 100/P -12345 100/P', b''),
@@ -145,6 +158,13 @@ ERRS = [
     # more than 8 cells on the stack: "..." and the top 8, negative ones too
     ('e_stk9', b'1 2 3 4 5 6 7 8 9 0/', b'', None),
     ('e_stk8', b'-1 -2 -3 -4 -5 -6 -32768 0/', b'', None),
+    # /~ with no row and column beneath the address: data-stack underflow
+    ('e_atund', b'"/~x"$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
+    ('e_atund2', b'5"/~x"$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
+    ('e_atund3', b'1 2"/~/~/~/~/~x"$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
+    ('e_atund4', b'[A 1 2 3 "/~/~"$ "no"$] A "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 1\r\n'),
+    # $ running into a NUL after /~ took its two cells: the stack shows the rest
+    ('e_atq', b'4_x! 47x@. 126x@1+. 65x@2+. 0x@3+. 1 2 3 4 x@$ "no"$', b'', None),
     # the report starts on a new line, whatever was printed before it
     ('e_out', b'"abc"$ 1 0/', b'', None),
 ]

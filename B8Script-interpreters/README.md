@@ -15,24 +15,39 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 ## Sizes (bytes, measured)
 
-| CPU | Generic | Generic, checked | CP/M | CP/M, checked |
-|---|---|---|---|---|
-| Z80 | 765 | 1,163 | 831 | 1,243 |
-| Z80 with the line editor | 1,488 | 1,796 | 1,663 | 1,987 |
-| 8080 | 854 | 1,299 | 904 | 1,364 |
-| 6502, stack in pages 2-3 | 1,175 | 1,706 | n/a | n/a |
-| 6502, stack in zero page | 1,095 | 1,628 | n/a | n/a |
-| 6809 | 825 | 1,220 | n/a | n/a |
+**Generic ROM images.** `ANSI = 0` is the default (the console escapes call the machine's routines); `ANSI = 1` sends ANSI sequences. "Before" is the last build without the escapes (commit `9c7f40c`).
 
-| Windows .EXE | Unchecked | Checked | With the editor | Editor, checked |
+| CPU | Before | `ANSI = 0` | `ANSI = 1` | Checked, before | Checked, `ANSI = 0` | Checked, `ANSI = 1` |
+|---|---|---|---|---|---|---|
+| Z80 | 765 | 827 | 878 | 1,163 | 1,230 | 1,281 |
+| Z80 with the line editor | 1,488 | 1,358 | 1,409 | 1,796 | 1,765 | 1,816 |
+| 8080 | 854 | 925 | 980 | 1,299 | 1,377 | 1,432 |
+| 6502, stack in pages 2-3 | 1,175 | 1,208 | 1,269 | 1,706 | 1,748 | 1,795 |
+| 6502, stack in zero page | 1,095 | 1,155 | 1,219 | 1,628 | 1,698 | 1,748 |
+| 6809 | 825 | 873 | 934 | 1,220 | 1,284 | 1,333 |
+
+**CP/M .COM files** (always ANSI):
+
+| CPU | Before | Now | Checked, before | Checked, now |
 |---|---|---|---|---|
-| The file | 2,560 | 3,072 | 3,584 | 4,096 |
-| Of that: code and table | 1,286 | 1,816 | 2,298 | 2,728 |
+| Z80 | 831 | 959 | 1,243 | 1,376 |
+| Z80 with the line editor | 1,663 | 1,595 | 1,987 | 2,014 |
+| 8080 | 904 | 1,049 | 1,364 | 1,516 |
+
+**Windows .EXE files** (always ANSI):
+
+| | Unchecked | Checked | With the editor | Editor, checked |
+|---|---|---|---|---|
+| The file, before | 2,560 | 3,072 | 3,584 | 4,096 |
+| The file, now | 2,560 | 3,072 | 3,072 | 3,584 |
+| Code and table, before | 1,286 | 1,816 | 2,298 | 2,728 |
+| Code and table, now | 1,319 | 1,845 | 2,009 | 2,539 |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
-- A Windows file is a 512-byte header and then the code, the table and about 405 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 358, 340, 350 and 432 bytes to spare before their next step up.
+- A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 357, 343, 155 and 137 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
+- Where the bytes went with the escapes: on the Z80 the escapes cost an unchecked generic build 62 bytes with `ANSI = 0` and 113 with `ANSI = 1`, and the checked one 67 and 118. The CP/M builds also read `-n?` themselves now (15 bytes on the Z80, 19 on the 8080; see The language). The editor builds lost ^V, which saved about 170 bytes in the unchecked ones (the stack listing was there only for it) and 100 in the checked ones.
 - Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 60 to 80 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 280 to 470 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
 
 ## Files
@@ -107,6 +122,10 @@ To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6
 | RAM | RS 8000h, DS 8100h, letters 8200h, PROG 8300h | RS = page 1, DS 0200h/0300h (or zero page 10h-EFh), letters 0400h, PROG 0500h | RS 8000h (S), DS 8100h (U), letters 8200h (DP), PROG 8300h |
 | Heap limit | `HEAPLIM` (page), default F0h | default E0h | default F0h |
 | Timing | `MSLOOP` = loop passes per millisecond for `n?` (1-255); tune it to your clock and KEY | same | same |
+| With `ANSI = 0`: CONCLS (FF0Ch), CONEOL (FF0Fh) | clear the screen and home the cursor; clear to the end of the line | same | same |
+| CONCUR (FF12h) | show the cursor if A is not 0, hide it if A = 0 | show if the carry is set, hide if clear | as the Z80 |
+| CONAT (FF15h) | cursor to row HL, column DE, both from 0 | row A, column Y | row X, column D |
+| The four must keep | BC and HL'; and DE and HL, all but CONAT | X | Y, U, DP |
 
 - There is one input routine, KEY. It replaces the earlier CONST and CONIN: `0?` waits by calling KEY until a key comes.
 - KEY is also called while a program runs, for the break key: once in every 256 word calls and loop-backs. A key it returns then is taken, so KEY must not wait, and should be quick.
@@ -176,7 +195,7 @@ A command key ends the line too, and takes what was typed before it as its argum
 - A program that is stopped, by an error or by Ctrl-C, prints its report and comes back to the editor, with both stacks empty.
 - A line typed at the editor is line 0 in the report; the column is the place in the line.
 
-The editor adds 723 bytes to the unchecked generic build and 832 to the CP/M one (633 and 744 to the checked ones, which have the report's routines already). ^V alone is about 170 of those in an unchecked build, because it brings in the stack listing. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
+The editor adds 531 bytes to the unchecked generic build and 636 to the CP/M one (535 and 638 to the checked ones). It has no ^V (view): taking it out saved about 170 bytes in an unchecked build, which needed the stack listing only for it, and kept the CP/M checked editor inside 2,048 bytes. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
 
 ## The Windows builds (`win32/`)
 
@@ -196,7 +215,7 @@ B8SWINE PROG.B8S
 - **Input that is not the console** (a pipe or a file) is read a byte at a time, and only by `?`, `-n?` and the editor: the break check does not read it, so Ctrl-C can't break in, and `n?` waits for a byte however small n is. At the end of the input the program exits.
 - **Time.** A plain timed wait on Windows ends only on the system's tick, every 15.6 ms, so `1?` would take about 16 ms and a game timed by it would crawl. So `n?`, the break-off cell's 250 ms and the editor's Esc wait use a high-resolution waitable timer (Windows 10 1803 and later), set once for the whole wait: the wait ends on a key or when the timer is due, to about a millisecond. On older Windows the timer can't be made, and the waits are plain ones, to the tick. The builds import `CreateWaitableTimerExW`, so they start on Windows Vista and later.
 - **The editor's files.** A name typed before ^R or ^W is a Windows path, as typed, and stays the name until another is typed. Nothing is said if a file can't be read or written: a read then gives no program.
-- **The header** is laid out by hand in the source, by the documented rules and nothing clever: one section, 512-byte file alignment, imports from `kernel32.dll` only (`GetStdHandle`, `GetConsoleMode`, `SetConsoleMode`, `GetCommandLineA`, `CreateFileA`, `ReadFile`, `WriteFile`, `WaitForSingleObject`, `WaitForMultipleObjects`, `CreateWaitableTimerExW`, `SetWaitableTimer`, `ReadConsoleInputA`, `ExitProcess`, and `CloseHandle` in the editor builds). `testing/chkpe.py` checks every file.
+- **The header** is laid out by hand in the source, by the documented rules and nothing clever: one section, 512-byte file alignment, imports from `kernel32.dll` only (`GetStdHandle`, `GetConsoleMode`, `SetConsoleMode`, `GetCommandLineA`, `CreateFileA`, `ReadFile`, `WriteFile`, `WaitForMultipleObjects`, `CreateWaitableTimerExW`, `SetWaitableTimer`, `ReadConsoleInputA`, `ExitProcess`, and `CloseHandle` in the editor builds). `testing/chkpe.py` checks every file.
 - **Dispatch.** One byte per punctuation character, as on the Z80, but with a single range: every handler starts within 255 bytes of one address, and the assembler stops if one doesn't.
 
 ## Checked builds

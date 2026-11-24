@@ -22,7 +22,7 @@ A postfix stack language for 64 KB 8-bit computers, by Robb Bates. Every instruc
 
 B8Script began as B8SCRIPT.COM, a 2 KB CP/M program for the Z80 with a built-in editor and loadable plugins ("If Forth and VTL had a love child!"). That dialect used different characters: `{` `}` for loops, `,` to print, `#` for the heap, `$` for hex literals, `~` for string compare and `` ` `` to load plugins. It is kept unchanged in `archive/1.0beta/`, with its lunar lander game and the CHAR, PRINTHEX and UNSIGNED plugins. Its user manual was a Google Doc that is now out of date.
 
-The language was then redesigned into the one in the spec, and the interpreters were rewritten for size, now under 800 bytes for the smallest builds. The plugin system was dropped: machine code is loaded with the grave (`` ` ``) instead.
+The language was then redesigned into the one in the spec, and the interpreters were rewritten for size, now under 900 bytes for the smallest builds. The plugin system was dropped: machine code is loaded with the grave (`` ` ``) instead.
 
 > There once was a game small and sweet
 > That Mr. Bates crammed in a tweet

@@ -1005,20 +1005,20 @@ q@0=)
 
 ## Appendix A: Z80
 
-Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`.
+Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`, `ANSI`.
 
 **Builds**
 
 | Build | File | Bytes | Notes |
 |---|---|---|---|
-| Generic ROM | `b8s-z80-rom-0000.bin` | 765 | Starts at 0000h (reset); owns page zero |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,163 |  |
-| CP/M runner | `B8SZ80.COM` | 831 | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` | 1,243 |  |
-| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,488 | The suggested standard under [Environments](#environments); see the interpreters README |
-| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,796 |  |
-| CP/M with the line editor | `B8SZ80E.COM` | 1,663 | `B8SZ80E PROG.B8S`, or with no file |
-| The same, checked | `B8SZ80EC.COM` | 1,987 |  |
+| Generic ROM | `b8s-z80-rom-0000.bin` | 827 | Starts at 0000h (reset); owns page zero. `ANSI = 0`; with `ANSI = 1`, 878 |
+| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,230 | With `ANSI = 1`, 1,281 |
+| CP/M runner | `B8SZ80.COM` | 959 | `B8SZ80 PROG.B8S` |
+| CP/M runner, checked | `B8SZ80C.COM` | 1,376 |  |
+| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,358 | The suggested standard under [Environments](#environments); see the interpreters README |
+| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,765 |  |
+| CP/M with the line editor | `B8SZ80E.COM` | 1,595 | `B8SZ80E PROG.B8S`, or with no file |
+| The same, checked | `B8SZ80EC.COM` | 2,014 |  |
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), HL' is the return-stack pointer. A and DE are scratch.
 
@@ -1059,17 +1059,18 @@ All four must keep BC and HL', and all but `CONAT` also DE and HL.
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`. Builds: `b8s-8080-rom-0000.bin` (854 bytes), `b8s-8080-rom-checked-0000.bin` (1,299), `B8S8080.COM` (904), `B8S8080C.COM` (1,364).
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (925 bytes; 980 with `ANSI = 1`), `b8s-8080-rom-checked-0000.bin` (1,377; 1,432), `B8S8080.COM` (1,049), `B8S8080C.COM` (1,516).
 
 The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 097Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, so the routines keep BC (and DE and HL where the Z80's do); and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
 
 ## Appendix C: 6502
 
-Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-6502-zp.asm` is smaller and keeps it in zero page. Switch: `CHECKED`. The image starts at E000h; point the reset vector at label `start`.
+Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-6502-zp.asm` is smaller and keeps it in zero page. Switches: `CHECKED`, `ANSI`. The image starts at E000h; point the reset vector at label `start`.
 
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
-| Bytes (unchecked, checked) | 1,175 and 1,706 | 1,095 and 1,628 |
+| Bytes (unchecked, checked), `ANSI = 0` | 1,208 and 1,748 | 1,155 and 1,698 |
+| The same, `ANSI = 1` | 1,269 and 1,795 | 1,219 and 1,748 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
 | Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |
@@ -1099,7 +1100,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 ## Appendix D: 6809
 
-Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switch: `CHECKED`. Builds: `b8s-6809-rom-F000.bin` (825 bytes), `b8s-6809-rom-checked-F000.bin` (1,220). The image starts at F000h, with label `start`: point the reset vector at it.
+Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. Builds: `b8s-6809-rom-F000.bin` (873 bytes; 934 with `ANSI = 1`), `b8s-6809-rom-checked-F000.bin` (1,284; 1,333). The image starts at F000h, with label `start`: point the reset vector at it.
 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|
@@ -1145,8 +1146,8 @@ Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`,
 |---|---|---|---|
 | Runner | `B8SWIN.EXE` | 2,560 | `B8SWIN PROG.B8S` |
 | Runner, checked | `B8SWINC.EXE` | 3,072 |  |
-| With the line editor | `B8SWINE.EXE` | 3,584 | `B8SWINE PROG.B8S`, or with no file. The suggested standard under [Environments](#environments) |
-| The same, checked | `B8SWINEC.EXE` | 4,096 |  |
+| With the line editor | `B8SWINE.EXE` | 3,072 | `B8SWINE PROG.B8S`, or with no file. The suggested standard under [Environments](#environments) |
+| The same, checked | `B8SWINEC.EXE` | 3,584 |  |
 
 **Memory map.** The machine is the 64 KB one of this spec, held in the last 64 KB of the program's image (at 00410000h). A B8Script address is an offset into it.
 

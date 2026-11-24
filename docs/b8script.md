@@ -37,8 +37,8 @@ A program is a byte string read left to right until a NUL byte. Each character a
 | Cell | 16 bits. Cells are untyped bit patterns: the same cell is a signed number (−32768 to 32767), an unsigned number or an address, depending on what reads it. Arithmetic wraps |
 | Truth | 0 is false, anything else true. Comparisons return −1 or 0 |
 | Memory | Byte-addressed 64 KB. Cells in memory are little-endian, unaligned |
-| Data stack | Operands and results. TOS is the top, NOS the one below |
-| Return stack | Return addresses, block starts and values parked with `{` |
+| Data stack | Operands and results. TOS is the top, NOS the one below. It holds at least 64 cells |
+| Return stack | Return addresses, block starts and values parked with `{`, one entry each. It holds at least 64 entries |
 | Ignored | Control characters (01h–1Fh), space and DEL (7Fh) |
 | Reserved | 80h–FFh outside strings. Programs must not use them there. Unchecked builds ignore them; checked builds stop with `X`. Inside strings they are allowed and printed as they are; what they look like is up to the terminal |
 | End | NUL. The end of a loaded file counts as NUL |
@@ -303,7 +303,7 @@ B8Script comes in two kinds of build. An **unchecked** build checks nothing, for
 | Category | Includes |
 |---|---|
 | Required | Everything in this spec, for programs that stay inside it |
-| Implementation-defined | Stack sizes, heap start and limit, memory layout, starting values of variables and words, how often the break key is polled, the -n? details listed under `?`, system addresses, the machine-code contract, and which environments a build offers |
+| Implementation-defined | Stack sizes beyond the 64 data cells and 64 return-stack entries every build has, heap start and limit, memory layout, starting values of variables and words, how often the break key is polled, the -n? details listed under `?`, system addresses, the machine-code contract, and which environments a build offers |
 | Unsafe (anything may happen in an unchecked build) | Data or return stack underflow or overflow, heap collision, stores outside the program's space, calling an undefined word, unclosed strings, printing an address with no closing quote, `[` not followed by a letter or space, reserved bytes outside strings, dividing by zero, unbalanced or mismatched brackets, and anything machine code does |
 
 ### What a checked build adds
@@ -596,7 +596,7 @@ If anything leaked, the top of the stack at the end isn't the sentinel. Add it w
 - **Store before you read.** Variables start with garbage. Seed a random counter with `0r!`.
 - **Prefer the stack to variables inside reusable words.** A word that stores into `n` or `d` clobbers any caller using them. The stack-only modulo `M` avoids this.
 - **Keep `{` and `}` paired inside a block** unless you mean a return-stack trick: `)` jumps to whatever is on top.
-- **Loop instead of recursing forever.** Each call grows the return stack; use a block or a tail call (`G`).
+- **Loop instead of recursing forever.** Each call grows the return stack; use a block or a tail call (`G`). A portable program stays within 64 return-stack entries and 64 data cells, the least every build holds: a word call, a block entered and a value parked with `{` each take an entry.
 - **Mask to make flags arithmetic.** True is all ones, so `flag 7&` gives 7 or 0 with no branch: `[D:9>7&+48+']` turns a nibble into a hex digit.
 - **Break with a value.** `cond:q!\` stores the flag and breaks in one step; test `q@\` after the closer to leave several levels.
 - **Build machine code in pieces.** Save the start with `:` or `{` before the first load, and drop the final address with `;`.
@@ -624,7 +624,7 @@ These differ between builds or environments, so a portable program must not depe
 - how -n? echoes and treats keys other than Backspace and CR;
 - the result of dividing by 0;
 - what happens after the last column, what control codes other than CR, LF, BS and BEL do, the screen's size, where the cursor goes for a row or column off the screen, and what a terminal's own sequences (sent with `/[` or `27'`) do;
-- memory layout, stack sizes and the heap limit.
+- memory layout, the heap limit, and either stack holding more than 64 (data cells, or return-stack entries: a word call, a block entered and a value parked with `{` take one each).
 
 [↑ Back to top](#b8script-spec)
 
@@ -691,6 +691,7 @@ This chapter is for anyone writing an interpreter. The first part lists what the
 - **Reserved bytes.** Ignored by unchecked builds, `X` in checked builds.
 - **The console.** The control codes CR, LF, BS and BEL, and the five console escapes, in every environment (see [The console](#the-console)). An appendix says how its build does the escapes, and gives the screen size.
 - **Checked builds.** The startup state, the error codes, the report format and the behaviour after an error, as in [Errors and checked builds](#errors-and-checked-builds).
+- **Stacks.** A data stack of at least 64 cells and a return stack of at least 64 entries. More is allowed; a program can't count on it.
 - **An appendix.** Each implementation documents its memory map, stack sizes, heap limit, machine-code contract, RET byte, system addresses (in hex, unsigned and signed decimal) and build options.
 
 ### How programs get in

@@ -451,7 +451,7 @@ The games share a few shapes: a frame is one timed key wait, end conditions fold
 | Bounce | `d@-1*d!`, or `[Z:@0%-%!]` then `dZ` | Negate a velocity (BREAKOUT) |
 | Smooth motion | `x@4/;` | Positions in quarter cells, drawn in whole ones (COPTER) |
 | Capped gravity | `v@1+:3>(;3 0)` | Falling speeds up to a limit (COPTER) |
-| Flood fill without recursion | Sweep until nothing changes, or keep an explicit stack | Recursion can pass the \~110 return-stack entries real builds have (MINE390, MINES) |
+| Flood fill without recursion | Sweep until nothing changes, or keep an explicit stack | Recursion can pass the 64 return-stack entries every build guarantees (MINE390, MINES) |
 | Catch up on arrival | Update a place from the day you last saw it | Nothing runs for places you aren't at (IDOL) |
 | Play again | `K 121=)` | The outer loop's flag is whether the key was y (all) |
 
@@ -524,7 +524,7 @@ The minus before a digit is the one that bites most: it got into 9 of the 31 sma
 | Variables start with garbage | Store before you read; a checked build hides this by zeroing them |
 | `x#` prints an address | You meant `x@#` (tutorial) |
 | `{` and `}` unpaired inside a block | `)` jumps to whatever is on top of the return stack |
-| Deep recursion | Real builds hold about 110 return-stack entries; loop or tail-call with G instead |
+| Deep recursion | Every build holds 64 return-stack entries and 64 data cells; most hold more, but don't count on it. Loop or tail-call with G instead (TICTAC's perfect play peaks at 43 entries) |
 | A slash in a string or comment | Write `//`: `"y//n"` prints y/n, where `"y/n"` would print y and then variable n (IDOL, QUBIC) |
 | A variable escape in a stored message | `/x` reads x when the string is printed, so text copied into a buffer and shown later prints the later value; keep `#` for numbers there (IDOL) |
 | `&` and `\|` don't short-circuit | Both sides always run, so the second must be safe when the first is false (BATTLE) |

@@ -473,15 +473,14 @@ PRLOOP  equ     h_print
 ; /~ ( row col addr -- ): the two cells under the string's address go.
 ; It comes before pesc: from there the short jumps reach h_print's loop.
 ; In a checked build the loop is the routine prstr: its return address
-; goes, and hp1 calls it again afterwards. Before each /~ chkstk looks at
-; the stack, as `next` does before each character: a /~ that finds it run
-; out already is s at once. One that takes its row or column from past the
-; bottom (at most two cells past, from the frame above the stack, which is
-; never returned to) is s after the '$', as for any other character.
+; goes, and hp1 calls it again afterwards. There each /~ first looks that
+; its two cells are there, and is s if not, before it prints anything.
 pat:
 %if CHECKED
         pop     eax
-        call    chkstk
+        lea     eax,[esp+8]             ; ESP + 8 at the empty mark or above:
+        cmp     eax,[V(v_dstop)]        ;   the row or the column isn't there
+        jae     e_under
 %endif
         call    pcsi
         pop     eax                     ; the column

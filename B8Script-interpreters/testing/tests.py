@@ -161,11 +161,12 @@ ERRS = [
     # more than 8 cells on the stack: "..." and the top 8, negative ones too
     ('e_stk9', b'1 2 3 4 5 6 7 8 9 0/', b'', None),
     ('e_stk8', b'-1 -2 -3 -4 -5 -6 -32768 0/', b'', None),
-    # /~ with no row and column beneath the address: data-stack underflow
-    ('e_atund', b'"/~x"$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
-    ('e_atund2', b'5"/~x"$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
-    ('e_atund3', b'1 2"/~/~/~/~/~x"$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
-    ('e_atund4', b'[A 1 2 3 "/~/~"$ "no"$] A "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 1\r\n'),
+    # /~ with no row and column beneath the address: data-stack underflow,
+    # found before the /~ does anything (nothing more of the string prints)
+    ('e_atund', b'"/~x"$ "no"$', b'', PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
+    ('e_atund2', b'5"/~x"$ "no"$', b'', PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
+    ('e_atund3', b'1 2"/~/~/~/~/~x"$ "no"$', b'', rb'\x1b\[2;3H' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
+    ('e_atund4', b'[A 1 2 3 "/~/~"$ "no"$] A "no"$', b'', rb'\x1b\[3;4H' + PLACE % b's' + rb'Stk 0:\r\nRtn 1\r\n'),
     # $ with nothing on the stack at all: s (it may print junk first)
     ('e_dollar0', b'$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
     # $ running into a NUL after /~ took its two cells: the stack shows the rest

@@ -68,6 +68,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `b8strip.py` | Strips a program of comments and white space, keeping a space only where B8Script needs one (`b8strip.py ../../games/NAME.TXT ../../games/NAME.B8S` after editing a game). `--same A B` checks that two files hold the same code |
 | `esc2slash.py` | Converts older programs to the `/` escape |
 | `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files next to each source |
+| `cpmsim.py` | Runs the CP/M builds under real CP/M 2.2 (Digital Research's BDOS and CCP) in z80pack's `cpmsim`: `cpmsim.py suite out B8SZ80 B8SZ80C` runs the suite's programs and compares each output with `ref.py`'s; `cpmsim.py type out STEP...` types at CP/M, for the editors. `-8` runs on an 8080 instead of the Z80 (which traps undocumented opcodes). Needs z80pack (set `Z80PACK`) and cpmtools; see its header. Not part of the regular run: it takes about ten minutes a build |
 
 Notes on the harnesses:
 - **Keys are typed as a person types them:** a key from the input is given only when the program is waiting for one, which the harness takes to be two looks at the keyboard close together (`GAP`: clock ticks on the Z80 and 8080, instructions on the others). Every build looks at the keyboard now and then for the break key, and holds only the newest key it finds, so a queue of keys handed over at every look would mostly be lost.

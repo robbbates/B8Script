@@ -1020,13 +1020,13 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 | Build | File | Bytes | Notes |
 |---|---|---|---|
 | Generic ROM | `b8s-z80-rom-0000.bin` | 825 | Starts at 0000h (reset); owns page zero. `ANSI = 0`; with `ANSI = 1`, 876 |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,228 | With `ANSI = 1`, 1,279 |
+| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,233 | With `ANSI = 1`, 1,280 |
 | CP/M runner | `B8SZ80.COM` | 957 | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` | 1,374 |  |
+| CP/M runner, checked | `B8SZ80C.COM` | 1,375 |  |
 | Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,361 | The suggested standard under [Environments](#environments); see the interpreters README |
-| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,768 |  |
+| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,773 |  |
 | CP/M with the line editor | `B8SZ80E.COM` | 1,594 | `B8SZ80E PROG.B8S`, or with no file |
-| The same, checked | `B8SZ80EC.COM` | 2,013 |  |
+| The same, checked | `B8SZ80EC.COM` | 2,014 |  |
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), HL' is the return-stack pointer. A and DE are scratch.
 
@@ -1067,7 +1067,7 @@ All four must keep BC and HL', and all but `CONAT` also HL. The flags may change
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (923 bytes; 977 with `ANSI = 1`), `b8s-8080-rom-checked-0000.bin` (1,376; 1,430), `B8S8080.COM` (1,046), `B8S8080C.COM` (1,514).
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (923 bytes; 977 with `ANSI = 1`), `b8s-8080-rom-checked-0000.bin` (1,381; 1,435), `B8S8080.COM` (1,046), `B8S8080C.COM` (1,519).
 
 The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers, without HL') and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 097Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, so the routines keep BC (and HL where the Z80's do); and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
 

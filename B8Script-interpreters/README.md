@@ -19,9 +19,9 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 | CPU | Before | `ANSI = 0` | `ANSI = 1` | Checked, before | Checked, `ANSI = 0` | Checked, `ANSI = 1` |
 |---|---|---|---|---|---|---|
-| Z80 | 765 | 825 | 876 | 1,163 | 1,228 | 1,279 |
-| Z80 with the line editor | 1,488 | 1,361 | 1,411 | 1,796 | 1,768 | 1,818 |
-| 8080 | 854 | 923 | 977 | 1,299 | 1,376 | 1,430 |
+| Z80 | 765 | 825 | 876 | 1,163 | 1,233 | 1,280 |
+| Z80 with the line editor | 1,488 | 1,361 | 1,411 | 1,796 | 1,773 | 1,819 |
+| 8080 | 854 | 923 | 977 | 1,299 | 1,381 | 1,435 |
 | 6502, stack in pages 2-3 | 1,175 | 1,208 | 1,265 | 1,706 | 1,738 | 1,781 |
 | 6502, stack in zero page | 1,095 | 1,155 | 1,217 | 1,628 | 1,704 | 1,752 |
 | 6809 | 825 | 873 | 934 | 1,220 | 1,293 | 1,342 |
@@ -30,9 +30,9 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 | CPU | Before | Now | Checked, before | Checked, now |
 |---|---|---|---|---|
-| Z80 | 831 | 957 | 1,243 | 1,374 |
-| Z80 with the line editor | 1,663 | 1,594 | 1,987 | 2,013 |
-| 8080 | 904 | 1,046 | 1,364 | 1,514 |
+| Z80 | 831 | 957 | 1,243 | 1,375 |
+| Z80 with the line editor | 1,663 | 1,594 | 1,987 | 2,014 |
+| 8080 | 904 | 1,046 | 1,364 | 1,519 |
 
 **Windows .EXE files** (always ANSI):
 
@@ -41,13 +41,13 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | The file, before | 2,560 | 3,072 | 3,584 | 4,096 |
 | The file, now | 2,560 | 3,072 | 3,072 | 3,584 |
 | Code and table, before | 1,286 | 1,816 | 2,298 | 2,728 |
-| Code and table, now | 1,319 | 1,853 | 2,029 | 2,575 |
+| Code and table, now | 1,319 | 1,861 | 2,029 | 2,583 |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
-- A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 357, 335, 135 and 101 bytes to spare before their next step up.
+- A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 357, 327, 135 and 93 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
-- Where the bytes went with the escapes: on the Z80 the escapes cost an unchecked generic build 60 bytes with `ANSI = 0` and 111 with `ANSI = 1`, and the checked one 65 and 116. The CP/M builds also read `-n?` themselves now (15 bytes on the Z80, 19 on the 8080; see The language). The editor builds lost ^V, which saved about 170 bytes in the unchecked ones (the stack listing was there only for it) and 100 in the checked ones.
+- Where the bytes went with the escapes: on the Z80 the escapes cost an unchecked generic build 60 bytes with `ANSI = 0` and 111 with `ANSI = 1`, and the checked one 70 and 117 (a checked `/~` looks that its two cells are there before it prints anything). The CP/M builds also read `-n?` themselves now (15 bytes on the Z80, 19 on the 8080; see The language). The editor builds lost ^V, which saved about 170 bytes in the unchecked ones (the stack listing was there only for it) and 100 in the checked ones.
 - Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 60 to 80 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 280 to 470 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
 
 ## Files
@@ -68,7 +68,7 @@ The builds follow [`docs/b8script.md`](../docs/b8script.md) (2026-11-24). What t
 - `-n?`: Backspace takes a character back and is echoed as it is; every other key but CR is stored and echoed, control keys and DEL included; CR ends the line and is not echoed. A count above 127 is taken as 127. The CP/M builds read the line the same way, with BDOS 6 a key at a time, not with BDOS 10: so a key held by the break check is the line's first, and the editing keys are the same on every build.
 - Dividing by zero in an unchecked build returns two cells of no meaning (different on each CPU), and the stack stays balanced.
 - `[` followed by anything but a letter is taken as `[ ` in an unchecked build.
-- The CP/M builds print through BDOS 6, which can't print the byte FFh (it means "read a key" there).
+- The CP/M builds print through BDOS 6, which can't print the bytes FFh and FEh: to BDOS 6, FFh means "read a key", and in Digital Research's CP/M 2.2 BDOS (an undocumented case, also in CP/M 3) FEh means "is a key waiting?". Neither reaches the screen. Found by running the test suite under real CP/M 2.2 (z80pack); see How they were tested.
 - The memory maps, stack sizes, heap limits and system addresses are in the spec's appendices.
 
 ## Building
@@ -294,6 +294,8 @@ Every build runs, in an emulator, against a reference interpreter written from t
 - for checked builds, every error in the table, several ways each, with the whole report compared byte for byte against the reference (run with that build's own addresses); the stack overruns are compared against patterns, since stack sizes differ.
 
 The four editor builds are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the cursor keys and arrows, Esc, editing a line in place, new, ^V doing nothing, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
+
+The six CP/M .COM files have also run under real CP/M 2.2, Digital Research's own BDOS and CCP, in z80pack's `cpmsim` (`testing/cpmsim.py`). There the suite's programs (all but two that need a clock or Z80 machine code) gave the reference's output on every build, on a Z80 that traps undocumented opcodes, and the 8080 builds also on an 8080. The one difference, everywhere, was the byte FEh in a string, which that BDOS doesn't print (see The language). Both editor builds were also driven by hand there: listing, running, a typed line, `/~`, an error, Ctrl-C, writing a file and reading it back. The Z80 builds don't run on an 8080 or 8085 (they use Z80 instructions throughout); use the 8080 builds there.
 
 The Windows builds run in the Unicorn emulator (`testing/harness_win32.py`): the .EXE is mapped as Windows would map it, and the dozen `kernel32` calls it makes are modelled. They go through the same suite as the others, the break-key tests and the editor sessions included, plus a few tests of their own (the report on standard error, redirected input, the arrow keys, the command line). That tests the interpreter, and the header against the rules; it can't show that Windows itself accepts the file, or that the model of each call is right.
 

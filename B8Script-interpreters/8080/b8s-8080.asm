@@ -940,15 +940,15 @@ pesc:   CPI     7Eh
 
 ; /~ ( row col addr -- ): the two cells under the string's address go. In
 ; the checked build '$' is the routine prstr: its own return address goes
-; first, and hp1 calls it again afterwards. There a /~ that takes cells
-; that aren't there is s after the '$' (or at its NUL: see e_dollar), as for
-; any other character. chkstk stops a /~ only when the stack is already
-; past its empty place, so that, however many there are, what they write
-; stays in the spare bytes above the stack.
+; first, and hp1 calls it again afterwards. There each /~ first looks that
+; its two cells are there, and is s if not, before it prints anything.
 pat:
         IF      CHECKED
-        POP     D
-        CALL    chkstk
+        XTHL                    ; the text pointer over prstr's return address
+        LXI     H,(6-DSTOP)&0FFFFh ; a carry: the two cells aren't there
+        DAD     SP
+        JC      e_under
+        POP     H
         ENDIF
         POP     D               ; DE = the column
         XTHL                    ; HL = the row; the text pointer is kept
@@ -1373,9 +1373,9 @@ e_hi:   INR     B
         MVI     A,'U'
         JMP     error
 ; e_dollar: '$' ran into a NUL (in prstr): Q, with the string's address
-; back in TOS. prstr's return address goes first. But if a /~ took cells
-; that weren't there, it is s, found now: chkstk, called one cell up, sees
-; the stack past its empty place then.
+; back in TOS. prstr's return address goes first. But if '$' had no
+; address at all (the stack was empty), it is s, found now: chkstk, called
+; one cell up, sees the stack past its empty place then.
 e_dollar:POP    D
         POP     H
         CALL    chkstk

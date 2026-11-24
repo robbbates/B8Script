@@ -929,15 +929,15 @@ pesc:   CP      7Eh
 
 ; /~ ( row col addr -- ): the two cells under the string's address go. In
 ; the checked build '$' is the routine prstr: its own return address goes
-; first, and hp1 calls it again afterwards. There a /~ that takes cells
-; that aren't there is s after the '$' (or at its NUL: see e_dollar), as for
-; any other character. chkstk stops a /~ only when the stack is already
-; past its empty place, so that, however many there are, what they write
-; stays in the spare bytes above the stack.
+; first, and hp1 calls it again afterwards. There each /~ first looks that
+; its two cells are there, and is s if not, before it prints anything.
 pat:
         IF      CHECKED
-        POP     DE
-        CALL    chkstk
+        EX      (SP),HL         ; the text pointer over prstr's return address
+        LD      HL,(6-DSTOP)&0FFFFh ; a carry: the two cells aren't there
+        ADD     HL,SP
+        JP      C,e_under
+        POP     HL
         ENDIF
         POP     DE              ; DE = the column
         EX      (SP),HL         ; HL = the row; the text pointer is kept
@@ -973,6 +973,32 @@ phide:  XOR     A               ; /`  (A = 0: hide)
 pshow:  LD      E,'h'           ; /|  ESC [ ? 2 5 h
         DB      0DAh            ; (JP C,nn: with no carry it steps over two bytes)
 phide:  LD      E,'l'           ; /`  ESC [ ? 2 5 l
+        ENDIF
+        IF      ANS*CHECKED
+; (The checked build prints the fixed parts with pmsg, which it has for the
+; report: shorter than a character at a time.)
+        CALL    pmsg
+        DB      27,'[?25',22h
+pse:    LD      A,E             ; then E
+        RST     28h
+        RET
+
+; pcon: /{ /| /}, with A = 0, 1, 2. /{ runs on into cse.
+pcon:   DEC     A
+        JR      Z,pshow         ; /|
+        LD      E,'K'
+        JP      P,cse           ; /}  ESC [ K
+        LD      E,'H'           ; /{  ESC [ H ESC [ J
+        CALL    cse
+        LD      E,'J'           ; (on into cse)
+; cse: ESC [ and then E. csi: ESC [. Both keep HL.
+cse:    CALL    csi
+        JR      pse
+csi:    CALL    pmsg
+        DB      27,'[',22h
+        RET
+        ENDIF
+        IF      ANS*(1-CHECKED)
         LD      A,'?'
         CALL    csia
         LD      A,'2'
@@ -1435,9 +1461,9 @@ e_break:LD      A,'B'           ; Ctrl-C (found inside pollk or getk)
 errp:   POP     DE
         JR      error
 ; e_dollar: '$' ran into a NUL (in prstr): Q, with the string's address
-; back in TOS. prstr's return address goes first. But if a /~ took cells
-; that weren't there, it is s, found now: chkstk, called one cell up, sees
-; the stack past its empty place then.
+; back in TOS. prstr's return address goes first. But if '$' had no
+; address at all (the stack was empty), it is s, found now: chkstk, called
+; one cell up, sees the stack past its empty place then.
 e_dollar:POP    DE
         POP     HL
         CALL    chkstk

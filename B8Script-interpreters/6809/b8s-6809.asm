@@ -1,10 +1,10 @@
 ; =============================================================================
 ;  B8Script interpreter for the Motorola 6809
-;  Spec: docs/b8script.md (2026-11-21).
+;  Spec: docs/b8script.md (2026-11-24).
 ;  Follows the design of the Z80 interpreter (z80/b8s-z80.asm).
 ;
-;  Two builds, selected by the CHECKED line below (CPM is always 0: the 6809
-;  has no CP/M; the line is kept only so that build.sh works):
+;  Two switches, in the EQU lines below (CPM is always 0: the 6809 has no
+;  CP/M; the line is kept only so that build.sh works):
 ;    CHECKED  0 = no checks (spec: an unchecked build checks nothing)
 ;             1 = a checked build: variables start at 0, words start
 ;                 undefined, and every error in the spec's table stops the
@@ -18,6 +18,10 @@
 ;                 W bad character after [, U undefined word, Q no closing
 ;                 quote, X reserved byte, Z divide by zero, N unbalanced or
 ;                 mismatched brackets, B Ctrl-C.
+;    ANSI     what the console escapes of '$' (/{ /} /| /` /~) do:
+;             1 = send ANSI (VT100) sequences through CONOUT
+;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
+;                 CONAT (see the equates)
 ;
 ;  In both builds Ctrl-C stops a running program (the unchecked build goes
 ;  to EXIT without a word): see the console layer below for the rules, the
@@ -28,6 +32,7 @@
 
 CPM     EQU     0               ; always 0 (no CP/M on the 6809)
 CHECKED EQU     0               ; 1 = checked build
+ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
 
 ; -----------------------------------------------------------------------------
 ;  Register use, everywhere in the interpreter
@@ -80,8 +85,9 @@ CHECKED EQU     0               ; 1 = checked build
 ;                 after the NUL and grows to HEAPLIM*256 (F000h)
 ;    F000h-       this image (ROM). The reset vector (FFFEh) must point to
 ;                 `start` (see the listing); the image does not contain it.
-;    FF03h-FF0Bh  the console routines (CONOUT, KEY) and EXIT are supplied
-;                 by the system and need no space here.
+;    FF03h-FF17h  the console routines (CONOUT, KEY, and with ANSI = 0
+;                 CONCLS, CONEOL, CONCUR, CONAT) and EXIT are supplied by
+;                 the system and need no space here.
 ;
 ;  The stacks sit below the letter page, so "the program's own space" (what
 ;  the checked build lets ! and . write) is the single range LET..HEAPLIM*256.
@@ -95,6 +101,16 @@ CONOUT  EQU     0FF03h          ; print the character in A
 EXIT    EQU     0FF09h          ; where to go when the program ends
 ;   Both are called with JSR. They may change A and CC and must preserve
 ;   B, X, Y, U and DP.
+        IF      1-ANSI
+; With ANSI = 0 the console escapes of '$' call these, with JSR. All four
+; may change A, B, X and CC, and must keep Y, U and DP.
+CONCLS  EQU     0FF0Ch          ; /{  clear the screen, the cursor to the top left
+CONEOL  EQU     0FF0Fh          ; /}  clear from the cursor to the end of the line
+CONCUR  EQU     0FF12h          ; /| and /`  show the cursor if A is not 0, hide
+                                ;     it if A = 0
+CONAT   EQU     0FF15h          ; /~  the cursor to row X, column D, both counted
+                                ;     from 0
+        ENDIF
 RSPAGE  EQU     80h
 DSPAGE  EQU     81h
 LETPAGE EQU     82h
@@ -117,6 +133,8 @@ PEND    EQU     38h             ; checked: the program's end, the first byte
                                 ;   after its NUL (big-endian): the heap's floor
 SSAV    EQU     3Ah             ; checked: S as each character starts (big-
                                 ;   endian): the return stack an error reports
+PSAV    EQU     3Ch             ; checked: the address '$' prints from (big-
+                                ;   endian), put back on the stack for a Q
 BRKOFF  EQU     7Bh             ; the break-off cell (827Bh, z9+): 0 = the
                                 ;   break key is on
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
@@ -897,31 +915,6 @@ h_emit: LDA     1,U             ; "'"
 h_drop: LEAU    2,U             ; ';'
         RTS
 
-; '$' prints the string at TOS, decoding escapes: '/' plus a character
-; clears that character's bit 6 (/M is CR, /` is space; '/' and '"' have no
-; bit 6, so // and /" give themselves).
-; Checked: a NUL (not one escaped by '/') stops with Q, the string's address
-; still on the stack.
-h_print:LDX     ,U
-pr0:    LDA     ,X+
-        IF      CHECKED
-        LBEQ    e_quote
-        ENDIF
-        CMPA    #22h
-        BEQ     h_drop
-        CMPA    #'/'
-        BNE     pr1
-        LDA     ,X+
-        ANDA    #0BFh
-pr1:
-        IF      1-CHECKED
-        BSR     putc
-        ENDIF
-        IF      CHECKED
-        JSR     CONOUT
-        ENDIF
-        BRA     pr0
-
 ; '!' ( n addr -- ) is '.' with the high byte stored first. The cell in
 ; memory is little-endian.
 ; Checked: both bytes must be in the program's space, and they are tested
@@ -1137,6 +1130,22 @@ h_sub:  JSR     isdig
         SUBD    ,U++
         BRA     st
 
+; '$' prints the string at TOS, decoding escapes: '/' plus a character from
+; 60h to 7Eh is one of the escapes at pesc; '/' plus any other character
+; clears that character's bit 6 (/M is CR, /? is DEL's '?'; '/' and '"' have
+; no bit 6, so // and /" give themselves). The address comes off the stack
+; first, and Y walks the string (the IP waits on S), so that /~ finds its
+; row and column on top, and an escape may use A, B, X and the routines.
+; Checked: a NUL (not one escaped by '/') stops with Q, the string's
+; address put back on the stack (from PSAV) over what any /~ left.
+; (The loop is with the tail, past the second range.)
+h_print:PSHS    Y
+        PULU    Y
+        IF      CHECKED
+        STY     <PSAV
+        ENDIF
+        BRA     pr0
+
 ; ---- the tail ---------------------------------------------------------------
 ; '/' is the last handler, so what follows its first byte may lie past the
 ; second range: the divide itself and the routines after it.
@@ -1206,5 +1215,123 @@ ud2:    LEAX    -1,X
         BNE     ud1
 ud3:    STD     ,U
         RTS
+
+; The loop of '$' (see h_print).
+pr0:    LDA     ,Y+
+        IF      CHECKED
+        BEQ     prq
+        ENDIF
+        CMPA    #22h
+        BEQ     pr9
+        CMPA    #'/'
+        BNE     pr1
+        LDA     ,Y+
+        SUBA    #60h            ; ` 0, a-z 1-26, { 27, | 28, } 29, ~ 30
+        CMPA    #1Fh
+        BHS     pr2
+        BSR     pesc
+        BRA     pr0
+pr2:    ADDA    #60h            ; any other: bit 6 goes
+        ANDA    #0BFh
+pr1:    JSR     CONOUT
+        BRA     pr0
+pr9:    PULS    Y,PC
+        IF      CHECKED
+prq:    LDX     <PSAV
+        PSHU    X
+        JMP     e_quote
+        ENDIF
+
+; pesc: the escapes of '$'. A = the character after the '/', minus 60h
+; (0 to 30); Y points past it. Each returns to the loop with an RTS, its
+; own or that of the routine it ends by jumping to. A, B and X are free.
+;    /a-/z   print the variable, as '#' does
+;    /{      clear the screen, the cursor to the top left
+;    /}      clear from the cursor to the end of the line
+;    /|  /`  show the cursor, hide it
+;    /~      ( row col -- ) the cursor to that row and column, from 0
+pesc:   CMPA    #27
+        BHS     pcon
+        ASLA                    ; (` leaves A = 0: hide)
+        BEQ     phide
+        LDX     #LET+40h-2      ; the variable's cell (little-endian)
+        LDD     A,X
+        EXG     A,B
+        PSHU    D
+        JMP     h_num
+        IF      1-ANSI
+pcon:   LBEQ    CONCLS          ; /{
+        CMPA    #29
+        LBEQ    CONEOL          ; /}
+        BHI     pat
+phide:  JMP     CONCUR          ; /|  (A = 28: show), /`  (A = 0: hide)
+        ENDIF
+pat:
+        IF      CHECKED
+        ; /~ checks first that there are a row and a column (with less it
+        ; is s, and the stack counts as empty): U is never let past the
+        ; top of the stack, however many /~ there are.
+        CMPU    #DSTOP-4
+        LBHI    e_ds            ; (N is clear: an underflow)
+        ENDIF
+        IF      1-ANSI
+        PULU    D,X             ; /~  D = the column, X = the row
+        JMP     CONAT
+        ENDIF
+        IF      ANSI
+; /~  ESC [ row+1 ; col+1 H (ANSI counts from 1)
+        PULU    D,X             ; D = the column, X = the row
+        ADDD    #1
+        LEAX    1,X
+        PSHU    D
+        PSHU    X
+        BSR     csi
+        JSR     pdec
+        BSR     pm
+        FCB     ';'+80h
+        JSR     pdec
+        BSR     pm
+        FCB     'H'+80h
+        RTS
+pcon:   BEQ     pcls            ; /{
+        CMPA    #29
+        BEQ     peol            ; /}
+        BHI     pat
+        BSR     pcsi            ; /|  ESC [ ? 2 5 h
+        FCB     "?25",'h'+80h
+        RTS
+phide:  BSR     pcsi            ; /`  ESC [ ? 2 5 l
+        FCB     "?25",'l'+80h
+        RTS
+pcls:   BSR     pcsi            ; /{  ESC [ H ESC [ J
+        FCB     'H'+80h
+        BSR     pcsi
+        FCB     'J'+80h
+        RTS
+peol:   BSR     pcsi            ; /}  ESC [ K
+        FCB     'K'+80h
+        RTS
+; pcsi: ESC [ and then the text after the call, as pmsg. csi: ESC [.
+csi:    BSR     pm
+        FCB     27,'['+80h
+        RTS
+pcsi:   BSR     csi
+        ENDIF
+        IF      ANSI*(1-CHECKED)
+; pmsg: print the text after the call, up to and including the character
+; that has bit 7 set (it is printed without it), then return after it.
+; (The checked build has its own, with the report: pm leads to it.)
+pm:
+pmsg:   PULS    X
+pm1:    LDA     ,X
+        ANDA    #7Fh
+        JSR     CONOUT
+        TST     ,X+
+        BPL     pm1
+        JMP     ,X
+        ENDIF
+        IF      ANSI*CHECKED
+pm:     JMP     pmsg
+        ENDIF
 
 imgend:

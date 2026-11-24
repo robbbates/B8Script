@@ -1,7 +1,7 @@
 ; =============================================================================
 ;  B8Script interpreter for the 6502 (NMOS opcodes only), with the data stack
 ;  in zero page
-;  Spec: docs/b8script.md (2026-11-21). -n? does no more editing than
+;  Spec: docs/b8script.md (2026-11-24). -n? does no more editing than
 ;        Backspace. Ctrl-C stops every build (see the console layer); the
 ;        break-off cell is BRKOFF, $047B.
 ;
@@ -11,7 +11,7 @@
 ;  addressing modes make nearly every handler smaller. The language is the
 ;  same; the memory map and the machine-code contract differ.
 ;
-;  One switch, set in the EQU line below:
+;  Two switches, set in the EQU lines below:
 ;    CHECKED  0 = no checks: whatever the spec calls unsafe is not caught
 ;             1 = a checked build, as in the spec's "Errors and checked
 ;                 builds": at startup every word cell points at 0000h (see
@@ -26,11 +26,16 @@
 ;                   Stk 2: 5 0
 ;                   Rtn 0
 ;                 and then goes to EXIT.
+;    ANSI     what the console escapes of '$' (/{ /} /| /` /~) do:
+;             1 = send ANSI (VT100) sequences through CONOUT
+;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
+;                 CONAT (see the equates)
 ;
 ;  Assembler: asm80, C6502 mode.
 ; =============================================================================
 
 CHECKED EQU     0               ; 1 = checked build
+ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
 
 ; -----------------------------------------------------------------------------
 ;  Registers and zero page
@@ -79,13 +84,18 @@ T2      EQU     06h
 D0      EQU     08h             ; divisor (division, number printing)
 D1      EQU     09h
         IF      CHECKED
-PLACE   EQU     D0              ; 08-09 the address of the character being
-                                ;   run, for the error report. No handler
-                                ;   uses D0/D1 before it can stop.
+PLACE   EQU     02h             ; 02-03 the address of the character being
+                                ;   run, for the error report. (Machine code
+                                ;   may change it: that matters only if it
+                                ;   also leaves a stack overrun, whose
+                                ;   report then shows a wrong place.)
+; '$' keeps the string's address meanwhile, for a Q report, in $0A-$0B
+; (machine code can't run while '$' does, and a full stack with '/a' reaches
+; down to $0C only):
+PSAVE   EQU     0Ah
 ; The error report runs after the program, so it may use the zero page that
-; machine code has ($02, $03, $0A-$0D; but not $0A-$0D once it prints
-; numbers, since a full stack and '#' reach down to them):
-P       EQU     02h             ; 02-03 the place, copied (D0/D1 go to '#')
+; machine code has ($0A-$0D; but not $0A-$0D once it prints numbers, since a
+; full stack and '#' reach down to them):
 LN      EQU     0Ah             ; 0A-0B the line being reported
         ENDIF
 
@@ -114,6 +124,16 @@ KEY     EQU     0FF06h          ; a waiting key in A, or A = 0 if none is
 CONOUT  EQU     0FF03h          ; print the character in A
 EXIT    EQU     0FF09h          ; where to go when the program ends
 ;   KEY and CONOUT must preserve X and Y.
+        IF      1-ANSI
+; With ANSI = 0 the console escapes of '$' call these. All four must keep X;
+; they may change A, Y and the flags.
+CONCLS  EQU     0FF0Ch          ; /{  clear the screen, the cursor to the top left
+CONEOL  EQU     0FF0Fh          ; /}  clear from the cursor to the end of the line
+CONCUR  EQU     0FF12h          ; /| and /`  show the cursor if the carry is set,
+                                ;     hide it if the carry is clear
+CONAT   EQU     0FF15h          ; /~  the cursor to row A, column Y, both
+                                ;     counted from 0
+        ENDIF
 DSE     EQU     0F0h            ; X when the data stack is empty
 DSFULL  EQU     10h             ; X when it is full
 LETPAGE EQU     04h
@@ -252,23 +272,29 @@ next:   JSR     step
 
 ; ---- handlers of ! " # $ % & ' ( : they must start in this page -------------
 
-; '$' prints the string at TOS, decoding escapes: '/' plus a character
-; clears that character's bit 6 (/M is CR, /` is space; '/' and '"' have no
-; bit 6, so // and /" give themselves).
-; The checked build walks a copy of TOS along the string, so that the address
-; is still there if it stops with Q on a NUL.
-h_print:
+; '$' prints the string at TOS, decoding escapes: '/' plus a character from
+; 60h to 7Eh is one of the escapes at pesc; '/' plus any other character
+; clears that character's bit 6 (/M is CR, /? is DEL's '?'; '/' and '"' have
+; no bit 6, so // and /" give themselves). TOS walks along the string; the
+; checked build keeps the address in PSAVE meanwhile, for a Q report.
         IF      CHECKED
-        JSR     h_dup           ; the copy
-        JSR     pr0
-        BNE     pdrop           ; always (X is never 0): drop the address
-e_qpr:  INX
-        INX                     ; the copy goes: the address is TOS again
-e_quote:LDA     #'Q'            ; $ or a string from 22h ran into the end
+e_qpr:  LDA     PSAVE           ; '$' ran into the end: the string's address
+        STA     0,X             ;   is TOS again
+        LDA     PSAVE+1
+        STA     1,X
+e_quote:LDA     #'Q'            ; a string runs into the end
         JMP     error
-pr0:
+h_print:LDA     0,X
+        STA     PSAVE
+        LDA     1,X
+        STA     PSAVE+1
+        BCC     pr0             ; always: the carry is clear on the way in
         ENDIF
-        JSR     tosget
+        IF      1-CHECKED
+h_print EQU     pr0
+        ENDIF
+pesc0:  JSR     pesc            ; (an escape, and back into the loop)
+pr0:    JSR     tosget
         CMP     #22h
         BEQ     pdrop
         IF      CHECKED
@@ -278,14 +304,13 @@ pr0:
         CMP     #'/'
         BNE     pr1
         JSR     tosget
-        AND     #0BFh
+        CMP     #60h
+        BCC     pr2
+        CMP     #7Fh
+        BCC     pesc0           ; 60h-7Eh, and the carry is clear
+pr2:    AND     #0BFh
 pr1:    JSR     CONOUT
-        IF      1-CHECKED
-        JMP     h_print
-        ENDIF
-        IF      CHECKED
         JMP     pr0
-        ENDIF
 
 ; 22h pushes the address of the text after it and skips the string.
 h_str:  JSR     puship
@@ -887,6 +912,104 @@ chkst:  PHA
 
         UDIV
 
+; pesc: the escapes of '$'. A = the character after the '/', 60h to 7Eh, and
+; the carry is clear. Each returns into the loop.
+;    /a-/z   print the variable, as '#' does
+;    /{      clear the screen, the cursor to the top left
+;    /}      clear from the cursor to the end of the line
+;    /|  /`  show the cursor, hide it
+;    /~      ( row col addr -- addr ): the cursor to that row and column,
+;            from 0. The two cells under the string's address go.
+        IF      1-ANSI
+pesc:   SBC     #7Ah            ; (the carry is clear: - 7Bh) { 0, | 1, } 2,
+        BCC     pe1             ;   ~ 3, with the carry; ` and a-z: E5h-FFh
+        BEQ     pcls            ; {
+        LSR                     ; | 0, } 1, ~ 1; the carry set for | and ~
+        BEQ     pcur            ; |  show: the carry is set
+        BCS     pat             ; ~
+        JMP     CONEOL          ; }
+pcls:   JMP     CONCLS
+pe1:    CMP     #0E6h           ; ` is E5h
+        BCC     pcur            ; `  hide: the carry is clear
+        ADC     #39h            ; a-z: A = the letter - 41h, as step has it
+        JSR     lower           ;   for lower: the variable's address,
+        JSR     h_fetch         ;   its value,
+        JMP     h_num           ;   printed (and TOS is the string again)
+pcur:   JMP     CONCUR
+        ENDIF
+        IF      ANSI
+pesc:   LDY     #M_CLS-MSG
+        SBC     #7Ah            ; (the carry is clear: - 7Bh) { 0, | 1, } 2,
+        BCC     pe1             ;   ~ 3, with the carry; ` and a-z: E5h-FFh
+        BEQ     prs             ; {  ESC [ H ESC [ J
+        LDY     #M_SHOW-MSG
+        LSR                     ; | 0, } 1, ~ 1; the carry set for ~
+        BEQ     prs             ; |  ESC [ ? 2 5 h
+        BCS     pat             ; ~
+        LDY     #M_EOL-MSG      ; }  ESC [ K
+        BNE     prs             ; always
+pe1:    CMP     #0E6h           ; ` is E5h
+        BCS     pvar
+        LDY     #M_HIDE-MSG     ; `  ESC [ ? 2 5 l
+        BNE     prs             ; always
+pvar:   ADC     #39h            ; a-z: A = the letter - 41h, as step has it
+        JSR     lower           ;   for lower: the variable's address,
+        JSR     h_fetch         ;   its value,
+        JMP     h_num           ;   printed (and TOS is the string again)
+        ENDIF
+        IF      CHECKED+ANSI
+; prs: print the message at MSG+Y; its last byte has bit 7 set. Y ends just
+; past it, at the next message.
+prs:    LDA     MSG,Y
+        PHA
+        AND     #7Fh
+        JSR     CONOUT
+        INY
+        PLA
+        BPL     prs
+        RTS
+        ENDIF
+
+; /~: the row is at 4,X, the column at 2,X, the string's address at 0,X.
+; Two swaps and two drops leave the address, 4 bytes up.
+pat:
+        IF      CHECKED
+        CPX     #DSE-5          ; fewer than two cells under TOS: s
+        BCS     e_sund
+        ENDIF
+        IF      1-ANSI
+        LDA     4,X             ; the row
+        LDY     2,X             ; the column
+        JSR     CONAT
+        ENDIF
+        IF      ANSI
+; ESC [ row+1 ; col+1 H (ANSI counts from 1). Three swaps put the row on top
+; and the address under the column: '#' prints the row and drops it, prints
+; the column and drops it, and TOS is the string's address again.
+        JSR     h_swap
+        INX
+        INX
+        JSR     h_swap
+        DEX
+        DEX
+        JSR     h_swap
+        LDY     #M_CSI-MSG
+        JSR     prs
+        JSR     inctos
+        JSR     h_num           ; the row + 1
+        LDA     #';'
+        JSR     CONOUT
+        JSR     inctos
+        JSR     h_num           ; the column + 1
+        LDA     #'H'
+        JMP     CONOUT
+        ENDIF
+        IF      1-ANSI
+        JSR     nip
+nip:    JSR     h_swap          ; nip: ( a b -- b )
+        JMP     drop
+        ENDIF
+
         IF      CHECKED
 ; The checked build's inner loop, out of page 1, where it would not fit,
 ; and its break check (described with the unchecked one in page 1).
@@ -1263,10 +1386,6 @@ rstip:  LDA     #<PROG
 ; and pops them again, so the stack is shown as it was. With the stack full
 ; (X = 0Eh) that reaches down to 0Ah, so nothing the report keeps is there.
 error:  PHA                     ; the letter
-        LDA     PLACE
-        STA     P
-        LDA     PLACE+1
-        STA     P+1             ; (the numbers need D0/D1)
         LDY     #M_ERR-MSG
         JSR     prs             ; CR LF "Err "
         PLA
@@ -1284,7 +1403,7 @@ error:  PHA                     ; the letter
         LDY     #M_NL-MSG
         JSR     prs
         LDY     #0              ; the text at the place
-er1:    LDA     (P),Y
+er1:    LDA     (PLACE),Y
         BEQ     er2
         CMP     #13
         BEQ     er2
@@ -1344,19 +1463,19 @@ er5:    LDY     #M_RTN-MSG
 prnum8: LDY     #0
 prnum:  JSR     pushay
         JMP     h_num
+        ENDIF
 
-; prs: print the message at MSG+Y; its last byte has bit 7 set. Y ends just
-; past it, at the next message.
-prs:    LDA     MSG,Y
-        PHA
-        AND     #7Fh
-        JSR     CONOUT
-        INY
-        PLA
-        BPL     prs
-        RTS
-
+        IF      CHECKED+ANSI
 MSG:
+        ENDIF
+        IF      ANSI
+M_CLS:  DB      27,'[','H',27,'[','J'+80h
+M_SHOW: DB      27,'[','?','2','5','h'+80h
+M_HIDE: DB      27,'[','?','2','5','l'+80h
+M_EOL:  DB      27,'[','K'+80h
+M_CSI:  DB      27,'['+80h
+        ENDIF
+        IF      CHECKED
 M_ERR:  DB      13,10,'Err',' '+80h
         DB      ' @',' '+80h
 M_NL:   DB      13,10+80h
@@ -1364,8 +1483,10 @@ M_STK:  DB      13,10,'Stk',' '+80h
 M_CD:   DB      ': ..','.'+80h
 M_C:    DB      ':'+80h
 M_RTN:  DB      13,10,'Rtn',' '+80h
+        ENDIF
 
-; lcol: the line (LN) and the column (T1/T2) of the place at P, both from
+        IF      CHECKED
+; lcol: the line (LN) and the column (T1/T2) of the place, both from
 ; 1. A place below the program is in the -n? line buffer: line 0, and the
 ; column is the place in the buffer. Otherwise IP (free now: the program has
 ; stopped) runs from PROG to the place, counting LFs; T1/T2 keeps where the
@@ -1377,9 +1498,9 @@ lcol:   LDA     #0
         STA     T1
         LDA     #>LINEBUF
         STA     T2
-        LDA     P
+        LDA     PLACE
         CMP     #<PROG
-        LDA     P+1
+        LDA     PLACE+1
         SBC     #>PROG
         BCC     lc9             ; below the program: line 0
         INC     LN
@@ -1389,9 +1510,9 @@ lc3:    LDA     IP              ; a line starts here
         LDA     IP+1
         STA     T2
 lc1:    LDA     IP
-        CMP     P
+        CMP     PLACE
         LDA     IP+1
-        SBC     P+1
+        SBC     PLACE+1
         BCS     lc9             ; at the place
         JSR     getc
         CMP     #10
@@ -1400,11 +1521,11 @@ lc1:    LDA     IP
         BNE     lc3
         INC     LN+1
         BNE     lc3             ; always
-lc9:    LDA     P
+lc9:    LDA     PLACE
         SEC
         SBC     T1
         STA     T1
-        LDA     P+1
+        LDA     PLACE+1
         SBC     T2
         STA     T2
         INC     T1              ; + 1

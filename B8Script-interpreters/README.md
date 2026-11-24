@@ -61,6 +61,7 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | `B8SZ80E.COM`, `B8SZ80EC.COM` | CP/M builds with the line editor; the C means checked. Run as `B8SZ80E PROG.B8S`, or with no file |
 | `win32/B8SWIN.EXE`, `B8SWINC.EXE`, `B8SWINE.EXE`, `B8SWINEC.EXE` | Windows command-shell builds: C means checked, E with the line editor. Run as `B8SWIN PROG.B8S` |
 | `*.lst` | The assembler's listings |
+| `TIMING.B8S` | Times `n?` on your machine, to tune the CP/M builds' count (see The language) |
 
 ## The language
 
@@ -70,7 +71,55 @@ The builds follow [`docs/b8script.md`](../docs/b8script.md) (2026-11-24). What t
 - Dividing by zero in an unchecked build returns two cells of no meaning (different on each CPU), and the stack stays balanced.
 - `[` followed by anything but a letter is taken as `[ ` in an unchecked build.
 - The CP/M builds print through BDOS 6, which can't print the bytes FFh and FEh: to BDOS 6, FFh means "read a key", and in Digital Research's CP/M 2.2 BDOS (an undocumented case, also in CP/M 3) FEh means "is a key waiting?". Neither reaches the screen. Found by running the test suite under real CP/M 2.2 (z80pack); see How they were tested.
+- **`n?` under CP/M** has no clock to go by: it counts keyboard checks (BDOS 6 calls), 4 a millisecond, which suits an RC2014 with RomWBW and ZPM3. On another machine it may run fast or slow: see Tuning `n?` under CP/M.
 - The memory maps, stack sizes, heap limits and system addresses are in the spec's appendices.
+
+## Tuning `n?` under CP/M
+
+CP/M has no clock a program can count on, so the CP/M builds time `n?` by counting keyboard checks: BDOS 6 calls, 4 to a millisecond. How long a call takes depends on the BIOS. On an RC2014 with RomWBW and ZPM3 one takes about 280 µs, and 4 of them make `n?` about 13% slow, which is the closest a whole number gets. A machine with a faster or slower BIOS can be tuned once:
+
+1. **Measure.** Run `B8SZ80 TIMING.B8S` (or whichever build you use) and time its step 1 with a watch. It should take 10 seconds. If it takes T seconds, the count your machine wants is 40 / T, rounded: 11.3 seconds gives 3.5, so 4; 5 seconds gives 8; 20 seconds gives 2. It must be 1 to 255. (Step 3 should take the same as step 1; step 4 just shows the machine's speed.)
+2. **Find the byte.** The count is one byte in the .COM file:
+
+   | File | File offset | Address once loaded | Pages (CP/M 2.2 SAVE) | Last address (CP/M 3 SAVE) |
+   |---|---|---|---|---|
+   | `B8SZ80.COM` | 1E8h | 2E8h | 4 | 4F8h |
+   | `B8SZ80C.COM` | 1E5h | 2E5h | 6 | 685h |
+   | `B8SZ80E.COM` | 1D8h | 2D8h | 7 | 76Dh |
+   | `B8SZ80EC.COM` | 1DEh | 2DEh | 8 | 8FFh |
+   | `B8S8080.COM` | 1D7h | 2D7h | 5 | 568h |
+   | `B8S8080C.COM` | 202h | 302h | 7 | 72Eh |
+
+   These move when the code changes: `testing/patchinfo.py` prints the table for the current builds.
+3. **Patch it**, in hex (8 is `08`, 12 is `0C`). Any one of these:
+   - **On a PC**, with a hex editor: the byte at the file offset (it holds `04` now).
+   - **CP/M 2.2**, with DDT, for `B8SZ80.COM`:
+     ```
+     A>DDT B8SZ80.COM
+     -S2E8
+     02E8 04 08
+     02E9 xx .
+     -G0
+     A>SAVE 4 B8SZ80.COM
+     ```
+     `S` shows the byte and takes the new one; `.` ends; `G0` leaves DDT; `SAVE` takes the page count from the table.
+   - **CP/M 3 or ZPM3**, where SAVE is a program run first, then the debugger:
+     ```
+     A>SAVE
+     A>SID B8SZ80.COM
+     #S2E8
+     02E8 04 08
+     02E9 xx .
+     #G0
+     Enter file (type RETURN to exit): B8SZ80.COM
+     Delete B8SZ80.COM? Y
+     Beginning hex address 100
+     Ending hex address 4F8
+     ```
+     (ZSID works the same way.)
+4. **Check.** Run `TIMING.B8S` again: step 1 should now take about 10 seconds.
+
+Two other waits are built from the same count: Ctrl-C's 250 ms wait for a second Ctrl-C, and the editor's 5 ms wait after Esc. The patch doesn't change them, and they don't need it: a little off either way does no harm.
 
 ## Building
 

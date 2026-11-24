@@ -122,10 +122,13 @@ HEAPLIM EQU     0F0h            ; the heap must stay below F000h (a page)
 BASE    EQU     0000h           ; where the image starts
         ENDIF
 
-MSLOOP  EQU     40              ; n? inner loop count for about 1 ms (1-255;
+MSLOOP  EQU     40-36*CPM       ; n? inner loop count for about 1 ms (1-255;
                                 ; the wait for a second Ctrl-C uses it too):
                                 ; each pass calls getk once, so tune it for
-                                ; your clock and your KEY routine
+                                ; your clock and your KEY routine. CP/M: 4,
+                                ; for a BDOS 6 call of about 280 us (an RC2014
+                                ; with RomWBW and ZPM3). A .COM can be
+                                ; patched: see TIMING.B8S.
 
 ; letter-page layout (offsets inside LETPAGE)
 LET     EQU     LETPAGE*256

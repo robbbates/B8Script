@@ -142,27 +142,27 @@ class Ed:
                     c = queue.pop(0)
                     if c >= 0x40:
                         break
-                c = {ord('C'): 6, ord('D'): 2}.get(c, 0)
+                c = {ord('C'): 'R', ord('D'): 'L'}.get(c, 0)      # an arrow key; ^B and ^F do nothing
             if c in (8, 127):
                 if cur:
                     cur -= 1
                     del buf[cur]
                     rest = buf[cur:] + b' '
                     out += b'\x08' + rest + b'\x08' * len(rest)
-            elif c >= 32 or c == 9:
+            elif c == 'L':
+                if cur:
+                    cur -= 1
+                    out.append(8)
+            elif c == 'R':
+                if cur < len(buf):
+                    out.append(buf[cur])
+                    cur += 1
+            elif c == 9 or (isinstance(c, int) and c >= 32):
                 if len(buf) < 125:
                     buf.insert(cur, c)
                     cur += 1
                     rest = buf[cur:]
                     out += bytes([c]) + rest + b'\x08' * len(rest)
-            elif c == 2:
-                if cur:
-                    cur -= 1
-                    out.append(8)
-            elif c == 6:
-                if cur < len(buf):
-                    out.append(buf[cur])
-                    cur += 1
             elif c in (13, 7, 12, 5, 18, 23, 14, 24):
                 out += b'\r\n'
                 typed = bytes(buf)
@@ -209,8 +209,7 @@ class Ed:
                 done += 1
             assert not events, 'a key was set for a line the list never reached'
         elif c == 14:
-            if queue and queue.pop(0) == 14:
-                del lines[:]
+            del lines[:]
         elif c == 18:
             if self.disk:
                 self.setname(typed)
@@ -285,15 +284,16 @@ def sessions():
         [R(b'%d %s' % (1 + i * 7 % (i + 1), b'"' + b'%d' % i + b'.' * (i * 5 % 110) + b'"$')) for i in range(40)]
         + [L, G, R(b'3'), R(b'30'), R(b'1'), L, G]),
     'a line of the full 125 characters': [R(b'1 ' + b'x' * 140), L, R(b'2 "' + b'y' * 119 + b'"$'), L,
-                                         R(b'3 ' + b'z' * 140 + B * 5 + b'QQ' + BS * 3 + b'RRRR'), L],
+                                         R(b'3 ' + b'z' * 140 + LEFT * 5 + b'QQ' + BS * 3 + b'RRRR'), L],
     'the character after the line number': [
         R(b'1 5#'), R(b'2 7 8+#'), R(b'3x9#'), R(b'2 '), L, G, R(b'2'), L, R(b'1  1#'), L],
     'Backspace and DEL': [R(BS * 2 + b'1 "abX' + BS + b'c"$'), R(b'2 9#' + b'\x7f' * 7 + b' 5 5*#'), L, G],
-    'the cursor: ^B and ^F, insert and delete in the middle': [
-        R(b'1 "ac"$' + B * 3 + b'b'), R(b'2 "xyz"$' + B * 9 + b'9' + F * 3 + b'A' + F * 9 + b' 1;'),
-        R(b'3 12345' + B * 3 + BS * 2 + b'6' + F + b'\x7f' + b'#'), L, G],
+    'the cursor: insert and delete in the middle': [
+        R(b'1 "ac"$' + LEFT * 3 + b'b'), R(b'2 "xyz"$' + LEFT * 9 + b'9' + RIGHT * 3 + b'A' + RIGHT * 9 + b' 1;'),
+        R(b'3 12345' + LEFT * 3 + BS * 2 + b'6' + RIGHT + b'\x7f' + b'#'), L, G],
+    '^B and ^F do nothing': [R(b'1 "a' + B * 3 + b'c"$' + F), R(b'2 "xy"$' + LEFT + B + b' ' + F), L, G],
     'the arrow keys': [R(b'1 "ac"$' + LEFT * 3 + b'b' + RIGHT + b'!' + LEFT + BS), R(b'2 7#' + UP + ESC + b'[1;5D' + b'7'), L, G],
-    'Esc drops the line': [b'1 "gone"$' + ESC, R(b' 5#'), b'' + ESC, R(b'1 6#') , b'2 x' + B + ESC, L],
+    'Esc drops the line': [b'1 "gone"$' + ESC, R(b' 5#'), b'' + ESC, R(b'1 6#') , b'2 x' + LEFT + ESC, L],
     'Esc and a key that is no arrow': [R(b' 1' + ESC + b'O2#'), R(b' 3' + ESC + b'[H#')],
     'keys that do nothing': [R(b' 1\x03\x01\n\x0f2#'), R(b'\n\x03\x04 5#')],
     'Tab is text': [R(b'1 \t7\t#'), L, G],
@@ -307,13 +307,13 @@ def sessions():
         (L, [(4, 3, None)]), (b'2' + L, [(2, 32, 3)]), (L, [(0, 3, None)]), R(b' 5#'), b'9' + L],
     'the data stack lasts from line to line': [
         R(b' 1 2 3'), R(b' +#'), R(b'1 10*'), G, R(b' #'), R(b' 4 5'), R(b' #" "$#')],
-    'edit a line': [R(b'1 "abc"$'), R(b'2 5#'), b'1' + E + R(B * 3 + b'X'), L, G,
+    'edit a line': [R(b'1 "abc"$'), R(b'2 5#'), b'1' + E + R(LEFT * 3 + b'X'), L, G,
                     b'2' + E + R(BS * 2 + b'77#'), L, G],
     'edit: no such line, a dropped edit, an emptied line': [
         R(b'1 1#'), R(b'2 2#'), b'9' + E, R(b' 7#'), b'0' + E, R(b' 8#'), b'2' + E + b'zzz' + ESC, L,
         b'1' + E + R(BS * 9), L, G, E, R(b' 9#')],
     'edit a line of the full length': [R(b'1 ' + b'x' * 125), b'1' + E + R(BS * 3 + b'abcd'), L],
-    'new': [R(b'1 1#'), R(b'2 2#'), N + b'x', L, N + G, L, N + N, L, R(b'1 3#'), L, G],
+    'new': [R(b'1 1#'), R(b'2 2#'), N, L, R(b'1 3#'), R(b'2 4#'), L, G, N, L, G],
     'no ^V: the key does nothing': [R(V + b' 6#'), R(b'1 "a"$'), R(b' 5' + V + b'#'), L],
 }
 
@@ -358,10 +358,10 @@ CHK_SESSIONS = {
 # What can't be modelled: a key pressed while a program is busy. (steps, keys
 # by count of characters printed, the patterns that must follow each other in
 # the output; checked: None = every build, True or False = only those.)
-RPT = rb'\r\nErr B @ %s,\d+\r\n[^\r\n]{0,16}\r\nStk \d+:[ \-\d.]*\r\nRtn \d+\r\n'
+RPT = rb'\r\nErr B @ %s,\d+\r\nD:\d+:[ \-\d.]*\r\nR:\d+\r\n'
 TIMED = {
     'Ctrl-C stops a program (checked)': (True, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L, R(b' ;')], [(40, b'\x03')],
-        [rb'\.{10,}' + RPT % b'1' + rb'\x1b\[\?25h 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb' ;\r\n\r\nErr s .*\r\nStk 0:\r\nRtn 0\r\n\x1b\[\?25h']),
+        [rb'\.{10,}' + RPT % b'1' + rb'\x1b\[\?25h 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb' ;\r\n\r\nErr s .*\r\nD:0:\r\nR:0\r\n\x1b\[\?25h']),
     'Ctrl-C stops a program (unchecked)': (False, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L], [(40, b'\x03')],
         [rb'\.{10,}\x1b\[\?25h 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n']),
     'Ctrl-C stops a typed line': (None, [R(b' 1("."$ 1)'), R(b' 8#')], [(40, b'\x03')], [rb'\.{10,}.* 8#\r\n8$']),
@@ -375,7 +375,7 @@ TIMED = {
     # past the stack's spare bytes, so word A survives. Then /~ works.
     'a /~ with nothing under it is s, and word A survives it': (
         True, [R(b'1 [A "a"$]'), G, R(b' "/~/~/~/~/~x"$'), R(b' A'), R(b' 1 2 3 4 "/~/~."$ A')], [],
-        [rb'\r\nErr s @ 0,15\r\n\$\r\nStk 0:\r\nRtn 0\r\n\x1b\[\?25h A\r\na 1 2 3 4 "/~/~\."\$ A\r\n'
+        [rb'\r\nErr s @ 0,15\r\nD:0:\r\nR:0\r\n\x1b\[\?25h A\r\na 1 2 3 4 "/~/~\."\$ A\r\n'
          rb'\x1b\[4;5H\x1b\[2;3H\.a$']),
     'the break key is on again for the next line': (
         None, [R(b' 1 %d.' % 0), R(b' 1("."$ 1)'), R(b' 8#')], [(60, b'\x03')], [rb'\.{10,}.* 8#\r\n8$']),

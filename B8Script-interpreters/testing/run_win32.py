@@ -116,7 +116,7 @@ def windows_only(exe, checked, editor, verbose):
             r = Run(exe, b'', [b' "abc"$ 1 0/\r'], mode='editor', files={})
             o = r.run()
             k = o.find(b'\r\nErr')
-            j = o.find(b'Rtn 0\r\n') + 7
+            j = o.find(b'R:0\r\n') + 5
             ok(k > 0 and set(r.handles[k:j]) == {'err'} and set(r.handles[:k]) == {'out'},
                'the editor\'s report goes to stderr, the echo to stdout', r)
     return fails

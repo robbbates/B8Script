@@ -19,11 +19,10 @@
 ;                 O (a store outside the program's space), U (undefined
 ;                 word), Q (no closing quote), W (bad character after [), X
 ;                 (a reserved byte), Z (divide by zero), N (brackets) or B
-;                 (Ctrl-C), printing the spec's four-line report:
+;                 (Ctrl-C), printing the spec's three-line report:
 ;                   Err Z @ 3,4
-;                   0/ "no"$
-;                   Stk 2: 5 0
-;                   Rtn 0
+;                   D:2: 5 0
+;                   R:0
 ;                 and then goes to EXIT.
 ;    ANSI     what the console escapes of '$' (/{ /} /| /` /~) do:
 ;             1 = send ANSI (VT100) sequences through CONOUT
@@ -226,7 +225,7 @@ next:
         ; underflow moves X up to FDh or FEh (no handler moves X by more
         ; than 2, but '$', whose /~ escapes each look first), and an
         ; overflow wraps it from 00h to FFh.
-        ; S is kept in RSV, for the report's Rtn line (an error found inside
+        ; S is kept in RSV, for the report's R: line (an error found inside
         ; a handler has its own calls on the hardware stack), and the place
         ; of the character about to run in PLACE.
         TXA                     ; TSX trashes X: keep it in A
@@ -252,13 +251,13 @@ e_rstack:LDA    RSV
         LDA     #'R'
         BCS     ejmp            ; S is 1Eh-1Fh: an overflow
         LDA     #0FFh
-        STA     RSV             ; S wrapped to 01h: Rtn 0
+        STA     RSV             ; S wrapped to 01h: R:0
         LDA     #'r'
         BNE     ejmp            ; always
 e_stack:CPX     #0FFh
         LDA     #'S'
         BCS     ejmp            ; X wrapped from 00h to FFh: an overflow
-        LDX     #DSE            ; an underflow: Stk 0
+        LDX     #DSE            ; an underflow: D:0
         LDA     #'s'
 ejmp:   JMP     error
         ENDIF
@@ -389,7 +388,7 @@ e_undef:PLA
         SBC     #0
         STA     PLACE+1
         INC     RSV
-        INC     RSV             ; Rtn does not count the call
+        INC     RSV             ; R: does not count the call
         LDA     #'U'
         BNE     ejmp3           ; always
         ENDIF
@@ -846,10 +845,10 @@ M_CSI:  DB      27,'['+80h
 M_ERR:  DB      13,10,'Err',' '+80h
         DB      ' @',' '+80h
 M_NL:   DB      13,10+80h
-M_STK:  DB      13,10,'Stk',' '+80h
+M_STK:  DB      13,10,'D',':'+80h
 M_CD:   DB      ': ..','.'+80h
 M_C:    DB      ':'+80h
-M_RTN:  DB      13,10,'Rtn',' '+80h
+M_RTN:  DB      13,10,'R',':'+80h
         ENDIF
 
 ; =============================================================================
@@ -1376,14 +1375,13 @@ exec:   LDA     TL
 ; =============================================================================
 
 ; error: the report, then EXIT. A = the letter, PLACE = the place, X = the
-; data stack to show, RSV = S for the Rtn line. Nothing here relies on S: an
+; data stack to show, RSV = S for the R: line. Nothing here relies on S: an
 ; overflowed or underflowed hardware stack wraps inside its page, and only
 ; its depth is shown.
 ;   CR LF
 ;   Err X @ line,col CR LF
-;   up to 16 characters from the place, raw, up to a CR, LF or NUL  CR LF
-;   Stk n: [...] and the top 8 cells at most, bottom to top  CR LF
-;   Rtn n CR LF
+;   D:n: [...] and the top 8 cells at most, bottom to top  CR LF
+;   R:n CR LF
 ; The numbers go through '#' (h_num), each pushed over the data stack first
 ; and popped again by '#', so the stack is shown as it was.
 error:  PHA                     ; the letter
@@ -1440,21 +1438,8 @@ lc9:    JSR     h_num           ; the line (and it is dropped)
         JSR     pushay
         JSR     inctos          ; + 1
         JSR     h_num           ; the column
-        LDY     #M_NL-MSG
-        JSR     prs
-        LDY     #0              ; the text at the place
-er1:    LDA     (PLACE),Y
-        BEQ     er2
-        CMP     #13
-        BEQ     er2
-        CMP     #10
-        BEQ     er2
-        JSR     CONOUT
-        INY
-        CPY     #16
-        BNE     er1
-er2:    LDY     #M_STK-MSG
-        JSR     prs             ; CR LF "Stk "
+        LDY     #M_STK-MSG
+        JSR     prs             ; CR LF "D:"
         TXA
         EOR     #0FFh
         SEC
@@ -1489,7 +1474,7 @@ er4:    LDA     T2              ; cells T2-1 down to 0, the top last
         JSR     prnum
         JMP     er4
 er5:    LDY     #M_RTN-MSG
-        JSR     prs             ; CR LF "Rtn "
+        JSR     prs             ; CR LF "R:"
         LDA     RSV
         EOR     #0FFh
         LSR                     ; (FFh - S) / 2 entries

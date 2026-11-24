@@ -882,9 +882,8 @@ e_brack:mov     al,'W'                  ; bad character after [
 ; place, EBX = TOS, and both stacks as the report is to show them:
 ;
 ;   Err X @ line,col
-;   up to 16 characters of the text from the place
-;   Stk n: the top 8 cells at most, bottom to top
-;   Rtn n
+;   D:n: the top 8 cells at most, bottom to top
+;   R:n
 ;
 ; It goes to the standard error handle. (The letter is written into the
 ; text of the first line. The texts end at a quote; prstr prints them, and
@@ -926,26 +925,12 @@ erlet:  db      'X @ ',22h
         movzx   eax,ax
         inc     eax
         CALLP   pdec                    ; the column
-        CALLP   pmsg
-        db      13,10,22h
-        push    16                      ; the text, as it is: 16 characters,
-        pop     ecx                     ;   or fewer if the line or the
-.er4:   lodsb                           ;   program ends first
-        test    al,al
-        jz      .er5
-        cmp     al,13
-        je      .er5
-        cmp     al,10
-        je      .er5
-        CALLP   putc
-        loop    .er4
-.er5:                                   ; the two stack lines:
-        ; Stk n: the top 8 cells at most, bottom to top
-        ; Rtn n
+        ; D:n: the top 8 cells at most, bottom to top
+        ; R:n
         ; The depth is 1 less than the dwords down to V_DSTOP (the cell
         ; that stands for TOS when the stack is empty).
         CALLP   pmsg
-        db      13,10,'Stk ',22h
+        db      13,10,'D:',22h
         mov     eax,[V(v_dstop)]
         sub     eax,esp
         shr     eax,2
@@ -970,7 +955,7 @@ erlet:  db      'X @ ',22h
         pop     ecx
         loop    .ps2
 .ps3:   CALLP   pmsg
-        db      13,10,'Rtn ',22h
+        db      13,10,'R:',22h
         mov     eax,RSTOP
         sub     eax,edi
         shr     eax,2
@@ -1058,7 +1043,8 @@ putc:   pushad
 ; on the input for the time, which starts again with its whole time after
 ; each event passed over. Only key-down events count: their character,
 ; or for the left and right arrow keys (virtual keys 25h and 27h, which
-; have none) ^B and ^F. Anything else is passed over.
+; have none) 1Ch and 1Eh, which the editor takes for them (a typed ^B or ^F
+; does nothing there). Anything else is passed over.
 ; Input that is not a console (a pipe or a file) is read a byte at a time
 ; with ReadFile, and only by a wait that is not just a look (a look would
 ; eat the input); at its end the interpreter exits.
@@ -1117,8 +1103,7 @@ waitk:  pushad
         sub     al,25h                  ; VK_LEFT 0, VK_RIGHT 2
         test    al,0FDh
         jnz     .wk1                    ; anything else: passed over
-        add     al,al
-        add     al,2                    ; ^B, ^F
+        add     al,1Ch                  ; 1Ch, 1Eh
         jmp     .wk9
 .wk6:   test    ebx,ebx                 ; not a console: a look finds nothing
         jz      .wk8
@@ -1404,12 +1389,13 @@ pmsg:   pop     ebx
 ;    name ^R   read the file of that name (no name: the current one: the
 ;              one from the command line, or the last one typed)
 ;    name ^W   write the program to that file (no name: the current one)
-;    ^N ^N     new: no program (the key twice in a row)
+;    ^N        new: no program
 ;    ^X        leave
 ;
 ;  Any other control key does nothing.
 ;
-;  In the line: ^B and ^F, or the left and right arrow keys, move the cursor;
+;  In the line: the left and right arrow keys move the cursor (^B and ^F do
+;  nothing);
 ;  a character goes in at the cursor; Backspace and DEL take out the one
 ;  before it; Esc drops the line (after Esc it waits 5 ms for a '[': Esc [ C
 ;  and Esc [ D are right and left too). Only CR, LF, BS and printing
@@ -1457,7 +1443,7 @@ cedln:  CALLP   rdnum
         jmp     ed1
 .ce9:   ret
 
-; ^F, right arrow: one to the right, by printing the character there
+; right arrow: one to the right, by printing the character there
 right:  cmp     ebx,edx
         je      ed1                     ; at the end
         mov     al,[ebx]
@@ -1482,7 +1468,7 @@ esc:    push    5
         je      right
         dec     al                      ; 'D'?
         jne     ed1                     ; no: on into left
-; ^B, left arrow: the cursor goes one to the left
+; left arrow: the cursor goes one to the left
 left:   cmp     bl,80h
         je      ed1                     ; at the start
         dec     ebx
@@ -1522,10 +1508,10 @@ ed1:    CALLP   ekey
         je      insc                    ; Tab is text
         cmp     al,8
         je      bsp
-        cmp     al,2
-        je      left                    ; ^B
-        cmp     al,6
-        je      right                   ; ^F
+        cmp     al,1Ch
+        je      left                    ; the left arrow key (see waitk)
+        cmp     al,1Eh
+        je      right                   ; the right arrow key
         cmp     al,1Bh
         je      esc
         push    edi                     ; a command key? Look it up
@@ -1614,12 +1600,9 @@ ctabr:  dw      exit-IB                 ; ^X
         dw      crun-IB                 ; ^G
         dw      cret-IB                 ; Return
 
-; ^N ^N: no program, if the next key is ^N too
-cnew:   CALLP   ekey
-        cmp     al,14
-        jne     cn9
-        mov     byte [ARENA+PROG],0
-cn9:    ret
+; ^N: no program
+cnew:   mov     byte [ARENA+PROG],0
+        ret
 
 ; delln: take line EAX out: copy everything after it down over it. Keeps ESI.
 delln:  push    esi

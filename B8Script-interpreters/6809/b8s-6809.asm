@@ -8,11 +8,10 @@
 ;    CHECKED  0 = no checks (spec: an unchecked build checks nothing)
 ;             1 = a checked build: variables start at 0, words start
 ;                 undefined, and every error in the spec's table stops the
-;                 program with the four-line report, then goes to EXIT:
+;                 program with the three-line report, then goes to EXIT:
 ;                   Err X @ line,col
-;                   <up to 16 characters of the text at the place>
-;                   Stk n: ... v v v      (n = depth, then the top 8 values)
-;                   Rtn n
+;                   D:n: ... v v v      (n = depth, then the top 8 values)
+;                   R:n
 ;                 S/s data stack over/underflow, R/r return stack over/
 ;                 underflow, H heap, O store outside the program's space,
 ;                 W bad character after [, U undefined word, Q no closing
@@ -1003,10 +1002,8 @@ e_quote:LDA     #'Q'            ; " or $ ran into the NUL
 ;
 ;     CR LF
 ;     Err X @ line,col CR LF
-;     <up to 16 raw characters from the place, ending early at CR, LF, NUL>
-;     CR LF
-;     Stk n:[ ...][ v]*  CR LF     (the top 8 cells, bottom to top, signed)
-;     Rtn n CR LF
+;     D:n:[ ...][ v]*  CR LF     (the top 8 cells, bottom to top, signed)
+;     R:n CR LF
 ;
 ;  and goes to EXIT. Line and column count from 1: the line is one more
 ;  than the LFs between PROG and the place, the column the distance from the
@@ -1066,21 +1063,7 @@ lc3:    LDD     <AT
         FCB     ','+80h
         BSR     pdec            ; the column
         BSR     pmsg
-        FCB     13,10+80h
-        ; the text at the place
-        LDX     <AT
-        LDB     #16
-tx1:    LDA     ,X+
-        BEQ     tx9
-        CMPA    #10
-        BEQ     tx9
-        CMPA    #13
-        BEQ     tx9
-        BSR     putc
-        DECB
-        BNE     tx1
-tx9:    BSR     pmsg
-        FCB     13,10,"Stk",' '+80h
+        FCB     13,10,"D",':'+80h
         ; the data stack: its depth, then its top 8 cells, from Y down to
         ; the program's top cell, at ,U.
         PSHS    U               ; where the walk ends
@@ -1105,7 +1088,7 @@ sl2:    CMPY    ,S
         BSR     h_num
         BRA     sl2
 sl9:    BSR     pmsg
-        FCB     13,10,"Rtn",' '+80h
+        FCB     13,10,"R",':'+80h
         LDD     #RSTOP          ; the return stack's depth, (RSTOP - S) / 2,
         SUBD    <SSAV           ;   S as it was when this character began
         BSR     pdh

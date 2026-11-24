@@ -180,16 +180,12 @@ class Ref:
         o = self.out
         line, col = self.linecol(place)
         o += b'\r\nErr %c @ %d,%d\r\n' % (ord(code), line, col)
-        for a in range(place, place + 16):
-            if self.m[a & 0xFFFF] in (0, 10, 13) or (self.pad and self.m[a & 0xFFFF] == 26):
-                break
-            o.append(self.m[a & 0xFFFF])
-        o += b'\r\nStk %d:' % len(self.ds)
+        o += b'D:%d:' % len(self.ds)
         if len(self.ds) > 8:
             o += b' ...'
         for v in self.ds[-8:]:
             o += b' %d' % self.s(v)
-        o += b'\r\nRtn %d\r\n' % len(self.rs)
+        o += b'\r\nR:%d\r\n' % len(self.rs)
 
     # What the console escapes send. A build with ANSI = 0 calls the
     # machine's own routines instead; the harnesses model those as sending

@@ -343,16 +343,14 @@ B8Script comes in two kinds of build. An **unchecked** build checks nothing, for
 
 ```
 Err X @ 4,16
-d@:*n@>\
-Stk 3: 1 2 42
-Rtn 1
+D:3: 1 2 42
+R:1
 ```
 
 - The report starts with CR LF, so it never lands in the middle of the program's output.
 - **Line 1:** `Err`, the code, `@`, then the line and column of the character that failed, both counted from 1. A line typed at a prompt or editor is line 0. Values up to 32767 are guaranteed; a build may print up to 65535. For `U` the place is the call; for `N` it is the opener where the skip started.
-- **Line 2:** up to 16 characters of the program text from that place, printed raw (escapes not decoded), stopping early at CR, LF or NUL.
-- **Line 3:** the data stack as it was when the error hit: `Stk`, the depth, then up to the top 8 values, bottom to top, so the top is last. More than 8 are shown as `…` and the top 8. For a `Q` from `$` the top is the string's address as `$` got it, not how far it had printed, over whatever cells its `/~` escapes left.
-- **Line 4:** `Rtn` and the return stack's depth.
+- **Line 2:** the data stack as it was when the error hit: `D:`, the depth and a colon, then up to the top 8 values, each after a space, bottom to top, so the top is last. More than 8 are shown as `…` and the top 8. For a `Q` from `$` the top is the string's address as `$` got it, not how far it had printed, over whatever cells its `/~` escapes left.
+- **Line 3:** `R:` and the return stack's depth.
 - The report goes to the console, or the platform's error channel where it has one, never into a program's redirected output.
 
 **After an error or a break,** a one-shot build returns to the OS or monitor. A build with a prompt or editor returns there, with both stacks cleared and words and variables kept.
@@ -710,8 +708,11 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 - **Keep TOS in a register.** On the Z80 and 8080 HL holds TOS, so `+` is `pop de` / `add hl,de`. Machine code never sees it there, because the code's own address was TOS and is consumed by the call.
 - **Walk with the IP.** The 6809's `$` parks the IP on the return stack and moves the string's address into the IP register, so the loop reads with the same post-increment addressing as the inner loop and one pull restores the IP and returns.
 - **Read a digit twice rather than save it.** The 6809's number reader adds the ASCII digit straight from the text and takes the `'0'` off at 16 bits, so the digit needs no register or stack slot of its own.
-- **Make "next" one byte.** On the Z80 and 8080, `RST` routines in page zero give one-byte calls for "next character", "drop, then next", "pop the return stack", "negate" and "print A". A handler ends in one byte instead of three.
-- **Use a spare register pair for the return stack.** The Z80 keeps the return-stack pointer in HL' (the alternate HL), so only the return-stack routines need `EXX`. The data stack is the CPU stack, which is what the machine-code contract wants anyway.
+- **Make "next" one byte.** On the Z80 and 8080, `RST` routines in page zero give one-byte calls for "next character", "drop, then next", "pop the return stack", "negate" and "print A". A handler ends in one byte instead of three. This is for a build that owns page zero: under CP/M, page zero is the system's.
+- **Without page zero, a register can hold "next".** The Z80 CP/M builds keep the address of the inner loop in IX for the whole run, so a handler ends with `JP (IX)`: two bytes, and faster than `JP`. Restore it after anything that may change it (the BDOS, machine code).
+- **Tail calls.** A routine that ends by calling another and returning can jump to it instead (`CALL putc / RET` is `JP putc`), and a routine whose last act is a call can be placed so that it falls into it.
+- **Use an index register for the return stack.** The Z80 keeps the return-stack pointer in IY. The data stack is the CPU stack, which is what the machine-code contract wants anyway.
+- **Leave the alternate registers alone.** Interrupt routines often use the Z80's alternate registers as their own, without saving them. An interpreter that kept state in them (as the Z80 one once kept its return-stack pointer in HL') can be corrupted at any moment on such a machine.
 
 **Dispatch tables**
 
@@ -794,10 +795,10 @@ This section is a suggestion, so that line editors on different machines feel al
 | `n`^E | Edit | Put line n in the input line to edit; Return replaces it |
 | ^R, `name`^R | Read | Load. With storage, from the named file. Without, by paste: raw text until ^Z or ^@ replaces the program |
 | ^W, `name`^W | Write | Save. With storage, to the current or named file. Without, print the raw text for the terminal to capture |
-| ^N ^N | New | Clear the program (pressed twice in a row) |
+| ^N | New | Clear the program |
 | ^X | eXit | Leave to the OS or monitor |
 | Esc (^[) | — | Cancel the line being typed |
-| ^B, ^F, ← → | Back, Forward | Move the cursor in the line, with insert and delete mid-line |
+| ← → | — | Move the cursor in the line, with insert and delete mid-line |
 | Backspace, Delete | — | Delete the character before the cursor |
 | ^C | — | Break a running program |
 
@@ -1019,16 +1020,16 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 
 | Build | File | Bytes | Notes |
 |---|---|---|---|
-| Generic ROM | `b8s-z80-rom-0000.bin` | 825 | Starts at 0000h (reset); owns page zero. `ANSI = 0`; with `ANSI = 1`, 876 |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,233 | With `ANSI = 1`, 1,280 |
-| CP/M runner | `B8SZ80.COM` | 957 | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` | 1,375 |  |
-| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,361 | The suggested standard under [Environments](#environments); see the interpreters README |
-| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,773 |  |
-| CP/M with the line editor | `B8SZ80E.COM` | 1,594 | `B8SZ80E PROG.B8S`, or with no file |
-| The same, checked | `B8SZ80EC.COM` | 2,014 |  |
+| Generic ROM | `b8s-z80-rom-0000.bin` | 835 | Starts at 0000h (reset); owns page zero. `ANSI = 0`; with `ANSI = 1`, 886 |
+| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,219 | With `ANSI = 1`, 1,266 |
+| CP/M runner | `B8SZ80.COM` | 1,017 | `B8SZ80 PROG.B8S` |
+| CP/M runner, checked | `B8SZ80C.COM` | 1,414 |  |
+| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,355 | The suggested standard under [Environments](#environments); see the interpreters README |
+| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,742 |  |
+| CP/M with the line editor | `B8SZ80E.COM` | 1,646 | `B8SZ80E PROG.B8S`, or with no file |
+| The same, checked | `B8SZ80EC.COM` | 2,048 |  |
 
-**Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), HL' is the return-stack pointer. A and DE are scratch.
+**Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), IY is the return-stack pointer. A and DE are scratch. In the CP/M builds IX holds the inner loop's address, so a handler ends with `JP (IX)`. The alternate registers are not used, so an interrupt routine may use them.
 
 **Memory map (generic build)**
 
@@ -1048,7 +1049,7 @@ Under CP/M the pages sit after the image and the heap limit is the BDOS. The bre
 
 **The break key.** The keyboard is looked at on every word call, block entry, true `)` and `{`, one time in 256. A program that stores a non-zero byte in the break-off cell gets Ctrl-C as key 3; two within about 250 ms still stop it. An unchecked build prints nothing when it is stopped.
 
-**Console interface (generic build).** `KEY` returns a waiting key in A, or A = 0 if none is waiting, with the zero flag matching A. `CONOUT` prints A. Both must keep BC, DE, HL and HL'. `EXIT` is jumped to when the program ends; in a build with the editor a program that ends goes back to the editor, and `LEAVE` is where ^X goes. `MSLOOP` sets the loop passes per millisecond for `n?`. `KEY` is also called while a program runs, for the break key, so it must not wait.
+**Console interface (generic build).** `KEY` returns a waiting key in A, or A = 0 if none is waiting, with the zero flag matching A. `CONOUT` prints A. Both must keep BC, DE, HL and IY. `EXIT` is jumped to when the program ends; in a build with the editor a program that ends goes back to the editor, and `LEAVE` is where ^X goes. `MSLOOP` sets the loop passes per millisecond for `n?`. `KEY` is also called while a program runs, for the break key, so it must not wait.
 
 **The console escapes.** Switch `ANSI`. With `ANSI = 1` they send the ANSI sequences through `CONOUT`; the CP/M builds always do. With `ANSI = 0` (the generic builds' default) they call four routines, at addresses set by equates:
 
@@ -1059,17 +1060,17 @@ Under CP/M the pages sit after the image and the heap limit is the BDOS. The bre
 | `CONCUR` (FF12h) | `/\|`, `` /` `` | Show the cursor, or hide it | A = 0 to hide, anything else to show | A, DE |
 | `CONAT` (FF15h) | `/~` | Cursor to a row and column, both from 0 | HL = the row, DE = the column (whole cells) | A, DE, HL |
 
-All four must keep BC and HL', and all but `CONAT` also HL. The flags may change.
+All four must keep BC and IY, and all but `CONAT` also HL. The flags may change.
 
 **Screen size.** Whatever the terminal or the machine's routines give: the interpreter doesn't know it.
 
-**Machine-code contract.** Entered by CALL, with the return address on top of the stack and the data cells above it. The code must keep BC and must leave 0008h–0033h intact (all of page zero on a generic build). A, DE, HL, IX, IY and the alternate registers may change; the interpreter saves HL' itself. It returns with RET (C9h), which the loader writes. On return, the cell on top of the stack becomes the new TOS. `RST 28h` prints the character in A and keeps BC, DE, HL and HL', on every Z80 build.
+**Machine-code contract.** Entered by CALL, with the return address on top of the stack and the data cells above it. The code must keep BC. A, DE, HL, IX, IY and the alternate registers may change; the interpreter restores IX and IY itself. It returns with RET (C9h), which the loader writes. On return, the cell on top of the stack becomes the new TOS. A generic build owns page zero: the code must leave it intact, and `RST 28h` prints the character in A, keeping BC, DE, HL and IY. A CP/M build doesn't use page zero, which is the system's: there, print through the BDOS.
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (923 bytes; 977 with `ANSI = 1`), `b8s-8080-rom-checked-0000.bin` (1,381; 1,435), `B8S8080.COM` (1,046), `B8S8080C.COM` (1,519).
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (926 bytes; 980 with `ANSI = 1`), `b8s-8080-rom-checked-0000.bin` (1,348; 1,402), `B8S8080.COM` (1,129), `B8S8080C.COM` (1,583).
 
-The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers, without HL') and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 097Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, so the routines keep BC (and HL where the Z80's do); and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
+The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers, without IY) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 0A7Bh in `B8S8080C.COM`), with these differences: the routines keep BC (and HL where the Z80's do); the return-stack pointer is a RAM cell; and the generic image's one-byte calls are `RST 1` to `RST 6` (08h, 18h, 20h, 28h and 30h), where `RST 5` (28h) prints A and keeps BC, DE and HL. The CP/M builds don't use page zero: there the same routines are CALLs and JMPs. The RET byte is C9h.
 
 ## Appendix C: 6502
 
@@ -1077,8 +1078,8 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
-| Bytes (unchecked, checked), `ANSI = 0` | 1,208 and 1,738 | 1,155 and 1,704 |
-| The same, `ANSI = 1` | 1,265 and 1,781 | 1,217 and 1,752 |
+| Bytes (unchecked, checked), `ANSI = 0` | 1,208 and 1,707 | 1,155 and 1,673 |
+| The same, `ANSI = 1` | 1,265 and 1,750 | 1,217 and 1,721 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
 | Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |
@@ -1108,7 +1109,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 ## Appendix D: 6809
 
-Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. Builds: `b8s-6809-rom-F000.bin` (873 bytes; 934 with `ANSI = 1`), `b8s-6809-rom-checked-F000.bin` (1,293; 1,342). The image starts at F000h, with label `start`: point the reset vector at it.
+Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. Builds: `b8s-6809-rom-F000.bin` (873 bytes; 934 with `ANSI = 1`), `b8s-6809-rom-checked-F000.bin` (1,264; 1,313). The image starts at F000h, with label `start`: point the reset vector at it.
 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|

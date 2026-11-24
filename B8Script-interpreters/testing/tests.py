@@ -96,18 +96,18 @@ CHK = [
 # must match that: a stack overrun is found once per character, so its place
 # can be a character late, and the sizes of the stacks differ from build to
 # build. No test may reach the "no" (it would be in the output twice).
-PLACE = rb'\r\nErr %c @ \d+,\d+\r\n[^\r\n\0]{0,16}\r\n'
+PLACE = rb'\r\nErr %c @ \d+,\d+\r\n'
 ERRS = [
     # data stack: s underflow (the stack then counts as empty), S overflow
-    ('e_under', b'1 2+ ;; "no"$', b'', PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
-    ('e_under2', b'1( + "no"$ 0)', b'', PLACE % b's' + rb'Stk 0:\r\nRtn 1\r\n'),
-    ('e_over', b'1( 7 1)', b'', PLACE % b'S' + rb'Stk \d{3}: \.\.\.( [71]){8}\r\nRtn 1\r\n'),
+    ('e_under', b'1 2+ ;; "no"$', b'', PLACE % b's' + rb'D:0:\r\nR:0\r\n'),
+    ('e_under2', b'1( + "no"$ 0)', b'', PLACE % b's' + rb'D:0:\r\nR:1\r\n'),
+    ('e_over', b'1( 7 1)', b'', PLACE % b'S' + rb'D:\d{3}: \.\.\.( [71]){8}\r\nR:1\r\n'),
     # ... and at the top level, with the return stack empty
-    ('e_over2', b'1 ' * 300, b'', PLACE % b'S' + rb'Stk \d{3}: \.\.\.( 1){8}\r\nRtn 0\r\n'),
+    ('e_over2', b'1 ' * 300, b'', PLACE % b'S' + rb'D:\d{3}: \.\.\.( 1){8}\r\nR:0\r\n'),
     # return stack: r underflow (it then counts as empty), R overflow
-    ('e_rund', b'1 2 ] "no"$', b'', PLACE % b'r' + rb'Stk 2: 1 2\r\nRtn 0\r\n'),
-    ('e_rund2', b'3 } "no"$', b'', PLACE % b'r' + rb'Stk \d: .*\r\nRtn 0\r\n'),
-    ('e_rover', b'[R R] 5 R', b'', PLACE % b'R' + rb'Stk 1: 5\r\nRtn \d{2,3}\r\n'),
+    ('e_rund', b'1 2 ] "no"$', b'', PLACE % b'r' + rb'D:2: 1 2\r\nR:0\r\n'),
+    ('e_rund2', b'3 } "no"$', b'', PLACE % b'r' + rb'D:\d: .*\r\nR:0\r\n'),
+    ('e_rover', b'[R R] 5 R', b'', PLACE % b'R' + rb'D:1: 5\r\nR:\d{2,3}\r\n'),
     # W: [ not followed by a letter or a space. The place is that character
     ('e_brack', b'[5 1] "no"$', b'', None),
     ('e_brack2', b'1 2 [[ 1] "no"$', b'', None),
@@ -163,18 +163,18 @@ ERRS = [
     ('e_stk8', b'-1 -2 -3 -4 -5 -6 -32768 0/', b'', None),
     # /~ with no row and column beneath the address: data-stack underflow,
     # found before the /~ does anything (nothing more of the string prints)
-    ('e_atund', b'"/~x"$ "no"$', b'', PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
-    ('e_atund2', b'5"/~x"$ "no"$', b'', PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
-    ('e_atund3', b'1 2"/~/~/~/~/~x"$ "no"$', b'', rb'\x1b\[2;3H' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
-    ('e_atund4', b'[A 1 2 3 "/~/~"$ "no"$] A "no"$', b'', rb'\x1b\[3;4H' + PLACE % b's' + rb'Stk 0:\r\nRtn 1\r\n'),
+    ('e_atund', b'"/~x"$ "no"$', b'', PLACE % b's' + rb'D:0:\r\nR:0\r\n'),
+    ('e_atund2', b'5"/~x"$ "no"$', b'', PLACE % b's' + rb'D:0:\r\nR:0\r\n'),
+    ('e_atund3', b'1 2"/~/~/~/~/~x"$ "no"$', b'', rb'\x1b\[2;3H' + PLACE % b's' + rb'D:0:\r\nR:0\r\n'),
+    ('e_atund4', b'[A 1 2 3 "/~/~"$ "no"$] A "no"$', b'', rb'\x1b\[3;4H' + PLACE % b's' + rb'D:0:\r\nR:1\r\n'),
     # $ with nothing on the stack at all: s (it may print junk first)
-    ('e_dollar0', b'$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
+    ('e_dollar0', b'$ "no"$', b'', rb'.*' + PLACE % b's' + rb'D:0:\r\nR:0\r\n'),
     # $ running into a NUL after /~ took its two cells: the stack shows the rest
     ('e_atq', b'4_x! 47x@. 126x@1+. 65x@2+. 0x@3+. 1 2 3 4 x@$ "no"$', b'', None),
     # ... and when a /~ took cells that weren't there first, it is s (found
     # at the /~, or at the NUL at the latest)
-    ('e_atq2', b'4_x! 47x@. 126x@1+. 0x@2+. x@$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
-    ('e_atq3', b'4_x! 47x@. 126x@1+. 0x@2+. 7 x@$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
+    ('e_atq2', b'4_x! 47x@. 126x@1+. 0x@2+. x@$ "no"$', b'', rb'.*' + PLACE % b's' + rb'D:0:\r\nR:0\r\n'),
+    ('e_atq3', b'4_x! 47x@. 126x@1+. 0x@2+. 7 x@$ "no"$', b'', rb'.*' + PLACE % b's' + rb'D:0:\r\nR:0\r\n'),
     # the report starts on a new line, whatever was printed before it
     ('e_out', b'"abc"$ 1 0/', b'', None),
 ]

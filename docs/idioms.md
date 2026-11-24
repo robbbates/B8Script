@@ -33,6 +33,7 @@ B8Script has only dup, drop and swap, so every other shuffle is built from those
 | Update and keep the new value | `:@ f@- :{ %! }` | Parks a copy of the result across the store (SUPERTRK) |
 | Read and mark | `:,%1%.` | `( addr -- old )` leaves the old byte and sets it to 1 (TRON) |
 | Store with the value pushed last | `1%.` | Address first, then value, then swap (LIFE, GREED) |
+| One value into two variables | `11:y!x!` | Dup, then two stores: the ball starts at 11, 11 (BREAKOUT in tweet280) |
 | Value and flag in one | `4:( ... 1-:)` | A nonzero count is already true, so `:` makes the loop flag (TICTAC) |
 | Count up, print after | `0 1( ... 1+1)#` | The score sits under the loop; a `\` inside ends it (SKI) |
 | Fold results under a loop | `0 0i! 1( ... \| i@1+:i! 16<)` | Start at 0 and OR each test in; start at −1 and AND for "all hold" (G2048, BATTLE, LIGHTS) |
@@ -76,7 +77,7 @@ Min and max work by copying both values, comparing, swapping when needed, and dr
 | Count matches | `0 0i! 1( ... a@= - i@1+:i! 64<)` | The same subtract-the-flag trick tallies a loop (REVERSI) |
 | Weighted score, no branches | `c@H 100&+ c@Q 3000&+ c@X 2000&-` | `flag n&` gives n or 0 to add or subtract (REVERSI, QUBIC) |
 | Random tie-break | `8* 8R+` | Equal scores are ordered by chance; unequal ones never swap (REVERSI, QUBIC) |
-| Keys to −1, 0, +1 | `:106=%108=-` | j gives −1, l gives +1, anything else 0 (SKI, BREAKOUT in tweet280); `:46=%44=-` does the same for `,` and `.`, to turn left or right (TRON, SNAKE, DUEL) |
+| Keys to −1, 0, +1 | `:106=%108=-` | j gives −1, l gives +1, anything else 0 (SKI, BREAKOUT in tweet280); `:46=%44=-` gives −1 for `.` and +1 for `,`, to turn one way or the other (TRON, SNAKE, DUEL) |
 | Bump 0 to 1 | `:0=-` | Adds 1 only when the value is 0 (NIM) |
 | Positive modulo | `c@- 3+3/%;` | Add the modulus before the remainder so the dividend is positive (RPS) |
 | Mod 3 compare to a score | `:1=%2=-` | 0, 1, 2 become 0, +1, −1 (RPS) |
@@ -200,6 +201,7 @@ v 1(
 | If-else on a copied flag | `:( then 0)0=( else 0)` | The flag stays on the data stack, so the then-part must leave the stack as it found it (KLONDIKE, LIGHTS) |
 | Else by NOT | `:( then 0)~( else 0)` | One byte shorter than `0=`; right only on a real −1/0 flag (SUPERTRK) |
 | Choose, then act once | `" CRASH"%5<(;" LANDED"0)$` | Push one string, swap in the other if the test says so, print once (LANDER) |
+| Choose one of three, print once | `" WIN"p@(;" LOSE"0)q@p@&(;" DRAW"0)$` | Each test that holds drops the message on the stack and pushes its own; one `$` prints what is left (DUEL in tweet280) |
 | Last case takes the selector | `:1=( ... 0) :2=( ... 0) 5=( ... 0)` | Every case copies but the last, so nothing is left to drop (BATTLE, QUBIC) |
 | Fast switch with its own break | `:16=:(;;+ 1 0)\` | The body drops flag and selector, works, and pushes 1 for the `\` (TINYBAS) |
 | While, tested at both ends | `n@( body n@)` | Runs zero or more times with no break (TINYBAS) |
@@ -378,7 +380,7 @@ B8Script's screen commands are five escapes inside the strings that `$` prints. 
 | Several places in one string | `3 0 1 0"/~Top/~Next"$` | Each `/~` takes the next pair, the first nearest the string |
 | Hide the cursor | ``"/`"$`` | At the start of a game that redraws |
 | Show the cursor | `"/\|"$` | Before the program ends |
-| Cursor word | `[Y"/~"$]` | `( row col -- )`; `Y` is one character shorter than writing the cursor escape into the string being placed |
+| Cursor word | `[Y"/~"$]` | `( row col -- )`; `5 10Y"Hi"$` is one character shorter than `5 10"/~Hi"$`, so the word's 8 characters pay off after about eight places |
 
 - **Counted from 0.** Row 0 is the top line and column 0 the left edge; on an 80 × 24 screen the last cell is row 23, column 79.
 - **Order of the pairs.** `/~` takes the column from just under the string's address and the row from under that; a second `/~` takes the pair below those. So push the pairs for a string's places last first.
@@ -403,6 +405,8 @@ B8Script's screen commands are five escapes inside the strings that `$` prints. 
 | Overwrite a line | `"/M/}"$` | CR then clear to the end of the line hides what was shown (SIMON) |
 | Clear a panel | Print a row of spaces on each line | Clears part of the screen, not all of it (IDOL) |
 | Status at the bottom | `17 0"/~score /l"$` | Place, label and value in one string (SNAKE, TRON) |
+| Zero a counter and home the cursor | `0:c!:"/~"$` | `0:` makes two zeros: one is stored in c, and `:` doubles the other into row 0, column 0 (MINE390) |
+| Mark the map and draw from one index | `96 1(1-:32+:g@+1%.32/1+"/~#"$:);` | The bricks lie one map row down, so the same index marks the map byte and, through `32/`, gives the screen row and column (BREAKOUT in tweet280) |
 
 ## Random numbers
 
@@ -488,7 +492,7 @@ Every character costs a byte of memory and a dispatch each time it runs, so the 
 | Keep a counter on the stack | `1-` is 2 bytes; `t@1-t!` is 6 (b8sms) |
 | Print one character with `'` | `32'` is 3 bytes; `" "$` is 4 |
 | Put variables in the text | `"Day /d"$` is 9 bytes; `"Day "$d@#` is 10, and each further number saves 4 more (most games) |
-| Place text with the escape | `5 10"/~Hi"$` in one string, rather than a cursor word and then the string |
+| Place text with the escape, for a few places | `5 10"/~Hi"$` needs no word; past about eight places a cursor word `[Y"/~"$]` is shorter overall (IDOL keeps Y; MAZE and DUEL write the escape) |
 | Let the value be the flag | `4:(` pushes a count and enters the loop (TICTAC) |
 | Use `~` for an else on a real flag | One byte less than `0=` |
 | Double with `:+`, halve with `2/;` | Both are fast; other multiplies and divides run the full routine |

@@ -23,7 +23,7 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | Z80 with the line editor | 1,488 | 1,358 | 1,407 | 1,796 | 1,765 | 1,814 |
 | 8080 | 854 | 925 | 980 | 1,299 | 1,377 | 1,432 |
 | 6502, stack in pages 2-3 | 1,175 | 1,208 | 1,265 | 1,706 | 1,748 | 1,791 |
-| 6502, stack in zero page | 1,095 | 1,155 | 1,219 | 1,628 | 1,698 | 1,748 |
+| 6502, stack in zero page | 1,095 | 1,155 | 1,217 | 1,628 | 1,698 | 1,746 |
 | 6809 | 825 | 873 | 934 | 1,220 | 1,284 | 1,333 |
 
 **CP/M .COM files** (always ANSI):
@@ -293,7 +293,7 @@ Every build runs, in an emulator, against a reference interpreter written from t
 - the break key, on unchecked and checked builds alike: Ctrl-C in a loop, in a chain of word calls and in `?`; the held key, the newest key winning, `?` taking the held key first; the break-off cell, with one Ctrl-C, two quick ones and two slow ones; and a count of how often KEY is called;
 - for checked builds, every error in the table, several ways each, with the whole report compared byte for byte against the reference (run with that build's own addresses); the stack overruns are compared against patterns, since stack sizes differ.
 
-The four editor builds are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the cursor keys and arrows, Esc, editing a line in place, new, view, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
+The four editor builds are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the cursor keys and arrows, Esc, editing a line in place, new, ^V doing nothing, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
 
 The Windows builds run in the Unicorn emulator (`testing/harness_win32.py`): the .EXE is mapped as Windows would map it, and the dozen `kernel32` calls it makes are modelled. They go through the same suite as the others, the break-key tests and the editor sessions included, plus a few tests of their own (the report on standard error, redirected input, the arrow keys, the command line). That tests the interpreter, and the header against the rules; it can't show that Windows itself accepts the file, or that the model of each call is right.
 

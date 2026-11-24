@@ -6,7 +6,10 @@ usage: esc2slash.py FILE...          rewrite the files in place, print a report
 Each string is treated by what follows its closing quote:
 
   "..."$   printed. Full conversion, so it prints exactly what it did before:
-               >X  ->  /X        (an escape stays an escape)
+               >X  ->  /X        (an escape stays an escape; for X from
+                                  60h to 7Eh, where / now means something
+                                  else, /Y with Y the character >X gave:
+                                  >b -> /"  and  >o -> //)
                >>  ->  >         ('>' is an ordinary character now)
                /   ->  //        (a literal slash must be escaped now)
   "...";   a comment. Nothing ever decodes it; only the skip reads it, and
@@ -56,7 +59,15 @@ def printed(body):
         c = body[i]
         if c == '>' and i + 1 < len(body):
             nx = body[i + 1]
-            out.append('>' if nx == '>' else '/' + nx)
+            if nx == '>':
+                out.append('>')
+            elif 0x60 <= ord(nx) <= 0x7E:
+                # >` to >~ cleared bit 6 too, but / before them is an escape
+                # of its own now (a variable, or the console): write the
+                # character they gave, which / before 20h-3Fh prints as it is
+                out.append('/' + chr(ord(nx) - 0x40))
+            else:
+                out.append('/' + nx)
             i += 2
         elif c == '/':
             out.append('//')

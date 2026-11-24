@@ -351,7 +351,7 @@ Rtn 1
 - The report starts with CR LF, so it never lands in the middle of the program's output.
 - **Line 1:** `Err`, the code, `@`, then the line and column of the character that failed, both counted from 1. A line typed at a prompt or editor is line 0. Values up to 32767 are guaranteed; a build may print up to 65535. For `U` the place is the call; for `N` it is the opener where the skip started.
 - **Line 2:** up to 16 characters of the program text from that place, printed raw (escapes not decoded), stopping early at CR, LF or NUL.
-- **Line 3:** the data stack as it was when the error hit: `Stk`, the depth, then up to the top 8 values, bottom to top, so the top is last. More than 8 are shown as `…` and the top 8.
+- **Line 3:** the data stack as it was when the error hit: `Stk`, the depth, then up to the top 8 values, bottom to top, so the top is last. More than 8 are shown as `…` and the top 8. For a `Q` from `$` the top is the string's address as `$` got it, not how far it had printed, over whatever cells its `/~` escapes left.
 - **Line 4:** `Rtn` and the return stack's depth.
 - The report goes to the console, or the platform's error channel where it has one, never into a program's redirected output.
 
@@ -720,11 +720,13 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 **Handlers**
 
 - **Share tails.** `,` is the last few instructions of `?`: both end by putting a byte into TOS. A `CP n` opcode byte can step over the one-byte entry of the next handler, so two entry points share code.
-- **Hide entries.** The checked builds' error entries each load their letter and then hide the next entry inside a 3-byte `LD HL,nn`, so all of them fall through to one error routine.
+- **Hide entries.** The checked builds' error entries each load their letter and then hide the next entry inside a 3-byte `LD HL,nn`, so all of them fall through to one error routine. On the 6502 the byte 24h (`BIT zp`) hides a one-byte instruction and 2Ch (`BIT abs`) a two-byte one; on the x86, 3Ch (`CMP AL,n`) hides one byte.
 - **Branchless compare.** Flip both sign bits, then `sbc hl,de` / `sbc hl,hl` gives −1 or 0 straight from the carry.
 - **Division by 2 as a shift.** Test for 2 and −2 before the 16-round loop, then shift and fix up the sign.
 - **Use addresses where they lie.** The zero-page 6502 uses a cell on the data stack as the pointer itself (`(0,X)`), so `@` and `!` need no copying, and a drop is two `INX`.
-- **One routine, called twice.** The zero-page 6502 does 16-bit operations a byte at a time through one short routine called for each half.
+- **One routine, called twice.** The zero-page 6502 does 16-bit operations a byte at a time through one short routine called for each half. To run a routine twice in a row, call it and then fall into it: `JSR nip` with `nip:` right after it drops two cells for one extra call.
+- **Push the return target before dispatching.** When every case of a dispatch ends by going to the same place, push that place first and each case ends in a plain return, or in a jump to its last routine, which then returns there. The Windows editor's commands all return to the editor's loop this way, and the escapes of `$` to the print loop.
+- **Pack a short sequence in a constant.** The Windows builds keep each console escape's tail in a 32-bit constant, low byte first, and print bytes while shifting right until nothing is left: one constant and a three-instruction loop instead of a string and its pointer.
 
 **The escapes**
 
@@ -1070,7 +1072,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
 | Bytes (unchecked, checked), `ANSI = 0` | 1,208 and 1,748 | 1,155 and 1,698 |
-| The same, `ANSI = 1` | 1,265 and 1,791 | 1,219 and 1,748 |
+| The same, `ANSI = 1` | 1,265 and 1,791 | 1,217 and 1,746 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
 | Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |
@@ -1166,7 +1168,7 @@ The stacks are outside the 64 KB. The data stack is the program's own Windows st
 
 **Console.** Output goes to standard output, and a checked build's report to standard error. Keys come from the console unechoed, Ctrl-C among them; when input is redirected, bytes are read from it instead, by `?`, `-n?` and the editor only. `-n?` is the plain line read of the generic builds. At startup the output's console mode is set to 7 (processed output, wrap at the end of a line, and virtual terminal processing), so the ANSI sequences that the console escapes send (and any others a program sends) work in the Windows 10 and later console as on a terminal. On older Windows, or when the output is redirected, the call fails and the bytes go out unchanged. The screen size is the console window's. The mode is left on at the end, which does no harm.
 
-**The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
+**The break key.** The keyboard is looked at on every word call, block entry, true `)` and `{`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
 
 **Time.** A plain timed wait on Windows ends only on the system's tick, every 15.6 ms. So `n?` uses a high-resolution waitable timer (Windows 10 1803 and later), set once for the whole wait, which ends on a key or when the timer is due, to about a millisecond. On older Windows the waits are plain ones, to the tick. The builds start on Windows Vista and later.
 

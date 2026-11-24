@@ -1036,7 +1036,7 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 827Ah | 33402 | −32134 |
 
-Under CP/M the pages sit after the image and the heap limit is the BDOS. The break-off cell is still at offset 7Bh of the letter page, which is the page below the program text: 077Bh (1915) in `B8SZ80.COM`, 087Bh (2171) in `B8SZ80C.COM`, 0A7Bh (2683) in `B8SZ80E.COM` and 0B7Bh (2939) in `B8SZ80EC.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
+Under CP/M the pages sit after the image and the heap limit is the BDOS. The break-off cell is still at offset 7Bh of the letter page, which is the page below the program text: 077Bh (1915) in `B8SZ80.COM`, 097Bh (2427) in `B8SZ80C.COM`, 0A7Bh (2683) in `B8SZ80E.COM` and 0B7Bh (2939) in `B8SZ80EC.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
 
 **The break key.** The keyboard is looked at on every word call, block entry, true `)` and `{`, one time in 256. A program that stores a non-zero byte in the break-off cell gets Ctrl-C as key 3; two within about 250 ms still stop it. An unchecked build prints nothing when it is stopped.
 
@@ -1061,7 +1061,7 @@ All four must keep BC and HL', and all but `CONAT` also DE and HL.
 
 Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`. Builds: `b8s-8080-rom-0000.bin` (854 bytes), `b8s-8080-rom-checked-0000.bin` (1,299), `B8S8080.COM` (904), `B8S8080C.COM` (1,364).
 
-The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, @@B8080@@ in `B8S8080.COM` and @@B8080C@@ in `B8S8080C.COM`), with these differences: there are no alternate registers, so the routines keep BC (and DE and HL where the Z80's do); and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
+The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 097Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, so the routines keep BC (and DE and HL where the Z80's do); and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
 
 ## Appendix C: 6502
 

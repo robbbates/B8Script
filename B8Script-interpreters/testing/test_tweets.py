@@ -75,7 +75,7 @@ def maze(seed):
     breadth-first search of the maze as the game printed it."""
     from collections import deque
     r, out = play('tweet280', 'MAZE', seed)
-    top = out.index(b'\x1b[H') + 3
+    top = out.index(b'\x1b[H\x1b[J') + 6
     m = out[top:top + 19 * 41]
     prev, todo = {79: None}, deque([79])
     while todo:
@@ -131,7 +131,7 @@ TESTS = {'b8sms': [
     ('PIG', 'pig, then hold at 102', b'r' + N * 5 + b'r' + (N * 4 + b'r') * 17 + b'h',
      [b'1 0+2 1', b'2 0+96 6', b'2 turns'], 'end'),
     ('TRON', 'turn into its own trail', N * 5 + b'.' + N * 20 + b',' + N * 3 + b',' + N * 3 + b',' + N * 5,
-     [b'\x1b[9;10HO', b'\x1b[1;14HO', b'\x1b[18Hscore 21'], 'end'),
+     [b'\x1b[9;10HO', b'\x1b[1;14HO', b'\x1b[18;1Hscore 21'], 'end'),
     # Lights Out: the 15-press solution of the all-on board, in both cases
     ('LIGHTS', 'solve it', b'abfgijmnoqrsvwy', [b'ABCDE', b'abCDE', b'uvwxy in 15'], 'end'),
     ('LIGHTS', 'upper case, stray keys', b' 0ABFGIJMNOQRSVWY0', [b'uvwxy in 18'], 'end'),
@@ -153,14 +153,14 @@ TESTS = {'b8sms': [
     ('PIG', 'pig, then hold at 102', b'r' + N * 5 + b'r' + (N * 4 + b'r') * 17 + b'h',
      [b'0+2 1', b'0+96 6', b'2 turns'], 'end'),
     ('TRON', 'turn into its own trail', N * 5 + b'.' + N * 20 + b',' + N * 3 + b',' + N * 3 + b',' + N * 5,
-     [b'\x1b[1;2HO', b'\x1b[18H21'], 'end'),
+     [b'\x1b[9;10HO', b'\x1b[1;14HO', b'\x1b[18;1Hscore 21'], 'end'),
     ('LIGHTS', 'solve it', b'abfgijmnoqrsvwy', [b'uvwxy 15'], 'end'),
     ('LIGHTS', 'upper case, stray keys', b' 0ABFGIJMNOQRSVWY0', [b'uvwxy 18'], 'end'),
 ], 'tweet280': [
     # Snake: the first food is next to the start, so it grows at once
     ('SNAKE', 'eat, grow, new food', N * 8 + b'.' + N * 4 + b',' + N * 30,
      [b'\x1b[1;2H*', b'\x1b[7;64H*', b'\x1b[1;2HO\x1b[1;1H \x1b[1;3HO\x1b[1;2H '], None),
-    ('SNAKE', 'random steering, then a crash', mash(3, b'\0' * 6 + b',.', 20000), [b'\x1b[18Hscore 4'], 'end'),
+    ('SNAKE', 'random steering, then a crash', mash(3, b'\0' * 6 + b',.', 20000), [b'\x1b[18;1Hscore 4'], 'end'),
     # Mastermind: seed 1 picks 4321
     ('MASTER', 'crack 4321', b'k1122\r3344\r5566\r1234\r4321\r',
      [b'1122 1B1W', b'5566 0B0W', b'1234 0B4W', b'4321 4B0W 4321'], 'end'),
@@ -186,8 +186,8 @@ TESTS = {'b8sms': [
     ('HANGMAN', 'six misses', b'kzqxjvw', [b'______ 5 ?', b'BINARY lost'], 'end'),
     # Maze: walls hold, and the shortest way out (54 steps in every binary-tree maze) gets out
     ('MAZE', 'walls hold', b'kiiii', [b'#######################################\r\n#', b'\x1b[2;39H@'], None),
-    ('MAZE', 'walk out', maze(b'k'), [b'\x1b[21HOut!'], 'end'),
-    ('MAZE', 'another maze', maze(b'\0\0\0\0\0k'), [b'\x1b[21HOut!'], 'end'),
+    ('MAZE', 'walk out', maze(b'k'), [b'\x1b[21;1HOut!'], 'end'),
+    ('MAZE', 'another maze', maze(b'\0\0\0\0\0k'), [b'\x1b[21;1HOut!'], 'end'),
 ], 'longer': [
     # Minesweeper with flood fill. Seed 1 has 7 mines, one at row 2, column 3
     ('MINE390', 'a blank cell floods open', b'k11', [b'01######\r\n01######\r\n012#####'], None),

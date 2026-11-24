@@ -707,6 +707,8 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 - **Group the punctuation.** The 32 punctuation characters sit in four ranges (21h–2Fh, 3Ah–40h, 5Bh–60h, 7Bh–7Eh). Subtracting a different constant for each range packs them into one table index of 0–31 with no gaps.
 - **Ignore cheaply.** Control characters, space, DEL and high bytes all go back to the top of the loop through one branch. NUL is the only control character that needs its own test.
 - **Keep TOS in a register.** On the Z80 and 8080 HL holds TOS, so `+` is `pop de` / `add hl,de`. Machine code never sees it there, because the code's own address was TOS and is consumed by the call.
+- **Walk with the IP.** The 6809's `$` parks the IP on the return stack and moves the string's address into the IP register, so the loop reads with the same post-increment addressing as the inner loop and one pull restores the IP and returns.
+- **Read a digit twice rather than save it.** The 6809's number reader adds the ASCII digit straight from the text and takes the `'0'` off at 16 bits, so the digit needs no register or stack slot of its own.
 - **Make "next" one byte.** On the Z80 and 8080, `RST` routines in page zero give one-byte calls for "next character", "drop, then next", "pop the return stack", "negate" and "print A". A handler ends in one byte instead of three.
 - **Use a spare register pair for the return stack.** The Z80 keeps the return-stack pointer in HL' (the alternate HL), so only the return-stack routines need `EXX`. The data stack is the CPU stack, which is what the machine-code contract wants anyway.
 
@@ -733,6 +735,7 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 - **One range test.** After the `/`, compare with 60h and 7Fh: in between is an escape, and everything else falls through to the AND BFh. Inside, subtracting 7Bh leaves `{` `|` `}` `~` as 0 to 3, a borrow for `` ` `` and the letters, and a further add of 1Ah splits those two apart and leaves the letters as 0–25.
 - **Reuse the number printer.** `/a` to `/z` are `#` on the variable's cell, and the ANSI `/~` prints its row and column with the same routine.
 - **Let each escape return into the loop.** Push the loop's address once, and each escape can end in a plain return or a tail jump into its last routine (such as "ESC [ and A").
+- **Restart rather than return through frames.** When a routine called inside a loop must also change the stack under its caller's return address (as `/~` does inside the checked build's `$`), throw the return address away, do the work, and jump to a point that calls the routine again: nothing has to reach past a frame.
 - **Keep `/~` away from return addresses.** Where `$` is a subroutine (in a checked build it shares its loop with the error report's texts), the two cells sit under the routine's return address. Throw that address away, take the cells, and call the loop again, rather than reach past it; and keep the string's original address (for a `Q` report) in a RAM cell rather than on the data stack.
 - **Check each `/~` in a checked build.** One string can hold many `/~`, so a once-per-character stack test is not enough: look before each one that the cells are there, and report `s` if not, so that nothing is ever written past the stack's spare bytes.
 - **Share the start of the sequences.** In an ANSI build every console escape starts with ESC `[`: one routine sends it, and another sends it followed by one more character.
@@ -740,6 +743,7 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 **Checked builds**
 
 - **Test the stacks once per character, not in every handler.** Give each stack its own page, so an overrun is simply the pointer's high byte leaving that page, and put a guard band below each stack to absorb the cell or two before the test runs.
+- **A small difference from the low bytes.** When two addresses are known to be less than 256 apart, the difference of their low bytes is the whole difference, even across a page: the Z80 report works out the return stack's depth that way.
 - **Report the place cheaply.** Count lines and columns only when an error happens, by scanning from the program's start to the failing address; nothing is counted while the program runs.
 - **Save the opener for `N`.** The skip routine keeps the address where it started, so a bracket error reports the opener, not the closer it tripped on.
 - **Default word cells.** Point every word cell at one internal byte that stops with `U` and reports the return address on top of the return stack as the place. An unchecked build that wants a safe default can point them at a hidden `]` instead.
@@ -798,7 +802,7 @@ This section is a suggestion, so that line editors on different machines feel al
 - **Esc and arrow keys.** A lone Esc cancels. Arrow keys send Esc `[` and a letter, so after Esc the editor waits about 5 ms for another key; if `[` follows, it reads the sequence, acts on right and left, and ignores the rest.
 - **Keys to avoid.** ^S and ^Q are XON/XOFF flow control on many serial links and may never reach the program. ^Z is CP/M's end of file. ^I is Tab, which programs may use for indentation. ^H, ^J and ^M are Backspace, LF and CR.
 - **Its own line reader.** The editor reads keys itself, rather than through an OS line reader such as CP/M's BDOS 10, which would swallow the command keys.
-- **After a run, an error or a break,** the editor comes back with words and variables kept. After an error or break both stacks are cleared.
+- **After a run, an error or a break,** the editor comes back with words and variables kept. After an error or break both stacks are cleared, and the cursor is shown, in case the program had hidden it.
 
 ### The screen editor
 
@@ -1107,7 +1111,7 @@ Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|
 | Return stack (S, 127 entries; 112 in the checked build) | 8000h page | 32768 | −32768 |
-| Data stack (U, 127 cells; 126 in the checked build) | 8100h page | 33024 | −32512 |
+| Data stack (U, 127 cells; 125 in the checked build) | 8100h page | 33024 | −32512 |
 | Letter page (DP) | 8200h | 33280 | −32256 |
 | Program text | 8300h | 33536 | −32000 |
 | Heap limit (default) | F000h | 61440 | −4096 |

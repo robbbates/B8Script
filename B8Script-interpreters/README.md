@@ -173,7 +173,7 @@ A command key ends the line too, and takes what was typed before it as its argum
 - The editor sends only printing characters, CR, LF and Backspace, so it works on any terminal. A character put in or taken out in the middle of the line prints the rest of the line again.
 - After Esc the editor waits about 5 ms for another key. If `[` follows, it reads on to the letter that ends the sequence and acts on C (right) and D (left); it ignores the rest. A lone Esc drops the line.
 - Tab is text. Other control keys do nothing.
-- **What lasts from line to line:** the program, the words, the variables and the data stack. The return stack starts empty for every line. After an error or a break both stacks are empty. A word's address points into the program text, so run the program again after editing it.
+- **What lasts from line to line:** the program, the words, the variables and the data stack. The return stack starts empty for every line. After an error or a break both stacks are empty, and the editor shows the cursor (it does when it starts, too), since a program that hid it can't show it again then. A word's address points into the program text, so run the program again after editing it.
 - A line run at once sits in the line buffer, which `-n?` also reads into. The stored program never returns to the line, so it can use `-n?` freely; a typed line that calls `-n?` itself and carries on afterwards runs what was typed.
 - `-n?` in a program is the plain line read of the other builds, not the editor's.
 - Nothing is printed between a program's output and what you type next.
@@ -255,7 +255,7 @@ Rtn 0
 - **A string with no closing quote inside skipped text** is an `N` at the skip's opener (or the quiet end of the program, for `\`), not a `Q`: the skip ran into the end.
 - **Store range.** "The program's space" runs from the letter page up to the heap limit, not just up to the heap top. Tiny BASIC keeps its program lines above the heap top without allocating them, so the stricter rule would stop it. On the Z80 and 8080 one test serves both bytes of a cell, so `.` can't store to the very last byte below the limit.
 - **The hex loader and machine code are never checked.**
-- **Stacks.** The stacks hold 127 data cells and 112 return entries (Z80/8080), 252 or 112 and about 110 (6502), or 126 and 112 (6809). A few spare bytes above each stack and a guard band below take what a character does before the check sees it, so an overrun can't reach the letter cells.
+- **Stacks.** The stacks hold 127 data cells and 112 return entries (Z80/8080), 252 or 112 and about 110 (6502), or 125 and 112 (6809). A few spare bytes above each stack and a guard band below take what a character does before the check sees it, so an overrun can't reach the letter cells.
 - **Undefined words.** The word cells start at 0000h. On the Z80 and 8080 the byte there is a reserved one, and the reserved-byte path sees that the text pointer is in page zero; the 6502 reads a NUL there (the text pointer's own low byte) and its end-of-text path sees that the pointer is in page zero; the 6809 tests the cell at the call.
 - **Unchecked builds and `[`.** A letter defines; anything else is taken as the space.
 - **Don't treat a checked run as proof.** What an unchecked build does with the same mistake is not defined. One example: an unclosed string in an unchecked build is skipped on through memory until some quote turns up.

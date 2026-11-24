@@ -326,6 +326,7 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Right-aligned | `[A 1-%:{:9>%:99>%:999>%9999>++++ 6%-"      "+$ }#]` | `( n w -- )` counts digits with flags and prints the tail of a string of six spaces (IDOL) |
 | Digits without a buffer | `[N -1% 1(10/ 48+% :0=0=); 1(E :0<0=);]` | Stacks the digits above a −1 marker, then prints them back (IDOL) |
 | Wipe old digits | `s@# " "$`, or `/}` after the number | A shorter number leaves nothing behind (KLONDIKE, BREAKOUT) |
+| A live template | `"v/x;"g!`, then `1x! g@$ 2x! g@$` | The string's address is kept, and each `g@$` prints x as it is then: `v1;` and then `v2;`. The other side of the stored-message gotcha (tests.py) |
 | Status line in one string | `"/~DUNGEON  Level /l  HP /h//20  Gold /g  Potions /p  Sword "$` | Placed, with four variables, in one `$`; `/h//20` prints h, then a slash (DUNGEON) |
 | A buffer as a string | `34b@6+.`, then `b@$` | Store a quote after the text and `$` prints it (HANGMAN, MAZE, IDOL) |
 | Rub out the last character | `8'32'8'` | BS, space, BS (TINYBAS) |

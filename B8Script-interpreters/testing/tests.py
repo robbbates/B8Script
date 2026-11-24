@@ -101,6 +101,8 @@ ERRS = [
     ('e_under', b'1 2+ ;; "no"$', b'', PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
     ('e_under2', b'1( + "no"$ 0)', b'', PLACE % b's' + rb'Stk 0:\r\nRtn 1\r\n'),
     ('e_over', b'1( 7 1)', b'', PLACE % b'S' + rb'Stk \d{3}: \.\.\.( [71]){8}\r\nRtn 1\r\n'),
+    # ... and at the top level, with the return stack empty
+    ('e_over2', b'1 ' * 300, b'', PLACE % b'S' + rb'Stk \d{3}: \.\.\.( 1){8}\r\nRtn 0\r\n'),
     # return stack: r underflow (it then counts as empty), R overflow
     ('e_rund', b'1 2 ] "no"$', b'', PLACE % b'r' + rb'Stk 2: 1 2\r\nRtn 0\r\n'),
     ('e_rund2', b'3 } "no"$', b'', PLACE % b'r' + rb'Stk \d: .*\r\nRtn 0\r\n'),

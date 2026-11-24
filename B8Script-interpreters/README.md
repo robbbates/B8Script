@@ -61,6 +61,7 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | `B8SZ80E.COM`, `B8SZ80EC.COM` | CP/M builds with the line editor; the C means checked. Run as `B8SZ80E PROG.B8S`, or with no file |
 | `win32/B8SWIN.EXE`, `B8SWINC.EXE`, `B8SWINE.EXE`, `B8SWINEC.EXE` | Windows command-shell builds: C means checked, E with the line editor. Run as `B8SWIN PROG.B8S` |
 | `*.lst` | The assembler's listings |
+| `TIMING.B8S` | Times `n?` on your machine, to tune the CP/M builds' count (see The language) |
 
 ## The language
 
@@ -70,6 +71,7 @@ The builds follow [`docs/b8script.md`](../docs/b8script.md) (2026-11-24). What t
 - Dividing by zero in an unchecked build returns two cells of no meaning (different on each CPU), and the stack stays balanced.
 - `[` followed by anything but a letter is taken as `[ ` in an unchecked build.
 - The CP/M builds print through BDOS 6, which can't print the bytes FFh and FEh: to BDOS 6, FFh means "read a key", and in Digital Research's CP/M 2.2 BDOS (an undocumented case, also in CP/M 3) FEh means "is a key waiting?". Neither reaches the screen. Found by running the test suite under real CP/M 2.2 (z80pack); see How they were tested.
+- **`n?` under CP/M** has no clock to go by: it counts keyboard checks (BDOS 6 calls), 4 a millisecond, and how long one takes depends on the BIOS. 4 is right for an RC2014 with RomWBW and ZPM3 (a call there costs about 280 µs; the generic builds' 40 made `100?` take 1.1 seconds). Run `TIMING.B8S` to see how your machine does: if its step 1 takes T seconds, your machine wants 4 / T (1 to 255). Patch that into the .COM at the byte `testing/patchinfo.py` prints: with a hex editor at the file offset, or under CP/M 2.2 with DDT at the address: `DDT B8SZ80.COM`, `S2E8`, the new value, `.`, then `G0` and `SAVE 4 B8SZ80.COM` (the page count is in the table too). Under CP/M 3 and ZPM3, `SAVE` is a program run before the debugger, and it asks for the range when the debugger exits. Ctrl-C's 250 ms wait for a second Ctrl-C, and the editor's 5 ms wait after Esc, use the same count, but aren't patched with it.
 - The memory maps, stack sizes, heap limits and system addresses are in the spec's appendices.
 
 ## Building

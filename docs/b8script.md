@@ -1081,6 +1081,17 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 **The break key.** The keyboard is looked at on every word call, block entry and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
 
+**The console escapes.** Switch `ANSI`: with `ANSI = 1` they send the ANSI sequences through `CONOUT`; with `ANSI = 0` (the default) they call four routines, by JSR, at addresses set by equates. All four must keep X, and may change A, Y and the flags.
+
+| Routine | Escape | Does | Gets |
+|---|---|---|---|
+| `CONCLS` (FF0Ch) | `/{` | Clear the screen, cursor to the top left | |
+| `CONEOL` (FF0Fh) | `/}` | Clear from the cursor to the end of the line | |
+| `CONCUR` (FF12h) | `/\|`, `` /` `` | Show the cursor, or hide it | The carry set to show, clear to hide |
+| `CONAT` (FF15h) | `/~` | Cursor to a row and column, both from 0 | A = the row, Y = the column (the low bytes of the cells) |
+
+**Screen size.** Whatever the terminal or the machine's routines give: the interpreter doesn't know it.
+
 **Machine-code contract.** Entered as a subroutine (`JMP (T0)`, with a return address on the stack), ending in RTS (60h, written by the loader). The address has been dropped. The code must keep the reading position at $00/$01 and leave the hardware stack balanced.
 
 - **`b8s-6502.asm`:** X is the data-stack index; NOS is $0200,X (low) and $0300,X (high). To push: DEX, store TOS there, then set TOS. To drop: load TOS from there, then INX. The code may change A, X (consistently), Y, $04–$06 and $08–$09; $0A–$0F are free for its own use.
@@ -1102,6 +1113,17 @@ Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switch: `CHECKED`. Builds: `b
 | Held key | 8234h | 33332 | −32204 |
 
 **The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. The unchecked build prints nothing when it is stopped.
+
+**The console escapes.** Switch `ANSI`: with `ANSI = 1` they send the ANSI sequences through `CONOUT`; with `ANSI = 0` (the default) they call four routines, by JSR, at addresses set by equates. All four may change A, B, X and CC, and must keep Y, U and DP.
+
+| Routine | Escape | Does | Gets |
+|---|---|---|---|
+| `CONCLS` (FF0Ch) | `/{` | Clear the screen, cursor to the top left | |
+| `CONEOL` (FF0Fh) | `/}` | Clear from the cursor to the end of the line | |
+| `CONCUR` (FF12h) | `/\|`, `` /` `` | Show the cursor, or hide it | A = 0 to hide, anything else to show |
+| `CONAT` (FF15h) | `/~` | Cursor to a row and column, both from 0 | X = the row, D = the column (whole cells) |
+
+**Screen size.** Whatever the terminal or the machine's routines give: the interpreter doesn't know it.
 
 **Machine-code contract.** Entered by a jump, with the dispatcher's return address on S, so the code ends in RTS (39h, written by the loader). U points at the top data cell, which becomes TOS on return. Cells on the data stack are big-endian (6809 order); cells in memory stay little-endian, as the spec says. The code may change A, B, X, CC and U (consistently). It must keep Y (the reading position) and DP, and leave S balanced.
 
@@ -1141,7 +1163,7 @@ Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`,
 
 The stacks are outside the 64 KB. The data stack is the program's own Windows stack, one 32-bit slot per cell: 127 cells in a checked build, as much as Windows gives (1 MB) in an unchecked one. The return stack holds 112 entries in a checked build. Memory starts as zeros in every build.
 
-**Console.** Output goes to standard output, and a checked build's report to standard error. Keys come from the console unechoed, Ctrl-C among them; when input is redirected, bytes are read from it instead, by `?`, `-n?` and the editor only. `-n?` is the plain line read of the generic builds. At startup the output's console mode is set to 7 (processed output, wrap at the end of a line, and virtual terminal processing), so the console subset and the rest of ANSI work in the Windows 10 and later console as on a terminal. On older Windows, or when the output is redirected, the call fails and the bytes go out unchanged. The mode is left on at the end, which does no harm.
+**Console.** Output goes to standard output, and a checked build's report to standard error. Keys come from the console unechoed, Ctrl-C among them; when input is redirected, bytes are read from it instead, by `?`, `-n?` and the editor only. `-n?` is the plain line read of the generic builds. At startup the output's console mode is set to 7 (processed output, wrap at the end of a line, and virtual terminal processing), so the ANSI sequences that the console escapes send (and any others a program sends) work in the Windows 10 and later console as on a terminal. On older Windows, or when the output is redirected, the call fails and the bytes go out unchanged. The screen size is the console window's. The mode is left on at the end, which does no harm.
 
 **The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
 

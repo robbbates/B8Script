@@ -1702,10 +1702,21 @@ left:   LD      A,L
 lf1:    RST     28h
         JR      ed1
 
-; edit0: reset, an error or a break: both stacks are cleared.
+; edit0: reset, an error or a break: both stacks are cleared, and the cursor
+;   is shown, in case the program had hidden it and could not show it again.
 ; skend: a program that ended inside skip: its return address goes.
 ; edend: a program that ended: TOS joins the rest of the data stack.
 edit0:  LD      SP,DSTOP-2      ; empty (the cell that stands for TOS is pushed)
+        ENDIF
+        IF      EDITOR*ANS
+        XOR     A               ; (pshow wants the carry clear)
+        CALL    pshow           ; ESC [ ? 2 5 h
+        ENDIF
+        IF      EDITOR*(1-ANS)
+        LD      A,1
+        CALL    CONCUR          ; show the cursor
+        ENDIF
+        IF      EDITOR
         DB      21h             ; (LD HL,nn: steps over the next two bytes)
 skend:  POP     DE
 edend:  PUSH    HL

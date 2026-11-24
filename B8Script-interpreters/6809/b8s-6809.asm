@@ -70,12 +70,15 @@ ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
 ;                 are a guard band for what a handler and an interrupt push
 ;                 on top of a full stack before the check runs.
 ;    8100h-81FFh  data stack (U). Unchecked: 127 cells, empty = 8200h.
-;                 Checked: 126 cells (U from 81FCh, empty, down to 8100h):
+;                 Checked: 125 cells (U from 81FCh, empty, down to 8102h):
 ;                 the 4 bytes above are a guard band, so a handler that runs
 ;                 on an empty stack writes there and not on the letter
-;                 cells. A push past the last cell lands on the return
-;                 stack's bottom entry (80FEh), and the program stops with S
-;                 before anything reads it.
+;                 cells. A push past the last cell lands on 8100h, still in
+;                 this page, and the program stops with S. (It must not
+;                 reach 80FEh: with the return stack empty, the handler's
+;                 own return address is there. pdec's cell for its divisor,
+;                 under '#' or a /a in '$' on a full stack, lands on 8100h
+;                 too.)
 ;    8200h-82FFh  letter page (LET): A..Z at +00h..+33h, a..z at +40h..+73h
 ;                 (a word cell is always 64 bytes below its variable), the
 ;                 heap pointer at +7Ch (= z10+), interpreter variables in the
@@ -143,7 +146,7 @@ RSTOP   EQU     RSPAGE*256+100h ; empty return stack
 RSLIM   EQU     RSPAGE*256+20h  ; checked: S may go no lower between characters
 RSREP   EQU     RSTOP-16        ; checked: S while the error report runs
 DSTOP   EQU     DSPAGE*256+100h-4*CHECKED ; empty data stack (a guard if checked)
-DSLIM   EQU     DSPAGE*256      ; checked: U may go no lower between characters
+DSLIM   EQU     DSPAGE*256+2    ; checked: U may go no lower between characters
 
         ORG     0F000h
 
@@ -1009,8 +1012,8 @@ e_quote:LDA     #'Q'            ; " or $ ran into the NUL
 ;  line 0, column = its offset there + 1. Numbers other than the cells are
 ;  printed unsigned (pdec), the cells signed (h_num).
 ;
-;  The data stack may be one cell past its limit (S, U = 80FEh): the
-;  report's own cells then reach 8 bytes further down, to 80F6h, into the
+;  The data stack may be one cell past its limit (S, U = 8100h): the
+;  report's own cells then reach 6 bytes further down, to 80FAh, into the
 ;  return stack page, so the report runs on a fresh return stack at RSREP
 ;  (80F0h), below those bytes.
 ; =============================================================================
@@ -1173,10 +1176,11 @@ dv1:    TST     ,S+
 
 ; '$' prints the string at TOS, decoding escapes: '/' plus a character from
 ; 60h to 7Eh is one of the escapes at pesc; '/' plus any other character
-; clears that character's bit 6 (/M is CR, /? is DEL's '?'; '/' and '"' have
-; no bit 6, so // and /" give themselves). The address comes off the stack
-; first, and Y walks the string (the IP waits on S), so that /~ finds its
-; row and column on top, and an escape may use A, B, X and the routines.
+; clears that character's bit 6 (/M is CR, '/' and DEL is '?'; '/', '"'
+; and '?' have no bit 6, so //, /" and /? give themselves). The address
+; comes off the stack first, and Y walks the string (the IP waits on S), so
+; that /~ finds its row and column on top, and an escape may use A, B, X
+; and the routines.
 ; Checked: a NUL (not one escaped by '/') stops with Q, the string's
 ; address put back on the stack (from PSAV) over what any /~ left.
 h_print:PSHS    Y

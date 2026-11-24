@@ -272,7 +272,9 @@ start:  mov     ebp,next
         call    token
         call    load                    ; (no file, or no such file: no text)
 %if EDITOR
-        jmp     edit
+        mov     eax,6835323Fh           ; ESC [ ? 2 5 h: the editor shows the
+        call    pseq                    ;   cursor when it starts, as after an
+        jmp     edit                    ;   error or a break (edit0)
 %else
         mov     edi,RSTOP               ; the return stack is empty
         mov     esi,ARENA+PROG          ; the IP
@@ -860,8 +862,15 @@ e_break:mov     al,'B'                  ; Ctrl-C (inside pollk or getk)
         jmp     short errp
 e_store:mov     al,'O'                  ; a store outside the program's space
         jmp     short errp
-e_dollar:mov    ebx,[V(v_str)]          ; '$' ran into a NUL: the string's
-        mov     al,'Q'                  ;   address is TOS again
+; e_dollar: '$' ran into a NUL: Q, with the string's address TOS again. But
+; if its /~ escapes took cells that weren't there, that is s (as the next
+; character's check would have said).
+e_dollar:pop    edx                     ; prstr's return address
+        cmp     esp,[V(v_dstop)]        ; (ESP = v_dstop: the cell that stands
+        jae     e_under                 ;   for TOS was taken too)
+        mov     ebx,[V(v_str)]
+        mov     al,'Q'
+        jmp     short error
 ; errp: an error found inside a routine: drop its return address first.
 errp:   pop     edx
         jmp     short error
@@ -1482,7 +1491,8 @@ left:   cmp     bl,80h
 lf1:    CALLP   putc
         jmp     ed1
 
-; edit0: an error or a break: both stacks are cleared.
+; edit0: an error or a break: both stacks are cleared, and the cursor is
+;   shown, in case the program had hidden it and could not show it again.
 ; skend: a program that ended inside skip: its return address goes.
 ; edend: a program that ended: TOS joins the rest of the data stack.
 edit0:  mov     esp,[V(v_dstop)]
@@ -1492,6 +1502,8 @@ edit0:  mov     esp,[V(v_dstop)]
         mov     [V(v_outh)],eax
         mov     ebx,esi                 ; (the report's texts moved EBX out of
  %endif                                 ;   the arena: the cell for TOS)
+        mov     eax,6835323Fh           ; ESC [ ? 2 5 h: show the cursor
+        call    pseq
         db      3Ch                     ; (CMP AL,n: steps over the POP)
 skend:  pop     eax
 edend:  push    ebx

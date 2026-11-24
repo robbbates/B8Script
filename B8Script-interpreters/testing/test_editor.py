@@ -38,6 +38,9 @@ class Left(Exception):
     """^X: the editor was left."""
 
 
+SHOW = b'\x1b[?25h'     # the cursor shown again (in an ANSI = 0 build, CONCUR)
+
+
 class Ed:
     """The editor, as the source has it."""
 
@@ -48,8 +51,9 @@ class Ed:
         self.pad = t.get('pad', cpm)            # a written file is padded with ^Z
         self.fname = t.get('fname')             # typed name -> the file's name
         self.lines = []                 # the program: each line with its CR LF
-        self.out = bytearray()
-        self.ds = []                    # the data stack lasts from line to line
+        self.out = bytearray(SHOW)      # the editor shows the cursor when it starts,
+        self.ds = []                    #   and after an error or a break (edit0)
+                                        # the data stack lasts from line to line
         self.cells = bytes(0x74)        # so do the words and the variables
         self.undef = set(range(0x41, 0x5B)) if checked else set()
         self.files = files if files is not None else {}
@@ -100,6 +104,8 @@ class Ed:
         if not stored:
             r.ip = sy['LINEBUF']
         self.out += r.run(2_000_000)
+        if r.error:
+            self.out += SHOW
         self.ds = [] if r.error else r.ds       # an error clears the stack
         self.cells = bytes(r.m[sy['LET']:sy['LET'] + 0x74])
         queue[:] = list(r.inp)                  # what the program did not read is typed at the editor
@@ -355,9 +361,9 @@ CHK_SESSIONS = {
 RPT = rb'\r\nErr B @ %s,\d+\r\n[^\r\n]{0,16}\r\nStk \d+:[ \-\d.]*\r\nRtn \d+\r\n'
 TIMED = {
     'Ctrl-C stops a program (checked)': (True, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L, R(b' ;')], [(40, b'\x03')],
-        [rb'\.{10,}' + RPT % b'1' + rb' 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb' ;\r\n\r\nErr s .*\r\nStk 0:\r\nRtn 0\r\n']),
+        [rb'\.{10,}' + RPT % b'1' + rb'\x1b\[\?25h 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb' ;\r\n\r\nErr s .*\r\nStk 0:\r\nRtn 0\r\n\x1b\[\?25h']),
     'Ctrl-C stops a program (unchecked)': (False, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L], [(40, b'\x03')],
-        [rb'\.{10,} 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n']),
+        [rb'\.{10,}\x1b\[\?25h 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n']),
     'Ctrl-C stops a typed line': (None, [R(b' 1("."$ 1)'), R(b' 8#')], [(40, b'\x03')], [rb'\.{10,}.* 8#\r\n8$']),
     'a key pressed while the program runs is held for it': (
         None, [R(b' 0i! 1( i@1+:i! 3000<) 0?#'), R(b' 6#')], [(28, b'A')], [rb'0\?#\r\n65 6#\r\n6$']),
@@ -369,7 +375,7 @@ TIMED = {
     # past the stack's spare bytes, so word A survives. Then /~ works.
     'a /~ with nothing under it is s, and word A survives it': (
         True, [R(b'1 [A "a"$]'), G, R(b' "/~/~/~/~/~x"$'), R(b' A'), R(b' 1 2 3 4 "/~/~."$ A')], [],
-        [rb'\r\nErr s @ 0,15\r\n\$\r\nStk 0:\r\nRtn 0\r\n A\r\na 1 2 3 4 "/~/~\."\$ A\r\n'
+        [rb'\r\nErr s @ 0,15\r\n\$\r\nStk 0:\r\nRtn 0\r\n\x1b\[\?25h A\r\na 1 2 3 4 "/~/~\."\$ A\r\n'
          rb'\x1b\[4;5H\x1b\[2;3H\.a$']),
     'the break key is on again for the next line': (
         None, [R(b' 1 %d.' % 0), R(b' 1("."$ 1)'), R(b' 8#')], [(60, b'\x03')], [rb'\.{10,}.* 8#\r\n8$']),
@@ -455,6 +461,7 @@ def check_editor(base, verbose=True, target=None):
         if only is not None and only != checked:
             continue
         steps = [s.replace(b' 1 0.', b' 1 %d.' % (sy['LET'] + 0x7B)) for s in steps]
+        timed = [(n + len(SHOW), k) for n, k in timed]   # (the counts are from after the start's SHOW)
         r = mkrun(steps, timed, None)
         got = r.run()
         at, ok = 0, r.ended == 'needkey' and not r.stages

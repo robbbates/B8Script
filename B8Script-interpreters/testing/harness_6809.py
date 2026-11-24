@@ -4,6 +4,8 @@ The image is ROM at F000h (taken from the hex file), the program text is
 loaded at PROG (from the listing) and NUL-terminated. KEY, CONOUT and EXIT
 are traps: when the PC reaches one, the harness does the job and simulates
 an RTS. KEY returns a waiting key in A, or 0, with the Z flag matching A.
+Each spoils what its contract lets it change (CONOUT: A and CC; KEY: V and
+C), so that an interpreter that relies on more is caught.
 In a build with ANSI = 0, CONCLS, CONEOL, CONCUR and CONAT (the console
 escapes of '$') are traps too: each adds to the output the ANSI sequence an
 ANSI = 1 build sends, so both are compared with ref.py's output unchanged,
@@ -136,7 +138,11 @@ class Run:
             if t is None:
                 continue
             if t == 'out':
-                self.out.append(a.value); idle = 0; self.rts()
+                # CONOUT may change A and CC: spoil them
+                self.out.append(a.value); idle = 0
+                a.set(0xEE)
+                cpu.set_cc(cpu.get_cc_value() ^ 0x0F)
+                self.rts()
             elif t == 'key':
                 a.set(self.key())
                 if a.value or self.inp or self.timed or self.pressed:
@@ -146,9 +152,10 @@ class Run:
                     idle += 1
                     if idle > IDLE:
                         self.ended = 'needkey'; break
-                # the host routine's contract: Z (and N) follow A
+                # the host routine's contract: Z (and N) follow A; it may
+                # change the rest of CC, so V and C are spoiled
                 v = a.value
-                cpu.set_cc((cpu.get_cc_value() & 0xF3) | (0x04 if v == 0 else 0) | (0x08 if v & 0x80 else 0))
+                cpu.set_cc(((cpu.get_cc_value() ^ 0x03) & 0xF3) | (0x04 if v == 0 else 0) | (0x08 if v & 0x80 else 0))
                 self.rts()
             elif t == 'exit':
                 self.ended = 'exit'; break

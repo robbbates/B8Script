@@ -326,7 +326,7 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Right-aligned | `[A 1-%:{:9>%:99>%:999>%9999>++++ 6%-"      "+$ }#]` | `( n w -- )` counts digits with flags and prints the tail of a string of six spaces (IDOL) |
 | Digits without a buffer | `[N -1% 1(10/ 48+% :0=0=); 1(E :0<0=);]` | Stacks the digits above a −1 marker, then prints them back (IDOL) |
 | Wipe old digits | `s@# " "$`, or `/}` after the number | A shorter number leaves nothing behind (KLONDIKE, BREAKOUT) |
-| Status line in one string | `"/~DUNGEON  Level /l  HP /h//20  Gold /g  Potions /p  Sword "$` | Placed, with four variables, in one `$`; `/h//20` prints h, then a slash (DUNGEON, SUPERTRK) |
+| Status line in one string | `"/~DUNGEON  Level /l  HP /h//20  Gold /g  Potions /p  Sword "$` | Placed, with four variables, in one `$`; `/h//20` prints h, then a slash (DUNGEON) |
 | A buffer as a string | `34b@6+.`, then `b@$` | Store a quote after the text and `$` prints it (HANGMAN, MAZE, IDOL) |
 | Rub out the last character | `8'32'8'` | BS, space, BS (TINYBAS) |
 | Grid lines by parity | `j@2M( cell line 0) j@2M0=( border line 0)` | One modulo picks the line (FIFTEEN, G2048) |
@@ -405,6 +405,11 @@ B8Script's screen commands are five escapes inside the strings that `$` prints. 
 | Overwrite a line | `"/M/}"$` | CR then clear to the end of the line hides what was shown (SIMON) |
 | Clear a panel | Print a row of spaces on each line | Clears part of the screen, not all of it (IDOL) |
 | Status at the bottom | `17 0"/~score /l"$` | Place, label and value in one string (SNAKE, TRON) |
+| Rows before the divide | `[P36+18/:+2+Y]`, `[P40+40/"/~"$]` | Adding k widths to an index before `/` adds k to the quotient (the row) and leaves the remainder (the column) alone, so a row offset costs nothing extra (MINES, DUNGEON, BATTLE, ROBOTS, REVERSI) |
+| One row, two places | `i@4+:42%2"/~/i  . . . ./~/i  . . . ."$` | `:42%2` turns row r into `r 42 r 2`: column 2 for the first `/~`, column 42 for the second (BATTLE) |
+| Both walls in one string | `j@49j@0"/~\|/~\|"$` | The left and right bars of a frame row with one `$` (BREAKOUT, ROBOTS) |
+| Clear the line, put the border back | `%79"/}/~\|"$` | `/}` also erases the frame's right-hand bar, so a second `/~` in the same string redraws it (IDOL) |
+| Clear a line and step in | `0 0Y"/} "$` | To the start of the line, clear it, and a space: the text starts at column 1 on a clean line (IDOL) |
 | Zero a counter and home the cursor | `0:c!:"/~"$` | `0:` makes two zeros: one is stored in c, and `:` doubles the other into row 0, column 0 (MINE390) |
 | Mark the map and draw from one index | `96 1(1-:32+:g@+1%.32/1+"/~#"$:);` | The bricks lie one map row down, so the same index marks the map byte and, through `32/`, gives the screen row and column (BREAKOUT in tweet280) |
 
@@ -523,7 +528,7 @@ The minus before a digit is the one that bites most: it got into 9 of the 31 sma
 | A variable escape in a stored message | `/x` reads x when the string is printed, so text copied into a buffer and shown later prints the later value; keep `#` for numbers there (IDOL) |
 | `&` and `\|` don't short-circuit | Both sides always run, so the second must be safe when the first is false (BATTLE) |
 | Do-while runs at least once | Test first, or use the copied-count form, when zero passes is possible (SUPERTRK) |
-| Words sharing scratch variables | Note which word uses which letter; prefer the stack inside reusable words (BATTLE, REVERSI, TINYBAS) |
+| Words sharing scratch variables | Note which word uses which letter; prefer the stack inside reusable words (BATTLE, REVERSI, TINYBAS). SUPERTRK once kept its command key in z, which its number reader also used, so the test that let the Klingons fire never held |
 | Divide by zero still runs on an unchecked build | Guard it yourself; never call R with 0 (TINYBAS, G2048) |
 | Values past 32767 wrap | Cap them, or keep two cells (KINGDOM, G2048) |
 | R's byte is one higher when the state is negative | Truncation toward zero; harmless, the result is still 0–255 (all games) |

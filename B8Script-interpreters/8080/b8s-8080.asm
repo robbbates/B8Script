@@ -1,10 +1,10 @@
 ; =============================================================================
 ;  B8Script interpreter for the Intel 8080
-;  Spec: docs/b8script.md (2026-11-21).
+;  Spec: docs/b8script.md (2026-11-24).
 ;  Design follows the Z80 interpreter (z80/b8s-z80.asm), with 8080 opcodes
 ;  only.
 ;
-;  Two switches, set in the two EQU lines below:
+;  Three switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
@@ -12,6 +12,10 @@
 ;                 and stops on every error in the spec's table (and Ctrl-C)
 ;                 with a four-line report: the letter and the place as line
 ;                 and column, the text there, and both stacks. See `error`.
+;    ANSI     what the console escapes of '$' (/{ /} /| /` /~) do:
+;             1 = send ANSI (VT100) sequences through CONOUT
+;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
+;                 CONAT (see the equates). The CP/M builds always send ANSI.
 ;
 ;  In every build Ctrl-C stops a running program (an unchecked build stops
 ;  without a word): see the console layer for the rules, the held key and
@@ -22,6 +26,8 @@
 
 CPM     EQU     0               ; 1 = CP/M .COM build
 CHECKED EQU     0               ; 1 = checked build
+ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
+ANS     EQU     ANSI+CPM-ANSI*CPM ; (CP/M: always ANSI)
 
 ; -----------------------------------------------------------------------------
 ;  Register use, everywhere in the interpreter
@@ -96,6 +102,18 @@ KEY     EQU     0FF06h          ; a waiting key in A, or A = 0 if none is
 CONOUT  EQU     0FF03h          ; print the character in A
 EXIT    EQU     0FF09h          ; where to go when the program ends
 ;   KEY and CONOUT must preserve BC, DE and HL.
+        ENDIF
+        IF      1-ANS
+; With ANSI = 0 the console escapes call these. All four must keep BC;
+; CONCLS, CONEOL and CONCUR also DE and HL.
+CONCLS  EQU     0FF0Ch          ; /{  clear the screen, the cursor to the top left
+CONEOL  EQU     0FF0Fh          ; /}  clear from the cursor to the end of the line
+CONCUR  EQU     0FF12h          ; /| and /`  show the cursor if A is not 0, hide
+                                ;     it if A = 0
+CONAT   EQU     0FF15h          ; /~  the cursor to row HL, column DE, both
+                                ;     counted from 0. May change A, DE and HL
+        ENDIF
+        IFN     CPM
 RSPAGE  EQU     80h             ; 8000h return stack
 DSPAGE  EQU     81h             ; 8100h data stack
 LETPAGE EQU     82h             ; 8200h letter cells and line buffer
@@ -115,7 +133,9 @@ HEAP    EQU     LET+7Ch         ; the heap pointer
 RSP     EQU     LET+34h         ; gap after Z: the return stack pointer;
 BRKCNT  EQU     LET+36h         ;   the break check's countdown;
 NPEND   EQU     LET+38h         ;   minus the address of the program's end
-                                ;   (the heap's first byte), for the checked '_'
+                                ;   (the heap's first byte), for the checked '_';
+PSAVE   EQU     LET+3Ah         ;   the checked build: the address '$' prints
+                                ;   from, for a report
 KEYBUF  EQU     LET+7Ah         ; gap after z: a key read by the break check and
                                 ;   held for the next '?' (0: none);
 BRKOFF  EQU     LET+7Bh         ;   the break-off cell: a program that stores a
@@ -626,9 +646,10 @@ h_str:  PUSH    H
         ENDIF
         RST     6
 
-; '$' prints the string at TOS, decoding escapes: '/' plus a character
-; clears that character's bit 6 (/M is CR, /` is space; '/' and '"' have no
-; bit 6, so // and /" give themselves).
+; '$' prints the string at TOS, decoding escapes: '/' plus a character from
+; 60h to 7Eh is one of the escapes at pesc; '/' plus any other character
+; clears that character's bit 6 (/M is CR, /? is DEL's '?'; '/' and '"' have
+; no bit 6, so // and /" give themselves).
         IF      1-CHECKED
 h_print:MOV     A,M
         INX     H
@@ -638,17 +659,22 @@ h_print:MOV     A,M
         JNZ     pr1
         MOV     A,M
         INX     H
-        ANI     0BFh
+        CPI     60h
+        JC      pr0
+        CPI     7Fh
+        JC      pesc
+pr0:    ANI     0BFh
 pr1:    RST     5
         JMP     h_print
+PRLOOP  EQU     h_print         ; (where the escapes go back to)
+PRAGAIN EQU     h_print         ; (and where /~ goes back to)
         ENDIF
         IF      CHECKED
 ; (The checked build has the loop as a routine, prstr, which the error
-; report uses too. The address is kept on the stack meanwhile: a report
-; shows the stack as it was before the '$'.)
-h_print:PUSH    H
-        CALL    prstr
-        POP     D
+; report uses too. The address is kept meanwhile, for a report: it shows
+; the stack as it was before the '$'. /~ comes back to hp1.)
+h_print:SHLD    PSAVE
+hp1:    CALL    prstr
         RST     3
         ENDIF
 
@@ -905,6 +931,116 @@ pdec:   LXI     D,10
         ADI     '0'
         RST     5
         RET
+
+;-----------------------------------------------------------------------------
+; pesc: the escapes of '$'. A = the character after the '/', 60h to 7Eh, and
+; HL points past it. Each goes back into the loop that prints the string
+; (PRLOOP), but /~ has the stack to see to, and goes back by PRAGAIN.
+;    /a-/z   print the variable, as '#' does
+;    /{      clear the screen, the cursor to the top left
+;    /}      clear from the cursor to the end of the line
+;    /|  /`  show the cursor, hide it
+;    /~      ( row col -- ) the cursor to that row and column, from 0
+pesc:   CPI     7Eh
+        JZ      pat
+        LXI     D,PRLOOP        ; the others return into the loop
+        PUSH    D
+        SUI     7Bh             ; { 0, | 1, } 2, and no borrow
+        JNC     pcon
+        ADI     1Ah             ; a-z: 0-25, and a carry; `: FFh, and none
+        JNC     phide
+        ADD     A               ; the variable's cell
+        ADI     40h
+        PUSH    H
+        PUSH    B
+        MOV     L,A
+        MVI     H,LETPAGE
+        MOV     A,M
+        INR     L
+        MOV     H,M
+        MOV     L,A
+        CALL    psgn
+        POP     B
+        POP     H
+        RET
+
+; /~ ( row col addr -- ): the two cells under the string's address go. In
+; the checked build '$' is the routine prstr: its own return address goes
+; first, and hp1 calls it again afterwards; and chkstk looks first that
+; there is a column at least (with less, it is s). With a column but no row
+; it is s after the '$', as for any other character: the spare bytes above
+; the stack take what is written meanwhile.
+pat:
+        IF      CHECKED
+        POP     D
+        CALL    chkstk
+        ENDIF
+        POP     D               ; DE = the column
+        XTHL                    ; HL = the row; the text pointer is kept
+        IF      1-ANS
+        CALL    CONAT
+        POP     H
+        JMP     PRAGAIN
+
+; With ANSI = 0 the machine's routines do the rest.
+phide:  XRA     A               ; /`  (A = 0: hide)
+        JMP     CONCUR
+pcon:   JZ      CONCLS          ; /{
+        CPI     2
+        JZ      CONEOL          ; /}
+        JMP     CONCUR          ; /|  (A = 1: show)
+        ENDIF
+        IF      ANS
+        PUSH    B               ; (pdec uses BC)
+        PUSH    D
+        CALL    csi             ; ESC [ row+1 ; col+1 H (ANSI counts from 1)
+        INX     H
+        CALL    pdec
+        MVI     A,';'
+        RST     5
+        POP     H
+        INX     H
+        CALL    pdec
+        MVI     A,'H'
+        RST     5
+        POP     B
+        POP     H
+        JMP     PRAGAIN
+
+; With ANSI = 1 they are sequences. The carry is clear on the way in.
+pcon:   DCR     A
+        JZ      pshow           ; /|
+        MVI     A,'K'
+        JP      csia            ; /}  ESC [ K
+        MVI     A,'H'           ; /{  ESC [ H ESC [ J
+        CALL    csia
+        MVI     A,'J'
+        JMP     csia
+pshow:  MVI     E,'h'           ; /|  ESC [ ? 2 5 h
+        DB      0DAh            ; (JC nn: with no carry it steps over two bytes)
+phide:  MVI     E,'l'           ; /`  ESC [ ? 2 5 l
+        MVI     A,'?'
+        CALL    csia
+        MVI     A,'2'
+        RST     5
+        MVI     A,'5'
+        RST     5
+        MOV     A,E
+        RST     5
+        RET
+
+; csia: ESC [ and then A. csi: ESC [. Both keep all but A.
+csia:   PUSH    PSW
+        CALL    csi
+        POP     PSW
+        RST     5
+        RET
+csi:    MVI     A,27
+        RST     5
+        MVI     A,'['
+        RST     5
+        RET
+        ENDIF
 
 ; skip: read past text to the closer at this level, and return A = 0 if it
 ; was ')' and 2 if it was ']'. Brackets of both kinds count together;
@@ -1192,11 +1328,17 @@ prstr:  MOV     A,M
         JNZ     prs1
         MOV     A,M
         INX     H
-        ANI     0BFh
+        CPI     60h
+        JC      prs0
+        CPI     7Fh
+        JC      pesc
+prs0:   ANI     0BFh
 prs1:   RST     5
         JMP     prstr
+PRLOOP  EQU     prstr           ; (where the escapes go back to)
+PRAGAIN EQU     hp1             ; (and where /~ goes back to)
 e_dollar:POP    D               ; '$' ran into a NUL: drop the return address,
-        POP     H               ;   and put the string's address back in TOS
+        LHLD    PSAVE           ;   and put the string's address back in TOS
         MVI     A,'Q'
         JMP     error
 

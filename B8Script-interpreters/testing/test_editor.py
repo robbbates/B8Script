@@ -27,7 +27,6 @@ from ref import Ref
 CR, BS, ESC = b'\r', b'\x08', b'\x1b'
 G, L, E, RD, WR, N, V, X, B, F, Z = (bytes([c]) for c in (7, 12, 5, 18, 23, 14, 22, 24, 2, 6, 26))
 LEFT, RIGHT, UP = ESC + b'[D', ESC + b'[C', ESC + b'[A'
-VERSION = b'2026-11-21'
 
 
 def R(text):
@@ -168,7 +167,7 @@ class Ed:
                 if cur < len(buf):
                     out.append(buf[cur])
                     cur += 1
-            elif c in (13, 7, 12, 5, 18, 23, 14, 22, 24):
+            elif c in (13, 7, 12, 5, 18, 23, 14, 24):
                 out += b'\r\n'
                 typed = bytes(buf)
                 digits = 0
@@ -243,11 +242,6 @@ class Ed:
                 self.files[self.key(self.name)] = t + (b'\x1a' * (-len(t) % 128) if self.pad else b'')
             else:
                 out += self.text()
-        elif c == 22:
-            t = self.text()
-            out += self.build + (b'C' if self.checked else b'') + b' ' + VERSION + self.stack_lines()
-            out += b'\r\nProg %d\r\nLines %d\r\nFree %d\r\n' % (
-                len(t), len(lines), self.heaplim - 1 - (self.sy['PROG'] + len(t)))
         elif c == 24:
             raise Left
 
@@ -316,7 +310,7 @@ def sessions():
     'Ctrl-C ends the list': [R(b'0 %d#' % i) for i in range(9)] + [
         (L, [(4, 3, None)]), (b'2' + L, [(2, 32, 3)]), (L, [(0, 3, None)]), R(b' 5#'), b'9' + L],
     'the data stack lasts from line to line': [
-        R(b' 1 2 3'), R(b' +#'), R(b'1 10*'), G, R(b' #'), R(b' 4 5'), V, R(b' ;;'), V],
+        R(b' 1 2 3'), R(b' +#'), R(b'1 10*'), G, R(b' #'), R(b' 4 5'), R(b' #" "$#')],
     'edit a line': [R(b'1 "abc"$'), R(b'2 5#'), b'1' + E + R(B * 3 + b'X'), L, G,
                     b'2' + E + R(BS * 2 + b'77#'), L, G],
     'edit: no such line, a dropped edit, an emptied line': [
@@ -324,15 +318,15 @@ def sessions():
         b'1' + E + R(BS * 9), L, G, E, R(b' 9#')],
     'edit a line of the full length': [R(b'1 ' + b'x' * 125), b'1' + E + R(BS * 3 + b'abcd'), L],
     'new': [R(b'1 1#'), R(b'2 2#'), N + b'x', L, N + G, L, N + N, L, R(b'1 3#'), L, G],
-    'view': [V, R(b'1 "a"$'), R(b'2 "bc"$'), V, R(b' 1 2 3 4 5 6 7 8 9 -10'), V],
+    'no ^V: the key does nothing': [R(V + b' 6#'), R(b'1 "a"$'), R(b' 5' + V + b'#'), L],
 }
 
 
 # Generic builds: read is a paste that ends at ^Z, write prints the text.
 GEN_SESSIONS = {
-    'read and write': [RD + b'1#\r\n2#\r\n' + Z, L, G, WR, V],
+    'read and write': [RD + b'1#\r\n2#\r\n' + Z, L, G, WR],
     'read: CR alone, LF alone, empty lines, no last line end': [
-        RD + b'1#\r2#\r' + Z, L, RD + b'3#\n4#\n\n5#' + Z, L, G, RD + b'\r\n\r\n6#\r\n\r\n' + Z, L, G, RD + Z, L, V],
+        RD + b'1#\r2#\r' + Z, L, RD + b'3#\n4#\n\n5#' + Z, L, G, RD + b'\r\n\r\n6#\r\n\r\n' + Z, L, G, RD + Z, L],
     'read replaces the program': [R(b'1 9#'), R(b'2 8#'), RD + b'"new"$' + Z, L, G, WR],
     'leave': [R(b' 5#'), X, R(b' 6#')],
 }
@@ -343,12 +337,12 @@ FILE = b'"one "$\r\n[W "w"$]\r\n2 3*#\r\n'
 CPM_SESSIONS = {
     'a file is loaded, listed, run and added to': (FILE, [L, G, R(b' W'), R(b'2 "new "$'), R(b'0 9#'), L, G]),
     'a file with no text': (b'', [L, R(b'1 5#'), L, G]),
-    'no file at all': (None, [L, V, R(b'1 5#'), L, G]),
+    'no file at all': (None, [L, R(b'1 5#'), L, G]),
     'a file of exactly one record': ((b'1#' + b' ' * 61 + b'\r\n') * 2, [L, G, R(b'0 2#'), G]),
     'a file whose last line has no CR LF': (b'1#\r\n2#', [L, G]),
     'write, change, read back': (FILE, [R(b'1 "zero "$'), WR, R(b'1'), R(b'1'), L, RD, L, G]),
     'write under a new name, read both': (FILE, [
-        R(b'1'), b'new.b8s' + WR, N + N, L, RD, L, b'PROG.B8S' + RD, L, b'new.b8s' + RD, L, WR, b'nosuch' + RD, L, V]),
+        R(b'1'), b'new.b8s' + WR, N + N, L, RD, L, b'PROG.B8S' + RD, L, b'new.b8s' + RD, L, WR, b'nosuch' + RD, L]),
     'write a program of several records': (b'', [R(b'0 "%s"$' % (bytes([65 + i]) * 60)) for i in range(7)] + [
         b'BIG' + WR, N + N, L, b'big' + RD, L, G]),
     'write an empty program': (FILE, [N + N, b'EMPTY.TXT' + WR, b'PROG.B8S' + RD, L, b'EMPTY.TXT' + RD, L]),
@@ -360,8 +354,9 @@ CPM_SESSIONS = {
 CHK_SESSIONS = {
     'errors in the program and in a typed line': [
         R(b'1 1 2'), R(b'2 3 0/ "no"$'), G, R(b' 7#'), R(b' 1 0! "no"$'), R(b' 5 Q "no"$'), R(b' [Q 9#] Q'),
-        R(b'3 [5 1]'), R(b'2'), G, R(b'1 [R R] 4'), R(b'2 0( 1'), G, V],
-    'an error clears the stack': [R(b' 1 2 3'), R(b' 4 0/'), V, R(b' 7#'), R(b' ;'), V],
+        R(b'3 [5 1]'), R(b'2'), G, R(b'1 [R R] 4'), R(b'2 0( 1'), G, R(b' ;')],
+    'an error clears the stack': [R(b' 1 2 3'), R(b' 4 0/'), R(b' 7#'), R(b' ;')],
+
     'variables start at 0 and words undefined': [R(b' q@# j@#'), R(b' 1 2 W "no"$'), R(b' [W 3#]W')],
 }
 
@@ -370,15 +365,23 @@ CHK_SESSIONS = {
 # the output; checked: None = every build, True or False = only those.)
 RPT = rb'\r\nErr B @ %s,\d+\r\n[^\r\n]{0,16}\r\nStk \d+:[ \-\d.]*\r\nRtn \d+\r\n'
 TIMED = {
-    'Ctrl-C stops a program (checked)': (True, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L, V], [(40, b'\x03')],
-        [rb'\.{10,}' + RPT % b'1' + rb' 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb'\r\nStk 0:\r\nRtn 0\r\n']),
-    'Ctrl-C stops a program (unchecked)': (False, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L, V], [(40, b'\x03')],
-        [rb'\.{10,} 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb'\r\nStk 0:\r\nRtn 0\r\n']),
+    'Ctrl-C stops a program (checked)': (True, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L, R(b' ;')], [(40, b'\x03')],
+        [rb'\.{10,}' + RPT % b'1' + rb' 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb' ;\r\n\r\nErr s .*\r\nStk 0:\r\nRtn 0\r\n']),
+    'Ctrl-C stops a program (unchecked)': (False, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L], [(40, b'\x03')],
+        [rb'\.{10,} 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n']),
     'Ctrl-C stops a typed line': (None, [R(b' 1("."$ 1)'), R(b' 8#')], [(40, b'\x03')], [rb'\.{10,}.* 8#\r\n8$']),
     'a key pressed while the program runs is held for it': (
         None, [R(b' 0i! 1( i@1+:i! 3000<) 0?#'), R(b' 6#')], [(28, b'A')], [rb'0\?#\r\n65 6#\r\n6$']),
     'a key held when the program ends is let go': (
         None, [R(b' 0i! 1( i@1+:i! 3000<)'), R(b' 6#')], [(24, b'A')], [rb'3000<\)\r\n 6#\r\n6$']),
+    # /~ with an empty stack: the first finds the dummy cell and prints a
+    # cursor sequence of no meaning (an underflow is found after the
+    # character has run); the next is stopped before anything is written
+    # past the stack's spare bytes, so word A survives. Then /~ works.
+    'a /~ with nothing under it is s, and word A survives it': (
+        True, [R(b'1 [A "a"$]'), G, R(b' "/~/~/~/~/~x"$'), R(b' A'), R(b' 1 2 3 4 "/~/~."$ A')], [],
+        [rb'\r\nErr s @ 0,15\r\n\$\r\nStk 0:\r\nRtn 0\r\n A\r\na 1 2 3 4 "/~/~\."\$ A\r\n'
+         rb'\x1b\[4;5H\x1b\[2;3H\.a$']),
     'the break key is on again for the next line': (
         None, [R(b' 1 %d.' % 0), R(b' 1("."$ 1)'), R(b' 8#')], [(60, b'\x03')], [rb'\.{10,}.* 8#\r\n8$']),
 }

@@ -33,6 +33,7 @@ import z80
 
 TRAP = 0xFFF0          # BDOS lives here in the cpm runs
 WBOOT = 0xFFE0
+CONS = ('CONCLS', 'CONEOL', 'CONCUR', 'CONAT')   # the console routines (ANSI = 0)
 IDLE = 20000         # empty KEY polls in a row before a run counts as waiting for input
 GAP = 3000           # clock ticks: two looks at the keyboard closer than this are a key loop
 
@@ -93,6 +94,7 @@ class Run:
         self.inp = list(inp)
         self.out = bytearray()
         self.mode = mode
+        self.cons = {self.sy[k]: k for k in CONS if k in self.sy}
         self.prog = prog
         self.maxticks = maxticks
         self.ended = None
@@ -101,12 +103,13 @@ class Run:
         if mode == 'generic':
             p = self.sy['PROG']
             self.m.set_memory_block(p, prog + b'\0')
-            for k in ('KEY', 'CONOUT', 'EXIT'):
-                self.m.set_breakpoint(self.sy[k])
+            for k in ('KEY', 'CONOUT', 'EXIT') + CONS:
+                if k in self.sy:
+                    self.m.set_breakpoint(self.sy[k])
             self.m.pc = 0
         elif mode == 'editor':
             self.m.set_memory_block(self.sy['PROG'], b'\xAA' * 2048)
-            for k in ('KEY', 'CONOUT', 'LEAVE'):
+            for k in ('KEY', 'CONOUT', 'LEAVE') + CONS:
                 if k in self.sy:
                     self.m.set_breakpoint(self.sy[k])
             self.m.pc = 0
@@ -125,6 +128,24 @@ class Run:
             self.dma = 0x80
             self.m.sp = 0xFF00
             self.m.pc = 0x100
+
+    def console(self, pc):
+        """A build with ANSI = 0 calls the machine's console routines for the
+        escapes of '$'. Each is modelled as sending the ANSI sequence that an
+        ANSI = 1 build sends, so the two print the same. Each then spoils
+        what its contract lets it change (A, and DE and HL for CONAT), so
+        that an interpreter that relies on more is caught."""
+        m, k = self.m, self.cons[pc]
+        if k == 'CONCLS':
+            self.out += b'\x1b[H\x1b[J'
+        elif k == 'CONEOL':
+            self.out += b'\x1b[K'
+        elif k == 'CONCUR':
+            self.out += b'\x1b[?25h' if m.a else b'\x1b[?25l'
+        else:                                   # CONAT: row HL, column DE
+            self.out += b'\x1b[%d;%dH' % ((m.hl + 1) & 0xFFFF, (m.de + 1) & 0xFFFF)
+            m.hl, m.de = 0xA5A5, 0x5A5A
+        m.a = 0xEE
 
     def mem(self, a):
         return self.m.memory[a & 0xFFFF]
@@ -190,6 +211,8 @@ class Run:
                     # the host routine's contract: Z (and S) follow A
                     m.f = (m.f & 0x3F) | (0x40 if m.a == 0 else 0) | (m.a & 0x80)
                     self.ret()
+                elif pc in self.cons:
+                    self.console(pc); idle = 0; self.ret()
                 elif pc == (sy['EXIT'] if self.mode == 'generic' else sy.get('LEAVE')):
                     self.ended = 'exit'; break
                 # anything else: the tick budget ran out; carry on

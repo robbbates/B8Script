@@ -12,6 +12,7 @@ A postfix stack language for 64 KB 8-bit computers, by Robb Bates. Every instruc
 | Path | What it is |
 |---|---|
 | [`docs/b8script.md`](docs/b8script.md) | The spec: the language, idioms, examples, how to implement it, and an appendix per CPU |
+| [`docs/idioms.md`](docs/idioms.md) | Idioms, tips and tricks, collected from the spec, the tutorial and the games, each with the game it came from |
 | [`B8Script-interpreters/`](B8Script-interpreters/) | Interpreters for the Z80, 8080, 6502 and 6809 (generic ROM images and CP/M .COM files) and for the Windows command shell (32-bit .EXE files), checked and unchecked, with and without a line editor. Its README covers sizes and building |
 | [`games/`](games/) | Fifty-four games, from Star Trek and Klondike to thirty-two that each fit in a tweet. Its README says how to run and play each one |
 | [`B8Script-interpreters/testing/`](B8Script-interpreters/testing/) | The reference interpreter, the test suite and emulator harnesses, which also run the games |

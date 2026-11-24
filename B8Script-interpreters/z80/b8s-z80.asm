@@ -1,8 +1,8 @@
 ; =============================================================================
 ;  B8Script interpreter for the Z80
-;  Spec: docs/b8script.md (2026-11-23).
+;  Spec: docs/b8script.md (2026-11-21).
 ;
-;  Four switches, set in the EQU lines below:
+;  Three switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
 ;    EDITOR   1 = with the line editor built in (see the end of this file):
@@ -11,12 +11,8 @@
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
 ;             1 = starts with every variable at 0 and every word undefined,
 ;                 and stops on every error in the spec's table (and Ctrl-C)
-;                 with a three-line report: the letter and the place as
-;                 line and column, and both stacks. See `error`.
-;    ANSI     1 = the four console codes (`@ `^ `_ `?) send ANSI escape
-;                 sequences through CONOUT
-;             0 = they call four routines of the machine's own instead:
-;                 CONAT, CONCLS, CONEOL and CONCUR (see the equates)
+;                 with a four-line report: the letter and the place as line
+;                 and column, the text there, and both stacks. See `error`.
 ;
 ;  In every build Ctrl-C stops a running program (an unchecked build stops
 ;  without a word): see the console layer for the rules, the held key and
@@ -28,7 +24,6 @@
 CPM     EQU     0               ; 1 = CP/M .COM build
 CHECKED EQU     0               ; 1 = checked build
 EDITOR  EQU     0               ; 1 = with the line editor
-ANSI    EQU     1               ; 1 = the console codes send ANSI sequences
 EDGEN   EQU     EDITOR*(1-CPM)  ; (the generic build with the editor)
                                 ; (IF takes any value but 0 as true, so
                                 ;  IF CHECKED+EDITOR means "either")
@@ -108,17 +103,6 @@ PROG    EQU     8300h           ; where the loader puts the program text
 HEAPLIM EQU     0F0h            ; the heap must stay below F000h (a page)
 BASE    EQU     0000h           ; where the image starts
         ENDIF
-        IF      (1-CPM)*(1-ANSI)
-; ---- generic machine with ANSI = 0: the console codes call these ------------
-CONAT   EQU     0FF0Ch          ; `@  cursor to row E, column L, both from 0
-                                ;     (DE and HL hold the whole cells). May
-                                ;     change A, DE and HL
-CONCLS  EQU     0FF0Fh          ; `^  clear the screen and home the cursor
-CONEOL  EQU     0FF12h          ; `_  clear from the cursor to the end of the line
-CONCUR  EQU     0FF15h          ; `?  cursor off if A = 0 (the zero flag is set
-                                ;     to match), on if not. May change A, DE, HL
-;   All four must preserve BC and HL'; CONCLS and CONEOL also DE and HL.
-        ENDIF
         IF      (1-CPM)*(1-EDITOR)
 EXIT    EQU     0FF09h          ; where to go when the program ends
         ENDIF
@@ -150,10 +134,7 @@ NPEND   EQU     LET+38h         ;   minus the address of the program's end
                                 ;   (the heap's first byte), for the checked '_';
 EDLN    EQU     LET+3Ah         ;   the editor: the number of the line that ^E
                                 ;   put in the input line (0: none)
-SEED    EQU     LET+76h         ; gap after z: the random seed, the cell whose
-                                ;   address `. gives. Nothing sets it at the
-                                ;   start but the checked build's clearing;
-KEYBUF  EQU     LET+7Ah         ;   a key read by the break check and
+KEYBUF  EQU     LET+7Ah         ; gap after z: a key read by the break check and
                                 ;   held for the next '?' (0: none);
 BRKOFF  EQU     LET+7Bh         ;   the break-off cell: a program that stores a
                                 ;   non-zero byte here gets Ctrl-C as a key
@@ -504,27 +485,23 @@ rpushn: EXX
         CALL    Z,pollk
         RST     30h
 
-; ---- the grave -------------------------------------------------------------
-; The grave is a prefix: with the character after it, it is one command.
-; The characters are tested one after another, each SUB taking off the step
-; from the one before, so A is 0 (and the carry clear) when a handler is
-; reached. Two are here, where they keep the first page as full as the
-; layout needs; grave2 has the rest.
-;
-;   `!  ( addr -- )  calls the machine code at TOS. The code is entered by
-;       CALL with the data stack above the return address; it must keep BC,
-;       and on return the top cell becomes the new TOS.
-;   `'  ( -- )  new line: CR LF
-h_grave:LD      A,(BC)
-        INC     BC
-        SUB     '!'
-        JR      Z,exec
-        SUB     27h-'!'         ; "'"
-        JP      NZ,grave2
-        LD      A,13
-        RST     28h
-        LD      A,10
-        RST     28h
+; ---- machine code: the grave -----------------------------------------------
+; '`' plus a hex digit loads bytes: ( addr -- addr' ). Pairs of hex digits
+; are stored from addr until a non-hex character; then a RET (C9h) is
+; written and its address is left. An odd last digit is consumed and dropped.
+; '`' plus anything else calls the machine code at TOS: ( addr -- ). The
+; code is entered by CALL with the data stack above the return address; it
+; must keep BC, and on return the top cell becomes the new TOS.
+h_grave:CALL    hexc
+        JR      NC,exec
+hx1:    LD      (HL),A          ; the high digit goes in first ...
+        CALL    hexc
+        JR      NC,hx2          ; odd digit: consumed, and the RET below
+        RLD                     ;   overwrites it
+        INC     HL              ; ... and RLD shifts it up under the low one
+        CALL    hexc
+        JR      C,hx1
+hx2:    LD      (HL),0C9h       ; (never range-checked: the spec says so)
         RST     30h
 
 ; ---- where the two pages meet ----------------------------------------------
@@ -765,7 +742,7 @@ h_str:  PUSH    HL
 ; '$' prints the string at TOS, decoding escapes: '/' plus a character
 ; clears that character's bit 6 (/M is CR, /` is space; '/' and '"' have no
 ; bit 6, so // and /" give themselves).
-        IF      1-CHECKED
+        IF      (1-CHECKED)*(1-EDITOR)
 h_print:LD      A,(HL)
         INC     HL
         CP      22h
@@ -787,6 +764,11 @@ h_print:PUSH    HL
         POP     DE
         RST     18h
         ENDIF
+        IF      (1-CHECKED)*EDITOR
+; (With the editor the loop is a routine, prstr, which ^V uses too.)
+h_print:CALL    prstr
+        RST     18h
+        ENDIF
 
 h_emit: LD      A,L             ; "'"
         RST     28h
@@ -801,7 +783,6 @@ h_num:  PUSH    BC
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
 ;   n = 0: wait for a key
-;          (both stir the random seed while they wait: see kt2)
 ;   n < 0: read a line of at most -n characters, with echo. The buffer
 ;          holds 127 characters and the CR: a bigger count is taken as 127.
 h_key:  BIT     7,H
@@ -811,11 +792,6 @@ kt2:    CALL    getk
         JR      NZ,kt3
         DEC     E
         JR      NZ,kt2
-        EX      DE,HL           ; a millisecond with no key stirs the random
-        LD      HL,(SEED)       ;   seed by one: how long a key takes to come
-        INC     HL              ;   is the one thing here that is not the
-        LD      (SEED),HL       ;   same every time
-        EX      DE,HL
         LD      A,H             ; 0? never counts down: it waits
         OR      L
         JR      Z,kt1
@@ -1055,216 +1031,6 @@ pdec:   LD      DE,10
         ADD     A,'0'
         RST     28h
         RET
-
-; =============================================================================
-;  The grave's other codes. h_grave comes here with A = the character minus
-;  27h, not zero; the tests carry on from there. The four characters from
-;  '+' to '.' follow one another, so one range test finds them and two
-;  rotates tell them apart.
-;
-;    `$  ( addr -- addr' )  the hex loader: pairs of hex digits are stored
-;        from addr until a non-hex character; then a RET (C9h) is written
-;        and its address is left. An odd last digit is consumed and dropped.
-;    `+  ( addr -- n )   add 1 to the cell at addr and leave its new value
-;    `,  ( n -- r )      a random number from 0 to n-1 (n is 1 to 32767)
-;    `-  ( addr -- n )   subtract 1 from the cell at addr, the same way
-;    `.  ( -- addr )     the address of the random seed
-;    `<  ( a b -- n )    the smaller of the two (signed)
-;    `>  ( a b -- n )    the larger
-;    `?  ( flag -- )     the cursor off (0) or on
-;    `@  ( row col -- )  the cursor to that row and column, both from 0
-;    `^  ( -- )          clear the screen and home the cursor
-;    `_  ( -- )          clear from the cursor to the end of the line
-;
-;  Any other character is unsafe: the unchecked build takes it as '_', the
-;  checked build stops with W.
-; =============================================================================
-grave2: SUB     '+'-27h         ; '+' ',' '-' '.' leave 0 to 3
-        CP      4
-        JR      NC,gv2
-        RRA                     ; carry: ',' or '.'; bit 0 of A: '-' or '.'
-        JR      C,gv3
-; `+ and `-: one routine.
-        IF      CHECKED
-        LD      D,A             ; (the checked build tests the address first,
-        CALL    chkst           ;   as '!' does: the test uses A, and under
-        LD      A,D             ;   CP/M E too)
-        ENDIF
-        LD      E,(HL)
-        INC     HL
-        LD      D,(HL)
-        RRA                     ; carry: '-'
-        JR      C,gi1
-        INC     DE
-        INC     DE
-gi1:    DEC     DE
-        LD      (HL),D
-        DEC     HL
-        LD      (HL),E
-        EX      DE,HL           ; the new value is TOS
-        RST     30h
-
-gv3:    RRA                     ; carry: '.'
-        JR      C,g_seed
-; `, ( n -- r ). The seed goes one step on: seed * 261 + 1, which takes
-; every 16-bit value in turn. The high bits of such a seed are the good ones
-; and the low ones repeat soon, so the high byte is folded into the low
-; (XOR) before the remainder of dividing by n is taken.
-; n must be 1 to 32767: the checked build stops with Z on anything less
-; than 1.
-g_rnd:
-        IF      CHECKED
-        DEC     HL
-        BIT     7,H             ; n - 1 negative: n is 0 or less
-        INC     HL
-        JP      NZ,e_zero
-        ENDIF
-        EX      DE,HL           ; DE = n
-        PUSH    BC
-        LD      HL,(SEED)
-        LD      B,H
-        LD      C,L
-        ADD     HL,HL
-        ADD     HL,HL
-        ADD     HL,BC           ; * 5
-        INC     HL              ; + 1
-        LD      A,H
-        ADD     A,C
-        LD      H,A             ; + * 256: * 261 + 1
-        LD      (SEED),HL
-        XOR     L               ; (A is still the high byte)
-        LD      L,A
-        CALL    udiv            ; DE = the remainder
-        EX      DE,HL
-        POP     BC
-        RST     30h
-
-; `. pushes the address of the random seed.
-g_seed: PUSH    HL
-        LD      HL,SEED
-        RST     30h
-
-gv2:    ADD     A,'+'-'$'       ; '$'
-        JR      NZ,gv4
-hx1:    CALL    hexc
-        JR      NC,hx2
-        LD      (HL),A          ; the high digit goes in first ...
-        CALL    hexc
-        JR      NC,hx2          ; odd digit: consumed, and the RET below
-        RLD                     ;   overwrites it
-        INC     HL              ; ... and RLD shifts it up under the low one
-        JR      hx1
-hx2:    LD      (HL),0C9h       ; (never range-checked: the spec says so)
-        RST     30h
-gv4:    SUB     '<'-'$'
-        JR      Z,g_min
-        SUB     '>'-'<'
-        JR      Z,g_max
-        DEC     A               ; '?'
-        JR      Z,g_cur
-        DEC     A               ; '@'
-        JR      Z,g_at
-        SUB     '^'-'@'         ; '^' leaves 0 and '_' leaves 1
-        IF      CHECKED
-        CP      2
-        JP      NC,e_brack      ; anything else: W. The place is the character
-        OR      A
-        ENDIF
-        IF      ANSI
-        JR      NZ,ge1
-        CALL    csi             ; '^': ESC [ H homes the cursor, and then
-        LD      A,'H'           ;   ESC [ J clears from there to the end of
-        RST     28h             ;   the screen
-        XOR     A
-ge1:    ADD     A,'J'           ; '_': ESC [ K clears to the end of the line
-        LD      E,A
-        CALL    csi
-        LD      A,E
-        RST     28h
-        RST     30h
-        ENDIF
-        IF      1-ANSI
-        JR      NZ,ge1
-        CALL    CONCLS
-        RST     30h
-ge1:    CALL    CONEOL
-        RST     30h
-        ENDIF
-
-; `< and `>. The carry says which: set for the larger. The two are put in
-; order, HL the smaller and DE the larger, and then swapped for '>'.
-; b < a (signed) is the borrow of b - a, turned round if the two signs
-; differ: RRA puts the borrow in bit 7, where the two XORs meet it.
-g_max:  SCF                     ; ('<' comes in with the carry clear)
-g_min:  POP     DE              ; DE = a, HL = b
-        PUSH    AF
-        LD      A,L
-        SUB     E
-        LD      A,H
-        SBC     A,D
-        RRA
-        XOR     H
-        XOR     D
-        RLA                     ; carry: b < a
-        JR      C,gm2
-        EX      DE,HL
-gm2:    POP     AF
-        JR      NC,gm3
-        EX      DE,HL
-gm3:    RST     30h
-
-        IF      ANSI
-; `? ( flag -- ): ESC [ ? 2 5 l hides the cursor, ESC [ ? 2 5 h shows it.
-g_cur:  CALL    csi
-        LD      A,'?'
-        RST     28h
-        LD      A,'2'
-        RST     28h
-        LD      A,'5'
-        RST     28h
-        LD      A,H
-        OR      L
-        LD      A,'l'
-        JR      Z,gc1
-        LD      A,'h'
-gc1:    RST     28h
-        RST     18h
-
-; `@ ( row col -- ): ESC [ row+1 ; col+1 H. (ANSI counts from 1.)
-g_at:   POP     DE              ; DE = the row
-        PUSH    BC              ; (pdec uses BC)
-        PUSH    HL              ; the column
-        EX      DE,HL
-        CALL    csi
-        INC     HL
-        CALL    pdec
-        LD      A,';'
-        RST     28h
-        POP     HL
-        INC     HL
-        CALL    pdec
-        LD      A,'H'
-        RST     28h
-        POP     BC
-        RST     18h
-
-; csi: print ESC [, which starts every ANSI sequence. Keeps all but A.
-csi:    LD      A,27
-        RST     28h
-        LD      A,'['
-        RST     28h
-        RET
-        ENDIF
-        IF      1-ANSI
-; With ANSI = 0 the machine's own routines do the work (see the equates).
-g_cur:  LD      A,H
-        OR      L
-        CALL    CONCUR
-        RST     18h
-g_at:   POP     DE              ; DE = the row, HL = the column
-        CALL    CONAT
-        RST     18h
-        ENDIF
 
 ; =============================================================================
 ;  Dispatch table: the low byte of each handler's address, in code order
@@ -1520,9 +1286,6 @@ e_break:LD      A,'B'           ; Ctrl-C (found inside pollk or getk)
 ; errp: an error found inside a routine: drop its return address first.
 errp:   POP     DE
         JR      error
-e_dollar:POP    DE              ; '$' ran into a NUL: drop prstr's return
-        POP     HL              ;   address, put the string's address back in
-        DB      11h             ;   TOS, and step over the next two bytes: Q
 e_quote:LD      B,H             ; an unclosed string: HL is its address, one
         LD      C,L             ;   past the opening quote, which is the place
         LD      A,'Q'
@@ -1537,6 +1300,7 @@ e_brack:LD      A,'W'           ; bad character after [
 ; HL = TOS, and both stacks as the report is to show them:
 ;
 ;   Err X @ line,col
+;   up to 16 characters of the text from the place
 ;   Stk n: the top 8 cells at most, bottom to top
 ;   Rtn n
 error:  PUSH    HL              ; now the whole data stack is in memory
@@ -1580,16 +1344,53 @@ er3:    PUSH    BC
         RST     28h
         POP     DE
         POP     HL
+        PUSH    HL
         OR      A
         SBC     HL,DE
         INC     HL
         CALL    pdec            ; the column
-; The two stack lines:  Stk n: the top 8 cells at most, bottom to top
-;                       Rtn n
-; TOS is in memory with the rest (pushed).
         CALL    pnl
+        DB      22h
+        POP     HL              ; the text, as it is: 16 characters, or fewer
+        LD      B,16            ;   if the line or the program ends first
+er4:    LD      A,(HL)
+        INC     HL
+        OR      A
+        JR      Z,er5
+        CP      13
+        JR      Z,er5
+        CP      10
+        JR      Z,er5
+        ENDIF
+        IF      CHECKED*CPM
+        CP      1Ah             ; (the ^Z that pads a file's last record ends
+        JR      Z,er5           ;   the text too: some terminals clear the
+        ENDIF                   ;   screen on it)
+        IF      CHECKED
+        RST     28h
+        DJNZ    er4
+er5:                            ; (without the editor: on into pstk)
+        ENDIF
+        IF      CHECKED*EDITOR
+        CALL    pstk
+        CALL    pnl
+        DB      22h
+        JP      edit0           ; back to the editor, with both stacks cleared
+        ENDIF
+
+; =============================================================================
+;  Routines that the checked build's report and the editor share
+; =============================================================================
+SPADJ   EQU     2*EDITOR        ; (with the editor pstk is called, not fallen
+                                ;   into: the stack is one address deeper)
+        IF      CHECKED+EDITOR
+; pstk: the two stack lines:  Stk n: the top 8 cells at most, bottom to top
+;                             Rtn n
+; TOS must be in memory with the rest (pushed). In a build without the
+; editor this is the end of `error`, which runs on into it.
+pstk:   CALL    pnl
         DB      "Stk ",22h
-        LD      HL,(2-DSTOP)&0FFFFh ; SP - (DSTOP-2) is minus twice the
+        LD      HL,(2+SPADJ-DSTOP)&0FFFFh ; SP - (DSTOP-2) is minus twice the
         ADD     HL,SP           ;   depth (the cell at DSTOP-2 was pushed
         RST     20h             ;   with the first value and holds nothing)
         CALL    phalf           ; the depth
@@ -1601,11 +1402,16 @@ er3:    PUSH    BC
         CALL    pmsg
         DB      " ...",22h
         LD      C,8
-er6:    LD      H,B             ; C = the number of cells to show (B is 0:
-                                ;   phalf left the depth in BC)
+er6:    LD      H,0             ; C = the number of cells to show
         LD      L,C
         ADD     HL,HL
         ADD     HL,SP           ; HL -> just above the deepest of them
+        ENDIF
+        IF      EDITOR
+        INC     HL
+        INC     HL
+        ENDIF
+        IF      CHECKED+EDITOR
         INC     C
 er7:    DEC     C
         JR      Z,er8
@@ -1623,25 +1429,30 @@ er7:    DEC     C
         POP     HL
         JR      er7
 er8:    CALL    pnl
+        ENDIF
+        IF      (1-CHECKED)*EDITOR
+        DB      "Rtn 0",22h     ; (only ^V comes here, and at the editor the
+        RET                     ;   return stack is always empty)
+        ENDIF
+        IF      CHECKED
         DB      "Rtn ",22h
-        EXX                     ; twice the depth is RSTOP less the pointer:
-        LD      A,RSTOP&0FFh    ;   the low bytes are enough, since even an
-        SUB     L               ;   overflowing stack holds under 128 entries
         EXX
-        LD      L,A
-        LD      H,B             ; (B is still 0)
+        PUSH    HL
+        EXX
+        POP     DE
+        LD      HL,RSTOP
+        OR      A
+        SBC     HL,DE
+        ENDIF
+        IF      CHECKED*(1-EDITOR)
         CALL    phalf
         CALL    pnl
         DB      22h
-        ENDIF
-        IF      CHECKED*(1-EDITOR)
         JP      endprog
         ENDIF
-        IF      CHECKED*EDITOR
-        JP      edit0           ; back to the editor, with both stacks cleared
-        ENDIF
-        IF      CHECKED
-; phalf: print half of HL, and leave it in C.
+        IF      CHECKED+EDITOR
+; phalf: print half of HL, and leave it in C. (With the editor, pstk ends by
+; running on into this.)
 phalf:  SRL     H
         RR      L
         PUSH    HL
@@ -1650,14 +1461,18 @@ phalf:  SRL     H
         RET
 
 ; prstr: print the string at HL, to its closing quote, decoding '/' (this is
-; '$', and the texts of the report). A
+; '$', and the texts of the report and the editor). In the checked build a
 ; NUL first is an error: Q.
 prstr:  LD      A,(HL)
         INC     HL
         CP      22h
         RET     Z
+        ENDIF
+        IF      CHECKED
         OR      A
-        JP      Z,e_dollar
+        JR      Z,e_dollar
+        ENDIF
+        IF      CHECKED+EDITOR
         CP      '/'
         JR      NZ,prs1
         LD      A,(HL)
@@ -1676,6 +1491,12 @@ pmsg:   EX      (SP),HL
         CALL    prstr
         EX      (SP),HL
         RET
+        ENDIF
+        IF      CHECKED
+e_dollar:POP    DE              ; '$' ran into a NUL: drop the return address,
+        POP     HL              ;   and put the string's address back in TOS
+        LD      A,'Q'
+        JP      error
         ENDIF
 
 ; =============================================================================
@@ -1703,6 +1524,8 @@ pmsg:   EX      (SP),HL
 ;    name ^W   write. CP/M: to that file (no name: the same file as last
 ;              time). Generic: the text is printed, as it is.
 ;    ^N ^N     new: no program (the key twice in a row)
+;    ^V        view: the build, both stacks, and the program's size, lines
+;              and free memory
 ;    ^X        leave (to LEAVE)
 ;
 ;  In the line: ^B and ^F, or the left and right arrow keys, move the cursor;
@@ -1932,9 +1755,11 @@ cmds:   DB      13
         DW      cwrite
         DB      14              ; ^N
         DW      cnew
+        DB      22              ; ^V
+        DW      cview
         DB      24              ; ^X
         DW      LEAVE
-NCMD    EQU     8
+NCMD    EQU     9
 
 ; ^N ^N: no program, if the next key is ^N too
 cnew:   CALL    ekey
@@ -1942,16 +1767,18 @@ cnew:   CALL    ekey
         JR      NZ,ged0
         XOR     A
         LD      (PROG),A
-ged0:   JR      gedit
+ged0:   JP      edit
 
 ; ^E: line n goes into the input line, to be changed. EDLN remembers which
 ; line it was: Return puts the text back in its place.
 cedln:  CALL    rdnum
-        LD      (EDLN),HL       ; (no such line: `edit` clears it again)
+        PUSH    HL
         CALL    find            ; HL -> the line, or the NUL if there is none
+        POP     DE
         LD      A,(HL)
         OR      A
         JR      Z,ged0
+        LD      (EDLN),DE
         LD      DE,LINEBUF
 ce1:    LD      A,(HL)          ; copy it, and show it, up to its CR (or LF)
         CP      13
@@ -2075,6 +1902,53 @@ li3:    PUSH    HL
         CALL    prl             ;   and the line
         JR      li1
 
+; ^V: view.
+cview:  CALL    pmsg
+        DB      "B8SZ80E"
+        ENDIF
+        IF      EDITOR*CHECKED
+        DB      "C"
+        ENDIF
+        IF      EDITOR
+        DB      " 2026-11-21",22h
+        CALL    pstk            ; both stacks
+        LD      HL,PROG
+        LD      DE,0FFFFh
+cv1:    INC     DE              ; count the lines, and find the end
+        CALL    nxl
+        JR      NZ,cv1
+        PUSH    HL              ; the NUL
+        PUSH    DE              ; the lines
+        LD      DE,(0-PROG)&0FFFFh
+        ADD     HL,DE
+        CALL    pnl
+        DB      "Prog ",22h
+        CALL    pdec            ; the program's size
+        POP     HL
+        CALL    pnl
+        DB      "Lines ",22h
+        CALL    pdec
+        POP     DE
+        ENDIF
+        IF      EDGEN
+        LD      HL,HEAPLIM*256-1
+        ENDIF
+        IF      EDITOR*CPM
+        LD      A,(0007h)       ; the BDOS page is the limit
+        LD      H,A
+        LD      L,0
+        DEC     HL
+        ENDIF
+        IF      EDITOR
+        OR      A
+        SBC     HL,DE
+        CALL    pnl
+        DB      "Free ",22h
+        CALL    pdec            ; the room left for text and heap
+        CALL    pnl
+        DB      22h
+ged1:   JP      edit
+
 ; delln: take line n (in HL) out: copy everything after it down over it.
 delln:  CALL    find
         LD      D,H
@@ -2152,7 +2026,7 @@ rd4:    LD      A,C
         CP      1Ah
         JR      NZ,rd1
         LD      (HL),0
-ged1:   JP      edit
+        JR      ged1
 
 ; ^W, generic: the text is printed as it is, for the terminal to capture.
 cwrite: LD      HL,PROG
@@ -2167,6 +2041,12 @@ cw1:    LD      A,(HL)
         IF      EDITOR*CPM
 CFCB     EQU     005Ch           ; the file's name is kept here, where the CCP
                                 ;   put the one from the command line
+; ^R, CP/M: read the file. A name typed before the key is the file's name
+; from now on.
+cread:  CALL    setname
+        CALL    load
+        JP      edit
+
 ; ^W, CP/M: write the file: delete the old one, make it anew, write the
 ; text in records of 128 bytes, and close it. The text's NUL and the 127
 ; bytes after it are set to ^Z meanwhile, which pads the last record. (A
@@ -2200,12 +2080,9 @@ cw3:    LD      A,E             ; a record that starts before the end is written
         POP     HL
         JR      cw3
 cw4:    LD      (HL),0          ; the NUL again
-        LD      C,16            ; close,
-        LD      HL,edit         ;   and from there back to the editor
-        PUSH    HL
-; fbdos: BDOS function C on the file. (^W ends by running on into it.)
-fbdos:  LD      DE,CFCB
-        JP      BDOS
+        LD      C,16            ; close
+        CALL    fbdos
+        JP      edit
 
 ; frec: BDOS function C (read or write a record) with the 128 bytes at DE.
 ; Returns A = the BDOS's answer, HL = DE and DE = DE + 128.
@@ -2215,8 +2092,9 @@ frec:   PUSH    DE
         CALL    BDOS
         POP     BC
         CALL    fbdos
-        POP     DE
-        LD      HL,128
+        POP     HL
+        LD      DE,128
+        EX      DE,HL
         ADD     HL,DE
         EX      DE,HL
         RET
@@ -2257,11 +2135,10 @@ fc1:    LD      (HL),0
         DJNZ    fc1
         RET
 
-; ^R, CP/M: read the file. A name typed before the key is the file's name
-; from now on. It runs on into load, which returns to the editor.
-cread:  CALL    setname
-        LD      HL,edit
-        PUSH    HL
+; fbdos: BDOS function C on the file
+fbdos:  LD      DE,CFCB
+        JP      BDOS
+
 ; load: read the file into PROG. No such file: no program. The text ends at
 ; the file's first ^Z (1Ah), which pads a text file's last record; one more
 ; goes after the last record, so the search always stops. And every line

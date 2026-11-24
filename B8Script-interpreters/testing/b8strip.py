@@ -17,10 +17,8 @@ join into numbers, so a space is kept:
   - after a '-' with a digit next: '5- 3' subtracts 3, '5-3' pushes 5 and -3;
   - after a '[' : '[ ' is an anonymous block, and '[' before a letter would
     define that letter;
-  - after a hex load ('`$' and the hex characters that follow it at once),
-    before a hex character, which it would load.
-A grave and the character after it are one command, kept as they are: the
-'-' of '`-' is not a minus, so no space is kept after it.
+  - after a grave with a hex character next: '` b' executes, '`b' would load
+    hex; and after a hex load, before a hex character, which it would load.
 A comment taken out counts as white space, so '5"c";3' becomes '5 3'.
 
 Strings are kept exactly as they are, '/' escapes and all.
@@ -29,7 +27,7 @@ import sys
 
 HEX = b'0123456789ABCDEFabcdef'
 DIG = b'0123456789'
-QUOTE, SEMI, MINUS, OPEN, GRAVE, SLASH, DOLLAR = 0x22, 0x3B, 0x2D, 0x5B, 0x60, 0x2F, 0x24
+QUOTE, SEMI, MINUS, OPEN, GRAVE, SLASH = 0x22, 0x3B, 0x2D, 0x5B, 0x60, 0x2F
 
 
 def blank(c):
@@ -48,7 +46,6 @@ def strip(src):
     out = bytearray()
     gap = False            # white space or a comment since the last character kept
     inhex = False          # the last characters kept were a hex load
-    code = False           # the last character kept was a grave's
     i, n = 0, len(src)
     while i < n:
         c = src[i]
@@ -67,25 +64,19 @@ def strip(src):
                 continue
         if gap and out:
             p = out[-1]
-            if ((p in DIG and c in DIG) or (p == MINUS and c in DIG and not code) or p == OPEN
-                    or (inhex and c in HEX)):
+            if ((p in DIG and c in DIG) or (p == MINUS and c in DIG) or p == OPEN
+                    or (p == GRAVE and c in HEX) or (inhex and c in HEX)):
                 out.append(32)
         gap = False
         if c == QUOTE:
             out += src[i:j]
-            inhex = code = False
+            inhex = False
             i = j
             continue
-        if c == GRAVE and i + 1 < n:
-            # a grave and its character are one command. After '`$' come the
-            # hex characters of a load, for as long as they follow at once
-            out += src[i:i + 2]
-            code = True
-            inhex = src[i + 1] == DOLLAR
-            i += 2
-            continue
-        code = False
-        inhex = inhex and c in HEX and out[-1] != 32
+        # a hex load is a grave followed at once by a hex character, and runs
+        # on while the characters that follow at once are hex
+        p = out[-1] if out else 32
+        inhex = c in HEX and (p == GRAVE or (inhex and p != 32))
         out.append(c)
         i += 1
     return bytes(out)

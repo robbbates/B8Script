@@ -1,10 +1,10 @@
 # B8Script for Beginners: A Stack of Fun
 
-Nov 23, 2026 · @ROB8S
+Nov 22, 2026 · @ROB8S
 
 ## Welcome
 
-B8Script is a tiny programming language where nearly every command is a single character, and you can learn its basics in an afternoon. It was made for little 8-bit computers with 64 KB of memory, so the whole interpreter fits in under a kilobyte on a Z80. It's also great fun on a modern PC.
+B8Script is a tiny programming language where every command is a single character, and you can learn its basics in an afternoon. It was made for little 8-bit computers with 64 KB of memory, so the whole interpreter fits in under a kilobyte on a Z80. It's also great fun on a modern PC.
 
 You don't need any programming experience. You do need a willingness to read things a bit backwards at first. By the end you'll have written a guessing game.
 
@@ -78,8 +78,6 @@ Every programmer's first program:
 The `"` marks the start and end of some text. When B8Script meets it, it puts the text's **address** (where it lives in memory) on the stack. Then `$` takes that address and prints the text.
 
 The `/M/J` at the end is a new line. A slash followed by a letter makes a special control character: `/M` returns the cursor to the start of the line and `/J` moves it down one. Together they start a new line, like pressing Enter.
-
-Outside a string, there's a quicker way to start a new line: `` `' ``. That's a grave (the backwards quote mark, `` ` ``) followed by an ordinary quote mark. A grave and the next character together are one command, so `` `' `` is not the same as `'` on its own. Try `` "Line one"$`'"Line two"$ ``. You'll meet more of the grave's commands as we go.
 
 Because slash is special in strings, a real slash has to be written twice. `"either//or"$` prints `either/or`. A quote mark inside a string is `/"`.
 
@@ -185,15 +183,7 @@ To change a variable, fetch it, do the sum, and store it back:
 
 This starts with 100 coins, spends 25, and prints `Coins: 75`. The `m@25-m!` part reads as "fetch m, push 25, subtract, store in m".
 
-Adding one to a counter is so common that you'll see `i@1+i!` everywhere: fetch i, add 1, store it back in i. B8Script has a short way to write it: `` i`+; ``. Remember the grave from Lesson 2: a grave and the next character together are one command, so the `+` here is not an add. `` `+ `` takes a variable's address, adds 1 to what's in it, and leaves the new value on the stack. The `;` then throws that value away. `` `- `` takes 1 off in the same way.
-
-```text
-5c! c`+; c`+#
-```
-
-This prints `7`. The first `` c`+; `` makes c 6 and drops the 6. The second `` c`+ `` makes c 7 and leaves the 7, so `#` can print it. Leaving the new value turns out to be very handy in the loops of Lesson 6.
-
-One catch: because the grave takes the next character, `` x`-5 `` means "take 1 off x, then the number 5". The `-` belongs to the grave, so it can't make a negative number.
+Adding one to a counter is so common that you'll see `i@1+i!` everywhere. Remember it; the loops in Lesson 6 use it.
 
 **Store before you read.** A variable starts out holding whatever junk was in memory, so always give it a value before you use it. The checked builds set them all to 0, but the small fast builds don't.
 
@@ -256,7 +246,7 @@ A loop is the same round brackets as an *if*, with one change: the closing `)` g
 ### Counting up
 
 ```text
-1i! 1( i@# " "$ i`+ 11<)
+1i! 1( i@# " "$ i@1+:i! 11<)
 ```
 
 This prints `1 2 3 4 5 6 7 8 9 10`. Reading it piece by piece:
@@ -266,10 +256,11 @@ This prints `1 2 3 4 5 6 7 8 9 10`. Reading it piece by piece:
 | `1i!` | Start the counter i at 1 |
 | `1(` | Enter the loop |
 | `i@# " "$` | Print i and a space |
-| `` i`+ `` | Add 1 to i, leaving the new value on the stack |
+| `i@1+` | Work out i + 1 |
+| `:i!` | Copy it and store the copy back in i, leaving the new value on the stack |
 | `11<)` | Is the new value less than 11? If so, go round again |
 
-This is why `` i`+ `` leaves the new value: the test gets it straight away. To count in a step other than 1, write it out in full: `i@2+:i!` works out i + 2, copies it, and stores the copy back in i. That `:i!` trick is worth remembering: it stores a value and keeps it for the test.
+The `:i!` trick is worth remembering: it stores a value and keeps it for the test.
 
 ### Counting down, with no variable at all
 
@@ -286,7 +277,7 @@ This prints `10 9 8 7 6 5 4 3 2 1 Liftoff!`. Each time round, `:#` prints a copy
 The backslash `\` means "if true, leave this block now". It's handy when the test belongs in the middle of the loop:
 
 ```text
-0n! 1( n`+# " "$ n@5=\ 1)
+0n! 1( n@1+:n!# " "$ n@5=\ 1)
 ```
 
 This prints `1 2 3 4 5`. The `1)` at the end would loop forever, but `n@5=\` jumps out once n reaches 5.
@@ -310,7 +301,7 @@ A word takes its inputs from the stack and leaves its results there, just like `
 ### A word with a loop inside
 
 ```text
-[B 1( "*"$ 1-: );] 5B `' 3B
+[B 1( "*"$ 1-: );] 5B "/M/J"$ 3B
 ```
 
 B prints a bar of stars as long as the number you give it:
@@ -395,35 +386,39 @@ Type 21 and press Enter, and it prints `Double that is 42`. (`:+` doubles: copy,
 You now know enough to read a real game. This one is from the B8Script spec: the computer picks a number from 1 to 99, and you guess it with hints of "higher" and "lower". Save it in a text editor as `GUESS.B8S` and run it with `B8SWINC GUESS.B8S`.
 
 ```text
-[N 0v! 1( 0? :48<\ 48- :# v@10*+v! 1) ; v@]
-"Guess my number from 1 to 99. Press a key to start."$`' 0?;
-99`,1+s! 0t!
-1( `'"Your guess: "$ N g! t`+;
+[M/%;]
+0r! [K 0 1( ; r@1+ 100M r! 1? :0=)]
+[N 0v! 1( K :48<\ 48- :# v@10*+v! 1) ; v@]
+"Guess my number from 1 to 99. Press a key to start./M/J"$ K;
+r@99M1+s! 0t!
+1( "/M/JYour guess: "$ N g! t@1+t!
    g@s@<( "  higher"$ 0)
    g@s@>( "  lower"$ 0)
    g@s@=0=)
-`'"Got it in "$ t@# " tries!"$`'
+"/M/JGot it in "$ t@# " tries!/M/J"$
 ```
 
-Eight lines, and nearly every piece is something you've met. Here's how it works.
+Ten lines, and every piece is something you've met. Here's how it works.
 
-**Line 1: N** is the number reader from Lesson 8, with spaces added to make it easier to read.
+**Line 1: `[M/%;]`** defines M, "modulo": divide and keep only the remainder. `27 10M` gives 7.
 
-**Line 2** prints the welcome and a new line with `` `' ``, then waits for a key with `0?`. The `;` throws the key away: which key you pressed doesn't matter, only that you pressed one. Line 3 explains why.
+**Line 2: K, a key reader that rolls dice.** B8Script has no random numbers, so this game makes its own from *you*. K is a loop that keeps adding 1 to r, wrapping round at 100, and checks for a key with the quick `1?` each time round. It spins thousands of times a second, so the exact moment you press a key leaves r at an unpredictable number. When a key arrives, `:0=` is false, the loop ends, and the key is left on the stack.
 
-**Line 3: the secret number.** `` n`, `` is the grave's random number command: it takes a number n and leaves a random number from 0 to n − 1. So `` 99`, `` gives 0 to 98, and `1+` makes it 1 to 99. It goes in s. The guess counter t starts at 0.
+**Line 3: N** is the number reader from Lesson 8, but it waits with K instead of `0?`. So the dice keep rolling while you type.
 
-A computer can't really pick at random. It works each "random" number out from the one before, starting from a number called the **seed**. If the seed were the same every time, so would the game be. But while a program waits for a key, B8Script stirs the seed with how long the key took to come, and that is never the same twice. That's the real job of the `0?` in line 2: the moment you press the key decides the secret number.
+**Line 4** prints the welcome and waits for a key with K. The `;` throws the key away: only the time you took mattered.
 
-**Lines 4 to 7: the main loop.** Start a new line, read a guess into g, and add 1 to the count with `` t`+; `` (the `;` drops the new count, which isn't needed here). If the guess is too low, say higher; if too high, say lower. The last line, `g@s@=0=)`, is the loop's test: go round again while the guess is *not* equal to the secret.
+**Line 5** makes the secret number. `r@99M` gives 0 to 98, and `1+` makes it 1 to 99. It goes in s. The guess counter t starts at 0.
 
-**Line 8** celebrates, with the number of tries.
+**Lines 6 to 9: the main loop.** Read a guess into g and add 1 to the count. If the guess is too low, say higher; if too high, say lower. The last line, `g@s@=0=)`, is the loop's test: go round again while the guess is *not* equal to the secret.
+
+**Line 10** celebrates, with the number of tries.
 
 ### Make it yours
 
-- Make it 1 to 999. You'll need to change two numbers. (Which two?)
+- Make it 1 to 999. You'll need to change three numbers. (Which three?)
 - Give it a limit: after 7 wrong guesses, print `Out of guesses! It was` and the number. Hint: the guess-checking loop can end on a test made with `|`, which is true if either side is true.
-- Add `` `^ `` at the start to clear the screen first. It's one more of the grave's commands; the spec's *Console* chapter has the rest, such as moving the cursor to any place on the screen.
+- Add `"/[[2J/[[H"$` at the start to clear the screen first. That's a terminal escape sequence; the spec's *Console* chapter lists the rest.
 
 ## Cheat sheet
 
@@ -446,11 +441,6 @@ Every character this tutorial used. In the *Stack* column, the left side is what
 | `#` | Print a number | n → |
 | `'` | Print a character from its code | code → |
 | `?` | Read the keyboard: `0?` waits for a key, `20?` waits briefly, `-72?` reads a line | n → key |
-| `` ` `` | The grave: with the next character, it makes one command (the five below) | |
-| `` `+ `` `` `- `` | Add 1 to a variable, take 1 off it, and leave the new value | addr → n |
-| `` `' `` | Start a new line | |
-| `` `, `` | A random number from 0 to n − 1 | n → r |
-| `` `^ `` | Clear the screen | |
 | `(` | Enter the block if true, skip it if false | flag → |
 | `)` | Go back to the `(` if true, carry on if false | flag → |
 | `\` | Leave the block or word now, if true | flag → |
@@ -465,14 +455,11 @@ Every character this tutorial used. In the *Stack* column, the left side is what
 | If-else | `flag:{( ... 0)}0=( ... 0)` |
 | Loop while | `1( ... flag)` |
 | Loop with a break | `1( ... flag\ ... 1)` |
-| Add 1 to i | `` i`+; `` (or `i@1+i!`) |
-| Count from 1 to 10 | `` 1i! 1( ... i`+ 11<) `` |
-| New line | `` `' `` |
-| A die: 1 to 6 | `` 6`,1+ `` |
+| Add 1 to i | `i@1+i!` |
 | Remainder | `/%;` |
 | Comment | `"any text";` |
 
-There's much more in the full [spec](b8script.md): the heap, machine code, the rest of the grave's commands (moving the cursor, the smaller or larger of two numbers, and more) and a large Idioms section. The spec's Programs chapter, with Conway's Life and Star Trek, makes great reading once these lessons feel easy.
+There's much more in the full [spec](b8script.md): the heap, machine code with the grave character, screen control and a large Idioms section. The spec's Programs chapter, with Conway's Life and Star Trek, makes great reading once these lessons feel easy.
 
 ## Answers to the challenges
 
@@ -480,7 +467,7 @@ No peeking until you've tried! There's usually more than one right answer; if yo
 
 **1.** `7 5+10 6-*#` prints 48. The first bracket leaves 12, the second leaves 4 beside it, and `*` multiplies them.
 
-**2.** `"3 + 4 = "$ 3 4+#` and, on two lines, `` "3 + 4 = "$ 3 4+# `'"Easy!"$ ``
+**2.** `"3 + 4 = "$ 3 4+#` and, on two lines, `"3 + 4 = "$ 3 4+# "/M/JEasy!"$`
 
 **3.** `6::**#` prints 216: two copies make three 6s, then two multiplies. For the bonus, `100 7/%;#` prints 2, so no, 100 isn't divisible by 7.
 
@@ -494,12 +481,12 @@ No peeking until you've tried! There's usually more than one right answer; if yo
 
 Change the start to `-5t!` for the freezing test.
 
-**6.** The five times table: `` 1i! 1( i@5*# " "$ i`+ 11<) ``
+**6.** The five times table: `1i! 1( i@5*# " "$ i@1+:i! 11<)`
 
 Even numbers, using the remainder:
 
 ```text
-1i! 1( i@2/%;0=( i@# " "$ 0) i`+ 21<)
+1i! 1( i@2/%;0=( i@# " "$ 0) i@1+:i! 21<)
 ```
 
 Or the sneaky way, counting in twos: `2i! 1( i@# " "$ i@2+:i! 21<)`. Sneaky is allowed.
@@ -507,10 +494,10 @@ Or the sneaky way, counting in twos: `2i! 1( i@# " "$ i@2+:i! 21<)`. Sneaky is a
 **7.**
 
 ```text
-[S:*] [C:S*] [L`'] 2C# L 3C#
+[S:*] [C:S*] [L"/M/J"$] 2C# L 3C#
 ```
 
-This prints 8 and then 27. L is just `` `' `` under a one-letter name: a word can be as short as one command. C copies the number, squares the copy with S, then multiplies: n × n² = n³.
+This prints 8 and then 27. C copies the number, squares the copy with S, then multiplies: n × n² = n³.
 
 **8.** With N already defined:
 
@@ -521,14 +508,14 @@ t@100>( "/M/JWow, that's a lot!"$ 0)
 
 `:t!` keeps a copy of the total in t, so it can still be tested after `#` has printed it.
 
-**Guess the number, 1 to 999.** Change `` 99`, `` to `` 999`, `` and the 99 in the welcome message to 999.
+**Guess the number, 1 to 999.** Change `100M` in K to `1000M`, `r@99M` to `r@999M`, and the 99 in the welcome message to 999.
 
 **Guess the number, with a limit.** Replace the last two lines of the game with these:
 
 ```text
    g@s@= t@7= | 0=)
-g@s@=:{( `'"Got it in "$ t@# " tries!"$`' 0)}
-0=( `'"Out of guesses! It was "$ s@# `' 0)
+g@s@=:{( "/M/JGot it in "$ t@# " tries!/M/J"$ 0)}
+0=( "/M/JOut of guesses! It was "$ s@# "/M/J"$ 0)
 ```
 
 The loop now ends when the guess is right *or* the seventh guess is used up. Afterwards an if-else decides which message you've earned.

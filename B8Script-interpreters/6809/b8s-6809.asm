@@ -1,6 +1,6 @@
 ; =============================================================================
 ;  B8Script interpreter for the Motorola 6809
-;  Spec: docs/b8script.md (2026-11-23).
+;  Spec: docs/b8script.md (2026-11-21).
 ;  Follows the design of the Z80 interpreter (z80/b8s-z80.asm).
 ;
 ;  Two builds, selected by the CHECKED line below (CPM is always 0: the 6809
@@ -8,8 +8,9 @@
 ;    CHECKED  0 = no checks (spec: an unchecked build checks nothing)
 ;             1 = a checked build: variables start at 0, words start
 ;                 undefined, and every error in the spec's table stops the
-;                 program with the three-line report, then goes to EXIT:
+;                 program with the four-line report, then goes to EXIT:
 ;                   Err X @ line,col
+;                   <up to 16 characters of the text at the place>
 ;                   Stk n: ... v v v      (n = depth, then the top 8 values)
 ;                   Rtn n
 ;                 S/s data stack over/underflow, R/r return stack over/
@@ -17,11 +18,6 @@
 ;                 W bad character after [, U undefined word, Q no closing
 ;                 quote, X reserved byte, Z divide by zero, N unbalanced or
 ;                 mismatched brackets, B Ctrl-C.
-;
-;  A third line, ANSI, says how the four console codes (`@ `^ `_ `?) work:
-;    ANSI     1 = they send ANSI escape sequences through CONOUT
-;             0 = they call four routines of the machine's own instead:
-;                 CONAT, CONCLS, CONEOL and CONCUR (see the equates)
 ;
 ;  In both builds Ctrl-C stops a running program (the unchecked build goes
 ;  to EXIT without a word): see the console layer below for the rules, the
@@ -32,7 +28,6 @@
 
 CPM     EQU     0               ; always 0 (no CP/M on the 6809)
 CHECKED EQU     0               ; 1 = checked build
-ANSI    EQU     1               ; 1 = the console codes send ANSI sequences
 
 ; -----------------------------------------------------------------------------
 ;  Register use, everywhere in the interpreter
@@ -100,16 +95,6 @@ CONOUT  EQU     0FF03h          ; print the character in A
 EXIT    EQU     0FF09h          ; where to go when the program ends
 ;   Both are called with JSR. They may change A and CC and must preserve
 ;   B, X, Y, U and DP.
-        IF      1-ANSI
-; ---- with ANSI = 0 the console codes call these (JMP or JSR) ----------------
-CONAT   EQU     0FF0Ch          ; `@  cursor to the row in X and the column in
-                                ;     D, both from 0
-CONCLS  EQU     0FF0Fh          ; `^  clear the screen and home the cursor
-CONEOL  EQU     0FF12h          ; `_  clear from the cursor to the end of the line
-CONCUR  EQU     0FF15h          ; `?  cursor off if D = 0 (the Z flag is set to
-                                ;     match), on if not
-;   All four may change A, B, X and CC and must preserve Y, U and DP.
-        ENDIF
 RSPAGE  EQU     80h
 DSPAGE  EQU     81h
 LETPAGE EQU     82h
@@ -132,10 +117,6 @@ PEND    EQU     38h             ; checked: the program's end, the first byte
                                 ;   after its NUL (big-endian): the heap's floor
 SSAV    EQU     3Ah             ; checked: S as each character starts (big-
                                 ;   endian): the return stack an error reports
-SEED    EQU     76h             ; the random seed (8276h, little-endian): the
-                                ;   cell whose address `. gives. Nothing sets
-                                ;   it at the start but the checked build's
-                                ;   clearing of the page
 BRKOFF  EQU     7Bh             ; the break-off cell (827Bh, z9+): 0 = the
                                 ;   break key is on
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
@@ -417,6 +398,22 @@ brk     EQU     e_break         ;   the checked build reports B (the report
 
 
 
+; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
+; and return its value in A with the carry set; otherwise leave the IP and
+; return with the carry clear.
+; (In the unchecked build it is here, ahead of the table, to leave room in
+; the two ranges after it; the checked build has it next to the grave.)
+        IF      1-CHECKED
+hexc:   BSR     isdig
+        BLO     hv1             ; C = 1
+        ANDA    #0DFh
+        SUBA    #11h
+        CMPA    #6
+        BHS     hv9             ; C = 0
+        SUBA    #0F6h           ; + 10, and sets the carry
+hv1:    LEAY    1,Y             ; (LEAY leaves the carry alone)
+hv9:    RTS
+        ENDIF
 
 ; =============================================================================
 ;  Dispatch table, in code order.
@@ -566,78 +563,48 @@ ah1:
         STX     ,U
         RTS
 
-; ---- the grave -------------------------------------------------------------
-; The grave is a prefix: with the character after it, it is one command.
-; GTAB (at the end of the image, just ahead of the handlers) holds each
-; character with the place of its handler, as a byte to add to the address
-; after that byte. A handler starts with A = the character, is entered by
-; the dispatcher's own JSR and ends in RTS.
-; A character that is not in the table is unsafe: the unchecked build
-; searches on through memory, the checked build stops with W.
-h_grave:
-        IF      CHECKED
-        STY     <AT             ; the place of anything that goes wrong in
-        ENDIF                   ;   one of these is the character after the grave
-        LDA     ,Y+
-        LDX     #GTAB
-gr1:    CMPA    ,X++
-        IF      1-CHECKED
-        BNE     gr1
-        ENDIF
-        IF      CHECKED
-        BEQ     gr2
-        TST     ,X              ; 0 ends the table
-        BNE     gr1
-        LDA     #'W'
-        JMP     error
-gr2:
-        ENDIF
-        LDB     -1,X
-        ABX                     ; the handler: the next entry's address plus it
-        JMP     ,X
-
-
-; ---- the line reader of -n? (see h_key) --------------------------------------
-; Backspace takes the last character back (and is echoed as it is), CR ends
-; (stored, not echoed), every other key is stored and echoed until the line
-; is full. B = the length so far; the low byte of the top cell becomes the
-; most allowed (it holds minus the count on entry).
-; (A macro, because the two builds need it in different places: the
-; unchecked build here, in the first range, where the layout needs these
-; bytes ahead of the handlers that follow; the checked build at the end of
-; the image, out of the way of its short branches.)
-.macro  LINERD
-line:   CMPX    #-127           ; (X = TOS, minus the count)
-        BHS     ln1
-        LDA     #-127           ; more than 127 is taken as 127
-        STA     1,U
-ln1:    NEG     1,U
-        LDX     #LINEBUF
-        CLRB
-ln2:    JSR     getk
-        BEQ     ln2
-        CMPA    #13
-        BEQ     ln5
-        CMPA    #8
-        BEQ     ln4
-        CMPB    1,U
-        BHS     ln2             ; full
-        STA     B,X
-        INCB
-ln3:    JSR     CONOUT
-        BRA     ln2
-ln4:    TSTB                    ; Backspace: nothing to take back?
-        BEQ     ln2
-        DECB
-        BRA     ln3             ; echo it
-ln5:    STA     B,X             ; A = 13
+; ---- machine code: the grave -----------------------------------------------
+; '`' plus a hex digit loads bytes: ( addr -- addr' ). Pairs of hex digits
+; are stored from addr until a non-hex character; then a RTS (39h) is
+; written and its address is left. An odd last digit is consumed and dropped.
+; '`' plus anything else calls the machine code at TOS: ( addr -- ). The
+; code is entered by JSR (the dispatcher's own), with the address already
+; popped: U points at the top data cell (big-endian, 2 bytes, stack grows
+; down) and the return address is on top of S. The code may pop and push
+; data cells by changing U; on return the cell at ,U is the new TOS. It must
+; keep Y (the interpreter's reading position), DP and S (balanced), and
+; return with RTS. A, B, X, CC may change.
+; Neither the loader's stores nor the code are checked, in either build.
+h_grave:BSR     hexc            ; the digit after the grave, if any
+        BCC     exec
+        LDX     ,U
+hx1:    LDB     #16
+        MUL                     ; B = the digit, moved up to the high half
+        STB     ,X              ; (an odd digit is overwritten by the RTS)
+        BSR     hexc
+        BCC     hx2             ; odd digit: already consumed, dropped
+        ORA     ,X
+        STA     ,X+
+        BSR     hexc
+        BCS     hx1
+hx2:    LDA     #39h            ; RTS
+        STA     ,X
         STX     ,U
         RTS
-.endm
-        IF      1-CHECKED
-        LINERD
-        ENDIF
+exec:   PULU    PC              ; jump to it: the code's RTS returns to the
+                                ;   dispatcher
 
+        IF      CHECKED
+hexc:   JSR     isdig
+        BLO     hv1             ; C = 1
+        ANDA    #0DFh
+        SUBA    #11h
+        CMPA    #6
+        BHS     hv9             ; C = 0
+        SUBA    #0F6h           ; + 10, and sets the carry
+hv1:    LEAY    1,Y             ; (LEAY leaves the carry alone)
+hv9:    RTS
+        ENDIF
 
 ; ---- where the two ranges meet ---------------------------------------------
 ; The first range ends somewhere among the next five handlers, ] \ [ @ ?
@@ -778,16 +745,12 @@ h_fetch:LDX     ,U              ; '@' (the cell in memory is little-endian)
 ;   n < 0: read a line of at most -n characters, with echo. The buffer
 ;          holds 127 characters and the CR: a bigger count is taken as 127.
 h_key:  LDX     ,U
-        LBMI    line
+        BMI     line
 kt1:    LDB     #MSLOOP         ; one millisecond, roughly
 kt2:    JSR     getk
         BNE     kt3
         DECB
         BNE     kt2
-        INC     <SEED           ; a millisecond with no key stirs the random
-        BNE     kt4             ;   seed by one: how long a key takes to come
-        INC     <SEED+1         ;   is the one thing here that is not the
-kt4:                            ;   same every time
         LEAX    -1,X
         BNE     kt1             ; A = 0 if the time ran out
         LDX     ,U              ; 0?: the countdown from 0 took 65536 ms;
@@ -796,8 +759,36 @@ kt3:    CLR     ,U
         STA     1,U
         RTS
 
-; (The line reader, `line`, is the macro LINERD, above: there is no
-; room for it here, between the short branches.)
+; Backspace takes the last character back (and is echoed as it is), CR ends
+; (stored, not echoed), every other key is stored and echoed until the line
+; is full. B = the length so far; the low byte of the top cell becomes the
+; most allowed (it holds minus the count on entry).
+line:   CMPX    #-127           ; (X = TOS, minus the count)
+        BHS     ln1
+        LDA     #-127           ; more than 127 is taken as 127
+        STA     1,U
+ln1:    NEG     1,U
+        LDX     #LINEBUF
+        CLRB
+ln2:    JSR     getk
+        BEQ     ln2
+        CMPA    #13
+        BEQ     ln5
+        CMPA    #8
+        BEQ     ln4
+        CMPB    1,U
+        BHS     ln2             ; full
+        STA     B,X
+        INCB
+ln3:    JSR     CONOUT
+        BRA     ln2
+ln4:    TSTB                    ; Backspace: nothing to take back?
+        BEQ     ln2
+        DECB
+        BRA     ln3             ; echo it
+ln5:    STA     B,X             ; A = 13
+        STX     ,U
+        RTS
 
 ; =============================================================================
 ;  Handlers that must start in the second range (unchecked build).
@@ -988,6 +979,8 @@ e_quote:LDA     #'Q'            ; " or $ ran into the NUL
 ;
 ;     CR LF
 ;     Err X @ line,col CR LF
+;     <up to 16 raw characters from the place, ending early at CR, LF, NUL>
+;     CR LF
 ;     Stk n:[ ...][ v]*  CR LF     (the top 8 cells, bottom to top, signed)
 ;     Rtn n CR LF
 ;
@@ -1049,6 +1042,20 @@ lc3:    LDD     <AT
         FCB     ','+80h
         BSR     pdec            ; the column
         BSR     pmsg
+        FCB     13,10+80h
+        ; the text at the place
+        LDX     <AT
+        LDB     #16
+tx1:    LDA     ,X+
+        BEQ     tx9
+        CMPA    #10
+        BEQ     tx9
+        CMPA    #13
+        BEQ     tx9
+        BSR     putc
+        DECB
+        BNE     tx1
+tx9:    BSR     pmsg
         FCB     13,10,"Stk",' '+80h
         ; the data stack: its depth, then its top 8 cells, from Y down to
         ; the program's top cell, at ,U.
@@ -1199,239 +1206,5 @@ ud2:    LEAX    -1,X
         BNE     ud1
 ud3:    STD     ,U
         RTS
-
-; =============================================================================
-;  The grave's codes (h_grave is the dispatcher). Each is entered with
-;  A = the character, and ends in RTS.
-;
-;    `!  ( addr -- )        call the machine code at addr. The code is
-;                           entered with the address already popped: U
-;                           points at the top data cell (big-endian) and the
-;                           dispatcher's return address is on top of S. It
-;                           may pop and push data cells by changing U; on
-;                           return the cell at ,U is the new TOS. It must
-;                           keep Y, DP and S (balanced) and return with RTS;
-;                           A, B, X and CC may change.
-;    `$  ( addr -- addr' )  the hex loader: pairs of hex digits are stored
-;                           from addr until a non-hex character; then a RTS
-;                           (39h) is written and its address is left. An odd
-;                           last digit is consumed and dropped.
-;    `'  ( -- )             new line: CR LF
-;    `+  ( addr -- n )      add 1 to the cell at addr and leave its new value
-;    `,  ( n -- r )         a random number from 0 to n-1 (n is 1 to 32767)
-;    `-  ( addr -- n )      subtract 1 from the cell at addr, the same way
-;    `.  ( -- addr )        the address of the random seed
-;    `<  ( a b -- n )       the smaller of the two (signed)
-;    `>  ( a b -- n )       the larger
-;    `?  ( flag -- )        the cursor off (0) or on
-;    `@  ( row col -- )     the cursor to that row and column, both from 0
-;    `^  ( -- )             clear the screen and home the cursor
-;    `_  ( -- )             clear from the cursor to the end of the line
-;
-;  Neither the loader's stores nor the machine code are checked.
-; =============================================================================
-; The table: a character, then its handler's distance from the address
-; after that byte.
-GTAB:   FCB     '!'
-        FCB     g_exec-$-1
-        FCB     '$'
-        FCB     g_hex-$-1
-        FCB     27h
-        FCB     g_nl-$-1
-        FCB     '+'
-        FCB     g_inc-$-1
-        FCB     ','
-        FCB     g_rnd-$-1
-        FCB     '-'
-        FCB     g_inc-$-1
-        FCB     '.'
-        FCB     g_seed-$-1
-        FCB     '<'
-        FCB     g_min-$-1
-        FCB     '>'
-        FCB     g_max-$-1
-        FCB     '?'
-        FCB     g_cur-$-1
-        FCB     '@'
-        FCB     g_at-$-1
-        FCB     '^'
-        FCB     g_cls-$-1
-        FCB     '_'
-        FCB     g_eol-$-1
-        IF      CHECKED
-        FCB     0               ; the end
-        ENDIF
-
-; `, The seed goes one step on: seed * 261 + 1, which takes every 16-bit
-; value in turn. The high bits of such a seed are the good ones and the low
-; ones repeat soon, so the high byte is folded into the low (EOR) before the
-; remainder of dividing by n is taken.
-; n must be 1 to 32767: the checked build stops with Z on anything less
-; than 1.
-g_rnd:
-        IF      CHECKED
-        LDD     ,U
-        SUBD    #1              ; n - 1 negative: n is 0 or less
-        LBMI    e_zero
-        ENDIF
-        LDB     <SEED           ; (the cell is little-endian)
-        LDA     <SEED+1
-        ASLB
-        ROLA
-        ASLB
-        ROLA
-        ORCC    #1              ; (the carry is the + 1)
-        ADCB    <SEED
-        ADCA    <SEED+1         ; * 5 + 1
-        ADDA    <SEED           ; + * 256: * 261 + 1
-        STB     <SEED
-        STA     <SEED+1
-        EORB    <SEED+1
-        PSHU    D
-        JSR     h_swap          ; the dividend under n
-        BSR     udiv            ; NOS = the quotient, TOS = the remainder
-        PULU    D
-        STD     ,U
-        RTS
-
-; `+ and `-: one routine. ',' minus the character is 1 or -1.
-g_inc:  LDX     ,U
-        IF      CHECKED
-        JSR     chkst           ; both bytes are tested first, as '!' does
-        LEAX    1,X
-        JSR     chkst
-        LEAX    -1,X
-        ENDIF
-        NEGA
-        ADDA    #','
-        TFR     A,B
-        SEX
-        ADDB    ,X              ; (the cell is little-endian)
-        ADCA    1,X
-        STB     ,X
-        STA     1,X
-        STD     ,U              ; the new value is TOS
-        RTS
-
-; `. pushes the address of the random seed.
-g_seed: LDX     #LET+SEED
-        PSHU    X
-        RTS
-
-; `< and `>: b is taken off and compared with a; it goes in a's place if it
-; is the one wanted.
-g_max:  BSR     gcmp
-        BLE     gm9
-        BRA     gm8
-g_min:  BSR     gcmp
-        BGE     gm9
-gm8:    STD     ,U
-gm9:    RTS
-gcmp:   LDD     ,U++
-        CMPD    ,U              ; b - a
-        RTS
-
-g_nl:   LDA     #13
-        BSR     gputc
-        LDA     #10
-        BRA     gputc
-
-g_hex:  LDX     ,U
-hx1:    BSR     hexc
-        BCC     hx2
-        LDB     #16
-        MUL                     ; B = the digit, moved up to the high half
-        STB     ,X              ; (an odd digit is overwritten by the RTS)
-        BSR     hexc
-        BCC     hx2             ; odd digit: already consumed, dropped
-        ORA     ,X
-        STA     ,X+
-        BRA     hx1
-hx2:    LDA     #39h            ; RTS
-        STA     ,X
-        STX     ,U
-        RTS
-
-; hexc: if the character at IP is a hex digit (0-9, A-F, a-f), step over it
-; and return its value in A with the carry set; otherwise leave the IP and
-; return with the carry clear.
-hexc:   JSR     isdig
-        BLO     hv1             ; C = 1
-        ANDA    #0DFh
-        SUBA    #11h
-        CMPA    #6
-        BHS     hv9             ; C = 0
-        SUBA    #0F6h           ; + 10, and sets the carry
-hv1:    LEAY    1,Y             ; (LEAY leaves the carry alone)
-hv9:    RTS
-
-g_exec: PULU    PC              ; jump to it: the code's RTS returns to the
-                                ;   dispatcher
-
-        IF      ANSI
-; `^: ESC [ H homes the cursor, and ESC [ J clears from there to the end of
-; the screen. `_: ESC [ K clears to the end of the line. (CONOUT keeps B.)
-g_cls:  BSR     csi
-        LDA     #'H'
-        BSR     gputc
-        LDB     #'J'
-        FCB     8Ch             ; (CMPX #: steps over the LDB)
-g_eol:  LDB     #'K'
-        BSR     csi
-        TFR     B,A
-        BRA     gputc
-
-; `? ( flag -- ): ESC [ ? 2 5 l hides the cursor, ESC [ ? 2 5 h shows it.
-g_cur:  BSR     csi
-        LDA     #'?'
-        BSR     gputc
-        LDA     #'2'
-        BSR     gputc
-        LDA     #'5'
-        BSR     gputc
-        LDX     ,U++            ; the flag
-        BEQ     gc1
-        LDA     #'h'
-        FCB     8Ch             ; (CMPX #: steps over the LDA)
-gc1:    LDA     #'l'
-        BRA     gputc
-
-; csi: print ESC [, which starts every ANSI sequence.
-csi:    LDA     #27
-        BSR     gputc
-        LDA     #'['
-        ENDIF
-gputc:  JMP     CONOUT
-        IF      ANSI
-
-; `@ ( row col -- ): ESC [ row+1 ; col+1 H. (ANSI counts from 1.)
-g_at:   BSR     csi
-        JSR     h_swap          ; the row on top
-        BSR     pinc
-        LDA     #';'
-        BSR     gputc
-        BSR     pinc
-        LDA     #'H'
-        BRA     gputc
-; pinc: print the top cell plus 1, unsigned, and drop it
-pinc:   INC     1,U
-        BNE     pi1
-        INC     ,U
-pi1:    JMP     pdec
-        ENDIF
-        IF      1-ANSI
-; With ANSI = 0 the machine's own routines do the work (see the equates).
-g_cls:  JMP     CONCLS
-g_eol:  JMP     CONEOL
-g_cur:  LDD     ,U++            ; D = the flag, and the Z flag says the same
-        JMP     CONCUR
-g_at:   LDD     ,U++            ; D = the column
-        LDX     ,U++            ; X = the row
-        JMP     CONAT
-        ENDIF
-
-        IF      CHECKED
-        LINERD                  ; the line reader of -n?
-        ENDIF
 
 imgend:

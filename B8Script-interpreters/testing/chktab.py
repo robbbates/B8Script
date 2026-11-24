@@ -8,8 +8,6 @@ usage: chktab.py LISTING...
   must start in the page the dispatcher expects: the first NPG1 entries in
   the image's second page, the rest in its first. (NPG1 is worked out by
   the assembler from where ] \\ [ @ landed.)
-- 8080: the grave's table holds each handler's distance from its own entry
-  in one byte, so every handler must start within 255 bytes of it.
 """
 import re, sys
 
@@ -35,12 +33,6 @@ def check(lst):
         want = (base >> 8) + (1 if i < npg1 else 0)
         if a >> 8 != want:
             bad.append(f'entry {i:2} {n} is at {a:04X}h: must be in page {want:02X}h')
-    # the 8080's table for the grave: each handler's distance from the byte
-    # that holds it, which must fit in that byte
-    for m in re.finditer(r'^([0-9A-F]{4})\s+([0-9A-F]{2})\s+DB\s+(G_\w+)-\$', text, re.I | re.M):
-        at, byte, n = int(m.group(1), 16), int(m.group(2), 16), m.group(3).upper()
-        if sym[n] - at != byte:
-            bad.append(f'{n} is {sym[n] - at} bytes past its table entry: more than a byte holds')
     last = max(sym[n.upper()] for n in names[:npg1])
     room = ((base >> 8) + 2) * 256 - 1 - last
     first = min(sym[n.upper()] for n in names[:npg1])

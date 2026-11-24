@@ -1,0 +1,973 @@
+"IDOL for B8Script. A space trading game on an 80 x 24 screen.";
+"You start in debt with a small ship, the Courier. Trade between the 64 star";
+"systems of a generated galaxy, smuggle when it pays, fight or flee, take";
+"contracts, upgrade your ship, and track down the six parts of an ancient idol,";
+"which can only be bartered for. Win by holding all six with the loan repaid;";
+"the score is the number of days it took. The game ends at day 999.";
+"The rules and numbers come from docs/design/trading-game.md, the design doc;";
+"where a note below names a number (the tank, the normal stock N, and so on) it";
+"is the doc's.";
+"Keys when docked: c chart, m market, y shipyard, k take a contract, l pay the";
+"loan, f refuel, r repair, t trade for an idol part, v show the save code,";
+"? help, q quit. In the chart, market and shipyard: w and s move, Return jumps";
+"(chart), b buys and x sells (then type a quantity; Return alone is the most).";
+
+"How to read the notes. ( a b -- c ) is a stack effect: what a word takes and leaves,";
+"the top of the stack on the right. [X ... ] defines word X; calling X runs its body.";
+"Every comment is a string that is dropped at once (the semicolon), so it does nothing.";
+"This file is the documentation: it is too big to load on a small machine. IDOL.B8S is";
+"the same program with the comments and spaces stripped (b8strip.py), and that is the";
+"one to run. No slash is written in any comment, so a division is spelt out.";
+
+"The plan in short:";
+"  1. B8Script has 26 words and 26 variables, too few for a program this size. So the";
+"     game's state lives in one block of cells (G gives a cell's address by number),";
+"     the galaxy in another, and most routines are numbered: [ body] nP puts the";
+"     body's address in slot n of a table (P), and n Z calls it. Letters are kept for the";
+"     small words that run most.";
+"  2. The galaxy is generated from the seed when a game starts (or loads): positions,";
+"     types, safety, the six idol parts. Names, prices, offers and rumours are worked";
+"     out when needed from the seed, the system and the day, so nothing about them is";
+"     stored or saved. Only the stock levels are kept for every system.";
+"  3. The screen is drawn once, then only what changes is redrawn: the status line (S),";
+"     the side panel, the main area (chart, market, shipyard, duel or help) and the";
+"     three message lines, which are kept in a buffer so they can scroll.";
+"  4. The main loop reads a key and runs it. A jump passes a day and may bring an";
+"     encounter (pirates, police, debt collectors) settled by a short duel.";
+
+"Variables";
+"  g  the state block: 50 cells, numbered (see below); n G is the address of cell n";
+"  h  the galaxy block (see below)   m  the message buffer   z  the routine table,";
+"     80 slots of a cell each";
+"  o  where printed characters go: 0 the screen, else the next byte of a message";
+"  r  the random state (see R)   v  the view: 0 chart, 1 market, 2 shipyard, 3 help";
+"  u  the system chosen on the chart (-1 none)   w  the row chosen in the market";
+"     or the shipyard   q  0 while playing; why the game ended (see the main loop)";
+"  a b c d e f i j k l n p s t x y  scratch; each routine's note says which it uses";
+
+"The state block g: cell n is at g+2n, and n G gives that address. Cells 0 to 33 are";
+"the player's state, saved in the save code in this order; the rest are working cells.";
+"   0 seed      1 day        2 cash high  3 cash low   4 debt        5 position";
+"   6-13 cargo, tonnes of goods 0 to 7    14 ship class (0 Courier 1 Freighter";
+"   2 Raider 3 Clipper)  15 laser level  16 shield level  17 missiles  18 cargo pods";
+"  19 tank upgrades  20 hull  21 fuel  22 escape pod (0 or 1)  23 hidden hold (0 or 1)";
+"  24 wanted days  25 idol parts held (a bit each)  26 idol parts known (a bit each)";
+"  27 contract kind (0 none, 1 carry, 2 bounty)  28 its destination  29 its good";
+"  30 its tonnes  31 its deadline day  32 its pay  33 passengers (1) or sealed cargo (0)";
+"  34-41 the duel: enemy hull, its full hull, laser, shield, missiles, the range";
+"        (0 far, 1 close), the enemy's kind (0 pirate 1 police 2 collector), its level";
+"  42-48 an offer being looked at, in the order of 27 to 33";
+"Money is two cells, high and low, meaning high*10000+low, with low always 0 to 9999,";
+"as the doc's economy part says: cash goes far past 32767, the largest cell. Every";
+"single amount added or taken stays below 32767, so one cell holds it.";
+
+"The galaxy block h, 1088 bytes, for system i (0 to 63; 0 is home):";
+"  h+i       x on the chart, 0 to 55     h+64+i   y on the chart, 0 to 15";
+"  h+128+i   kind byte: type (0 Agricultural 1 Mining 2 Industrial 3 High-tech) in";
+"            bits 0-1, safety (0 policed 1 frontier 2 lawless) in bits 2-3, and";
+"            visited in bit 4 (value 16)";
+"  h+192+8i+k  the stock of good k, 0 to 120 tonnes, a byte";
+"  h+704+2i  the day that system's stock was last brought up to date, a cell";
+"  h+832+p   the system where idol part p (0 to 5) lies";
+"  h+840+2i  the chart's key for system i, a cell (see 24)";
+"  h+968+i   the character the chart shows for system i, or 0 if none (see 24)";
+"  h+1032    the save code being made or read, 48 values of 6 bits (see 72)";
+"  h+1080+k  the stock of good k read from a save code, until the galaxy is made";
+
+"The message buffer m: three slots of 80 bytes, each a message of at most 78";
+"characters and a quote after it, so $ can print a slot. Byte m+240 says which slot";
+"holds the newest message; the other two are the older ones. A new message goes in";
+"the oldest slot, so nothing is copied.";
+
+"The screen (rows and columns from 0, as `@ counts them):";
+"  row 0      the status line";
+"  row 1      a border: + then 56 dashes, + then 21 dashes, +";
+"  rows 2-17  the main area, columns 1 to 56, and the side panel, columns 58 to 78,";
+"             between bars in columns 0, 57 and 79";
+"  row 18     a border; rows 19-21 the messages; row 22 the command line;";
+"  row 23     the bottom border, which stops at column 78: writing the last column";
+"             of the last row would scroll the screen on some terminals";
+"  The chart puts system i at row y+2, column x+1.";
+
+"Allocate the blocks. The heap top is the address of each new block.";
+100_g! 1088_h! 241_m! 160_z! 0o! 0m@240+.
+
+"Words";
+
+"R: ( n -- 0..n-1 )  a random number below n, drawn by `, from the random state r:";
+"   r is put in the interpreter's seed (`.), one number is drawn, and the seed is";
+"   kept in r again. The interpreter stirs its seed while it waits for a key, so the";
+"   game keeps its own copy: whatever starts r from the seed (H, 20, 75) gets the";
+"   same numbers after it however long the player takes over a key, as in a duel.";
+[R r@`.!`,`.@r!]
+
+"Y: ( row column -- )  move the cursor, counted from 0: `@, called often enough to";
+"   be worth a letter. `^ (clear the screen) and `_ (clear to the end of the line)";
+"   are the rest of the screen control there is.";
+[Y`@]
+
+"Z: ( n -- )  call routine n. n doubled plus z is its slot; @ fetches the address,";
+"   { puts it on the return stack and ] jumps to it, as if Z had been called from";
+"   there. The routine's own ] then returns to whoever called Z.";
+[Z:+z@+@{]
+
+"P: ( address n -- )  make the code at address routine n: store it in slot n.";
+[P:+z@+!]
+
+"I: ( a b -- min )  the smaller of a and b: `<, used often enough to be worth a";
+"   letter. (The larger of two, `>, is written out.)";
+[I`<]
+
+"G: ( n -- address )  the address of state cell n: g+2n.";
+[G:+g@+]
+
+"E: ( c -- )  print the character c: to the screen when o is 0, otherwise into the";
+"   message being written, at o, moving o on. The guard copies the flag, so one copy";
+"   opens the block (the swap brings c up for ' to print) and the other leaves the";
+"   word with the break.";
+[E o@0=:(%'0)\ o@. o`+;]
+
+"T: ( address -- )  print a string as E would, up to its closing quote: on the";
+"   screen (o is 0) with $ at once (the guard), otherwise copied into the message.";
+"   Each pass fetches the next character; a quote (34) breaks out, leaving the";
+"   address and the quote, which the two drops take away. This is E written out,";
+"   which is much faster than calling it for every character.";
+[T o@0=:(%$0)\ 1(:,:34=\ o@.o`+; 1+ 1);;]
+
+"N: ( n -- )  print n (0 to 32767) through E. The digits are worked out by dividing";
+"   by 10, the last digit first, so they are pushed on the stack above a -1 marker:";
+"   each pass leaves the digit character (remainder plus 48) under the quotient, and";
+"   stops when the quotient is 0, which is dropped. Then the second loop prints the";
+"   top digit, the first one, until the marker comes up, and drops it.";
+[N -1% 1(10/ 48+% :0=0=); 1(E :0<0=);]
+
+"A: ( n w -- )  print n (0 to 32767) right-aligned in w columns, on the screen (only";
+"   tables need it, and # and ' are much faster than E). The digits of n are 1 plus";
+"   one for each of 9, 99, 999 and 9999 that n is above; a true comparison is -1,";
+"   so w-1 plus the four flags is the number of spaces. n waits on the return stack";
+"   while the flags are made (each copy of n is swapped up for its test). The spaces";
+"   are the last ones of a string of six, printed with $ from 6 less their number";
+"   into it; so w is at most 6 more than the digits of n, and never fewer.";
+[A 1-%:{:9>%:99>%:999>%9999>++++ 6%-"      "+$ }#]
+
+"M: ( address -- )  begin a new message with the string at address: the slot after";
+"   the newest (3 wraps to 0) becomes the newest, o points at its start, so that E,";
+"   T and N write into it, and the string is written (T). A message is so its first";
+"   string, M, any more pieces, and F.";
+[M m@240+:,1+:3=(;0 0)%. m@240+,80*m@+o! T]
+
+"F: ( -- )  finish the message: a quote ends it, printing goes back to the screen,";
+"   and the three slots are shown on rows 19 to 21, the oldest at the top. Row 18+k";
+"   shows slot (newest+k) mod 3 for k from 1 to 3, so the newest is on row 21. Each";
+"   is printed, the rest of its line cleared, and the bar at column 79 put back; the";
+"   row waits under k on the stack, swapped up when it is needed.";
+[F 34o@. 0o! 1 1(:18+:1Y %:m@240+,+3/%; 80*m@+$ `_ %79Y124' 1+:4<);]
+
+"U: ( -- )  end a message with a full stop and show it (F).";
+[U46E F]
+
+"C: ( n -- )  add n to the cash (n may be negative, as small as -32767). One division";
+"   by 10000 splits n into a high part and a low part, both with n's sign; they are";
+"   added to the two cells. The low cell is then -9999 to 19998, and one carry or one";
+"   borrow puts it back into 0 to 9999.";
+[C 10000/ 3G@+3G! 2G@+2G!
+   3G@9999>(3G@10000- 3G! 2G`+; 0) 3G@0<(3G@10000+3G! 2G`-; 0)]
+
+"W: ( -- n )  the wallet: the cash, or 30000 if there is more. Every price is below";
+"   30000, so this is all a purchase needs to compare with. A high part above 2 means";
+"   30000 or more; otherwise high*10000+low is at most 29999 and fits a cell.";
+[W 2G@2>:(30000%0)\ 2G@10000*3G@+]
+
+"D: ( i j -- q )  four times the squared distance between systems i and j, with x";
+"   counted at half (a screen cell is about twice as tall as it is wide): dx*dx +";
+"   4*dy*dy, at most 3025+900. j waits on the return stack, then i above it, while";
+"   the x difference is squared; then each comes back for the y difference.";
+[D:{h@+,%:{h@+,-:*}h@+64+,}h@+64+,-:*:+:++]
+
+"J: ( q -- c )  the distance as the fuel a jump costs: the real distance, the square";
+"   root of q divided by 2, rounded up. That is the smallest c with 4c*c >= q. Rather";
+"   than square c each time, the loop takes 8c+4 (the step from 4c*c to 4(c+1)(c+1))";
+"   off what is left of q, while anything is left; the count of passes is c. Inside";
+"   a pass the stack is c t: the swap, the copy and the rotation make c t 8c+4 into";
+"   c and t minus 8c+4, then c is counted up. A jump in range takes at most 14 passes.";
+[J 0% 1(:0>0=\ %:8*4+{%}%%- %1+% 1);]
+
+"H: ( n -- )  start the random state from the seed and n: r becomes (seed+n) times";
+"   25173, which spreads near values of n far apart. Names, prices, offers, rumours";
+"   and idol prices each call H with their own n, so they come out the same every";
+"   time they are worked out, and in a loaded game too.";
+[H 0G@+25173*r!]
+
+"K: ( i -- byte )  the kind byte of system i: its type, safety and visited bit.";
+[K h@+128+,]
+
+"O: ( k i -- n )  the normal stock N of good k in system i, from the doc's economy";
+"   part: 100 where the good is produced (plentiful), 20 where it is consumed";
+"   (scarce), 60 otherwise. For the six ordinary goods it comes from the system's";
+"   type: a table of 24 digits, six for each type in the order of the goods, gives";
+"   N in twenties (type*6 + k is the place). For the two contraband goods (k above";
+"   5) it comes from the safety instead, as the doc's law part says: 20 policed, 60";
+"   frontier, 100 lawless, which is 20*(2*safety+1). The guard keeps its flag under";
+"   the kind byte and k while the contraband N is made, dropping k.";
+[O K%:5>:(%;%4/;3&:+1+20*%0)\ %3&6*+"553113135133131533113355"+,48- 20*]
+
+"Q: ( k s -- p )  the price to buy good k at a stock of s tonnes, here (cell 5),";
+"   today. The doc's price: base*(180-s) divided by 120, while the stock rests at";
+"   the system's own N (O). At rest that is two thirds of the base where the good";
+"   is produced, the base where neither, four thirds where it is consumed, and it";
+"   runs from one and a half times the base (stock 0) down to half (stock 120, the";
+"   most a system holds), a 120th of the base for each tonne. Every base is a";
+"   multiple of 10, so the table holds base divided by 10 (as letters, 64 plus the";
+"   value: ABCFHOLN is 1 2 3 6 8 15 12 14) and the price is that times (180-s)";
+"   divided by 12.";
+"   Then the wobble: up to 10% either way (21R less 10, in percent), drawn by H";
+"   from the seed, the system, the good and the day, so nothing is stored. The";
+"   random state is kept on the return stack and put back, as in L. k waits on the";
+"   return stack above it while the base price is made.";
+[Q r@{ 180%- %:{"ABCFHOLN"+,64- *12/; }5G@8*+1G@509*+H :21R10- *100/;+ }r!]
+
+"L: ( i -- )  print the name of system i through E. The name is 2 or 3 syllables";
+"   taken from a table of 32 two-letter syllables (64 bytes), chosen by H from the";
+"   seed and 1000+i, so it is the same every time; i = 64 names the idol. The first";
+"   letter is made a capital by masking it with 223, which clears bit 5. The random";
+"   state is kept on the return stack and put back at the end, so that printing a";
+"   name never upsets the numbers a duel is drawing. Inside the loop the stack is";
+"   mask count: the mask waits on the return stack while a syllable s (32R) is";
+"   found at the table plus 2s; its first letter is masked and printed, its second";
+"   printed, and the mask becomes 255 for the rest of the name.";
+[L r@{ 1000+H 223 2R2+ 1(%{32R:+"laveraxedisoticebumazerikoangeloquvaneisortausbearonmidaensukael"+:,}&E1+,E 255%1-:);; }r!]
+
+"X: ( k w address -- )  print entry k of a table of words, each w characters wide and";
+"   padded with spaces, through E. The address is parked while k*w is made, then";
+"   the characters are printed up to the first space. On the screen (o is 0) the";
+"   second loop prints them with ' straight away, which is much faster than E.";
+[X{*}+ o@(1(:,:32=\E1+1); 0) o@0=(1(:,:32=\'1+1); 0);]
+
+"B: ( f c -- v )  stat f of ship class c, from a table of six letters a class, each";
+"   64 plus the value: f is 0 cargo (in tens of tonnes), 1 tank, 2 hull (in tens),";
+"   3 laser maximum, 4 shield maximum, 5 price (in thousands). The rows are the doc's";
+"   class table: Courier BGCBBE (20 7 30 2 2 5000), Freighter EHEBCI, Raider CJFDDL,";
+"   Clipper GJHDD^ (^ is 64+30).";
+[B 6*+"BGCBBEEHEBCICJFDDLGJHDD^"+,64-]
+
+"V: ( -- n )  tonnes in the hold: the cargo of the eight goods, plus a carry";
+"   contract's tonnes (sealed cargo and passengers both take hold space). The start";
+"   value is the contract's tonnes masked by the flag kind = 1. Then for cells 6 to";
+"   13 the sum, under the cell number, is rotated up and added.";
+[V 27G@1=30G@& 6 1(:G@{%}%+%1+:14<);]
+
+"Routines. Each is [ body] then its number n and P, which stores the body's";
+"address in slot n of z. The note before each gives n, the stack effect, and the";
+"scratch variables it uses.";
+
+"0: ( n c -- )  print character c n times, straight to the screen.";
+[ %1(%:'%1-:);;] 0P
+
+"1: ( -- )  print the cash through E: the high part and then the low part padded";
+"   to four digits with zeros, or just the low part when the high part is 0.";
+[ 2G@:0=:(%;3G@N0)\ N 3G@:1000<(48E0):100<(48E0):10<(48E0)N] 1P
+
+"2: ( -- )  clear the main area: 56 spaces on each of rows 17 down to 2.";
+[ 16 1(:1+ 1Y "                                                        "$ 1-:);] 2P
+
+"3: ( -- )  draw the frame on a cleared screen: the borders on rows 1, 18 and 23 and";
+"   the bars down the sides (and between the main area and the side panel).";
+[ `^
+   1 0Y 43' 56 45 0Z 43' 21 45 0Z 43'  18 0Y 43' 56 45 0Z 43' 21 45 0Z 43'
+   16 1(:1+:0Y 124' :57Y 124' 79Y 124' 1-:);
+   19 1(:0Y 124' :79Y 124' 1+:23<);
+   23 0Y 43' 78 45 0Z] 3P
+
+"4 to 8: ( k -- )  print the name of a type, a good, a safety level, a ship class or";
+"   an idol part through E, from tables of fixed-width words (X).";
+[ 9"Agri     Mining   Industry Hi-tech  "X] 4P
+[ 10"Food      Textiles  Ore       Machinery Medicine  Luxuries  Narcotics Weapons   "X] 5P
+[ 9"Policed  Frontier Lawless  "X] 6P
+[ 10"Courier   Freighter Raider    Clipper   "X] 7P
+[ 6"Head  Eye   Heart LHand RHand Base  "X] 8P
+
+"9: ( -- n )  the hold: the class's cargo plus 10 tonnes for each cargo pod.";
+"10: ( -- n )  the tank: the class's tank plus 2 for each tank upgrade.";
+"11: ( -- n )  the class's full hull.";
+[ 0 14G@B10* 18G@10*+] 9P
+[ 1 14G@B 19G@:++] 10P
+[ 2 14G@B10*] 11P
+
+"12: ( -- )  draw the side panel. Uses i j k. Rows 2 to 17 are cleared first.";
+"   Row 2: the class and its laser, shield and missiles. Row 3: tonnes held of the";
+"   hold. Rows 4 on: each good held, its name at column 60 and its tonnes right-";
+"   aligned to column 76. Rows 12 and 13: the contract, if any. Row 14: the idol parts held and, when it runs, the wanted";
+"   count. In the chart view rows 15 to 17 show the chosen system (15).";
+[ 16 1(:1+ 58Y "                     "$ 1-:);
+   2 59Y 14G@7Z " L"$ 15G@# " S"$ 16G@# " M"$ 17G@#
+   3 59Y "Cargo "$ V# 47' 9Z#
+   4j! 0i! 1( i@6+G@( j@60Y i@5Z j@73Y i@6+G@4A j`+; 0) i`+8<)
+   27G@( 12 59Y 27G@2=("Bounty"$ 0) 27G@1=( 30G@# 33G@(" passengers"$ 0) 33G@0=(" t "$ 29G@5Z 0) 0)
+         13 59Y "to "$ 28G@L " by day "$ 31G@# 0)
+   14 59Y "Idol "$ 23Z# 47'54' 24G@( "  Wanted "$ 24G@# 0)
+   v@0=(15Z 0)] 12P
+
+"23: ( -- n )  how many idol parts are held: the bits of cell 25 counted. Uses k.";
+"   Each pass adds the low bit to k and halves the value, six times.";
+[ 0k! 25G@6 1(%:1&k@+k!2/;%1-:);; k@] 23P
+
+"S: ( -- )  draw the status line, row 0: where you are, its type and safety, the";
+"   day, cash, debt, fuel of tank, and the hull as a percentage of the class's full";
+"   hull. The row is cleared first (from column 0, then a space), and each field";
+"   goes to its own column.";
+[S 0 0Y`_32' 5G@L 0 8Y 5G@K3& 4Z 0 17Y 5G@K4/;3& 6Z
+   0 26Y "Day "$ 1G@# 0 35Y "Cr "$ 1Z 0 49Y "Debt "$ 4G@#
+   0 60Y "Fuel "$ 21G@# 47' 10Z# 0 71Y "Hull "$ 20G@100* 11Z/;# 37']
+
+"13: ( -- )  draw the chart from nothing: clear the main area, mark every system as";
+"   not shown (0 in its byte at h+968), and let 24 draw them all. Uses i, and 24's.";
+[ 2Z 0i! 1( 0i@h@+968+. i`+ 64<) 24Z] 13P
+
+"24: ( -- )  bring the chart up to date. Uses b e f i l p x y.";
+"   p is where you are and l the range: a system is in range when D from p is at";
+"   most 4*fuel*fuel. For each system i the loop first works out its key for the";
+"   chart's choices (14) and keeps it at h+840+2i: 64*q + i - 32768 for q = D, or";
+"   32767 for a system out of range or your own. In range q is at most 784, so";
+"   64*q + i is below 50240, and subtracting 32768 makes it fit a signed cell with";
+"   the order kept: nearer first, and the lower number first when two are as far.";
+"   (The if-else keeps its flag on the return stack for the else.) y is the";
+"   in-range flag, -1 or 0.";
+"   Then the system's character: @ where you are; a visited system shows its type";
+"   letter A M I H, an unvisited one a star; capitals and stars in range, lower case";
+"   and dots out of range. Exactly one of the blocks leaves it: a visited system's";
+"   letter has 32 added (lower case) when out of range, an unvisited one is 46 (dot)";
+"   less 4 when in range, which is 42 (star). Only a character that differs from";
+"   the one shown (h+968+i) is printed, at the system's place, and remembered: after";
+"   a jump most of the chart stays as it is, and is not sent to the terminal again.";
+"   e is the system's address in the galaxy block (h+i) and f says whether it is";
+"   yours. The lowest key so far is kept in b, and its system becomes the choice";
+"   u: the nearest system in range (or none), shown in the panel (15) at the end.";
+[ 5G@p! 21G@:*:+:+ l! 32767b! -1u!
+   0i! 1( i@h@+e! i@p@=f! p@i@D :l@>f@|:{(;32767 0)}0=(64*i@+ -32768+ 0) :i@:+h@+840+!
+      :b@<(:b! i@u! 0) 32767< y!
+      f@(64 0) f@0=( e@128+,x! x@16&(x@3&"AMIH"+,y@0=32&+0) x@16&0=(46 y@4*+0) 0)
+      :e@968+,=0=( :e@968+. e@64+,2+ e@,1+Y :' 0);
+   i`+ 64<) 15Z] 24P
+
+"14: ( d -- )  step the chosen system u: d = 1 to the next farther in range, -1 to";
+"   the next nearer, in the order of the keys the chart made (13). Uses a b c d j k.";
+"   Multiplying the keys by d turns nearer into farther. a is the key of the chosen";
+"   system (-32768, below every key, when there is none), b the best key found yet";
+"   and c its system. Every system in range (key not 32767) whose key is above a";
+"   and below b becomes the best. If one was found it is chosen; if not, u stays as";
+"   it is, at the end of the list.";
+[ d! u@0<(-32768 0) u@-1>(u@:+h@+840+@d@* 0) a! 32767b! -1c!
+   0j! 1( j@:+h@+840+@k! k@32767<( k@d@*k! k@a@> k@b@<&(k@b! j@c! 0) 0) j`+ 64<)
+   c@-1>(c@u! 0)] 14P
+
+"15: ( -- )  show the chosen system in rows 15 and 16 of the side panel: its name and";
+"   the fuel a jump there costs, its type and safety. Rows 15 to 17 are cleared; row";
+"   17 lists the chart's keys, as every view lists its keys on its last line (the";
+"   chart takes all the main area's rows).";
+[ 3 1(:14+ 58Y "                     "$ 1-:);
+   u@0<(15 59Y "Nothing in range"$ 0)
+   u@-1>(15 59Y u@L "  fuel "$ 5G@u@DJ# 16 59Y u@K3& 4Z 32' u@K4/;3& 6Z 0) 17 59Y "w s, Return jumps"$] 15P
+
+"16: ( -- )  put the terminal's cursor on what is chosen, so it shows: in the chart";
+"   the chosen system (your own when there is none), in the market and the";
+"   shipyard row w+3 at column 1, in the help view the command line.";
+[ v@0=(u@0<(5G@ 0) u@-1>(u@ 0) :h@+64+,2+ %h@+,1+ Y 0)
+   v@1= v@2=|(w@3+ 1Y 0) v@3=(22 1Y 0)] 16P
+
+"18: ( -- )  jump to the chosen system. With none: a message, and nothing more.";
+"   The fuel is the distance J of D; a day passes, which adds 1% to the debt (the";
+"   loan, never above 30000) and counts the wanted days down. You are at the new";
+"   system; the random state for whatever happens there starts from H of the day";
+"   and the system, so the same jump on the same day always goes the same way (a";
+"   loaded game too). There may be an encounter (42), which leaves a flag: true if";
+"   it used the main area. Then, unless the game is over, you arrive (19) and the";
+"   status line, the panel and the chart are brought up to date: drawn from nothing";
+"   after a duel. (If the game is over the flag is dropped.)";
+[ u@0<:("No system is in range."M F0)\
+   5G@u@DJ 21G@%- 21G! 1G`+; 4G@:100/;+30000I4G! 24G@:0>+24G!
+   u@5G! S 1G@64*u@+5000+H 42Z q@0=( 19Z S 12Z :(13Z 0)0=(24Z 0) 0) q@(; 0)] 18P
+
+"19: ( -- )  arrive at the system in cell 5: bring its stock up to date (33), mark";
+"   it visited (bit 4 of its kind byte) and say so. If an idol part you don't hold";
+"   lies here (59), it becomes known (its bit in cell 26) and its price is shown.";
+"   A carry contract for this system is paid (69) and ends. Then the rumour (65)";
+"   and the day's offers (64). Just after a game is loaded (q is 2) there is no";
+"   rumour: it was given when the saved game arrived here, and a rumour can make a";
+"   part known, so giving it again could change the state.";
+[ 33Z 5G@h@+128+:,16|%. "Docked at "M 5G@L U
+   59Z :-1>( :62Z 26G@|26G! :58Z "The Idol's "M :8Z " is here: "T 60Z " (t trades)."T F 0);
+   27G@1= 28G@5G@=&( 69Z "You deliver: "M N U 0 27G! 12Z 0) q@2=0=(65Z 0) 1 64Z 2 64Z] 19P
+
+"33: ( -- )  bring the stock of the system here up to date. Uses a d k l n p.";
+"   l is the day of its last update. 0 means never (a new game or a loaded one):";
+"   each good's stock is set to its normal stock N. Otherwise, as the doc says, each";
+"   good recovers by an eighth of its gap to N for each day since, for at most 8";
+"   days: d is the days, capped at 8, and each pass adds (N-s) divided by 8 to the";
+"   stock s at a. Only this one system is worked on. Then the last update is today.";
+[ 5G@p! p@:+h@+704+@l!
+   0k! 1( k@p@O n! p@8*k@+h@+192+a!
+      l@0=(n@a@. 0)
+      l@( 1G@l@- 8I 1(:1<\ a@,:n@%- 8/;+a@. 1- 1); 0)
+   k`+ 8<)
+   1G@ p@:+h@+704+!] 33P
+
+"20: ( -- )  generate the galaxy from the seed. Uses a b c e f i k p s x y.";
+"   The random state starts from the seed, so the same seed always gives the same";
+"   galaxy. Home, system 0, is at the centre (28, 8). Each new system i is grown";
+"   from a random system p already placed (i R picks one of 0 to i-1): an offset";
+"   a, b of -14 to 14 and -7 to 7, which must be in the starter's range (D at most";
+"   196, 4 times 7*7), give the place x, y. It must be on the chart and at least 2";
+"   cells from every other system, in x or in y. That is looked up in a grid e of";
+"   58 x 18 bytes, the chart with a border of one cell, where every system placed";
+"   has a 1: the 3 x 3 cells around the place must all be 0. The grid is taken from";
+"   the heap and given back at the end. Every system is in the starter's range of";
+"   one placed before it, so all can be reached with the starter's tank.";
+"   Then each system gets a random type and a safety from its distance from home:";
+"   policed up to 4, frontier up to 9, lawless beyond. D is compared with 4 times";
+"   the squares of those (64 and 324) rather than taking the root. Last, the six idol";
+"   parts go to six different systems other than home; a policed system is drawn";
+"   again once, so they lie mostly on the frontier and beyond.";
+[ 0G@r! 1044_e! 0i! 1( 0e@i@+. i`+ 1044<)
+   28h@. 8h@64+. 1e@551+.
+   1i! 1( 1( i@R p! 29R14- a! 15R7- b! p@h@+,a@+x! p@h@+64+,b@+y!
+             x@-1> x@56<& y@-1>& y@16<& a@:*b@:*:+:++ 197<& f!
+             f@( y@1+58* x@+1+e@+s!
+                 s@59-,s@58-,+s@57-,+s@1-,+s@,+s@1+,+s@57+,+s@58+,+s@59+,+ 0=f! 0)
+          f@0=)
+      x@i@h@+. y@i@h@+64+. 1s@. i`+ 64<)
+   0i! 1( 0i@D :64>%324>+ 0%- 4* 4R+ i@h@+128+. i`+ 64<)
+   0k! 1( 1( 63R1+ :K4/;3&0=(;63R1+ 0) c!
+             0f! 0j! 1( j@k@<0=\ j@h@+832+,c@=(1f!0) j`+; 1)
+          f@)
+      c@k@h@+832+. k`+ 6<)
+   e@0_-_;] 20P
+
+"21: ( -- )  a new game: every state cell 0, then the start. The seed is the";
+"   interpreter's (`.) as the title's key wait left it. Day 1, cash 1000 and a debt of 5000 (the loan paid for your";
+"   Courier), and a new Courier (52). Uses i.";
+[ 0i! 1( 0i@G! i`+ 50<) `.@0G! 1 1G! 1000 3G! 5000 4G! 52Z] 21P
+
+"52: ( -- )  a new Courier: cells 14 to 23 (class, laser, shield, missiles, pods,";
+"   tank upgrades, hull, fuel, escape pod, hidden hold) from a table of letters, 64";
+"   plus the value: class 0, laser 1, hull 30 (the caret is 64+30), fuel 7, the";
+"   rest 0. Uses i.";
+[ 14i! 1( i@"@A@@@@^G@@"+14- ,64- i@G! i`+ 24<)] 52P
+
+"22: ( -- )  mark every system's stock as never worked out: a last update day of 0.";
+"   The stock of a system is set up when you first arrive there (19). Uses i.";
+[ 0i! 1( 0i@:+h@+704+! i`+ 64<)] 22P
+
+"25: ( -- )  refuel: fill the tank as far as the cash goes, at 20 a unit (the doc's";
+"   running costs). Uses n. n is the units missing, or the units the wallet pays";
+"   for if that is fewer (I). A full tank or no money says so; otherwise the cash, the fuel, the";
+"   status line and, in the chart, the range are brought up to date.";
+[ 10Z21G@- W20/; I n!
+   10Z21G@=:("The tank is full."M F0)\ n@0=:("You have no money for fuel."M F0)\
+   n@-20*C 21G@n@+21G! "Refuelled "M n@N" units for "T n@20*NU S v@0=(24Z 0)]
+   25P
+
+"26: ( m -- n )  read a quantity from the command line, where the caller has put a";
+"   prompt: Return alone means m, the most; otherwise the digits typed, but no more";
+"   than m. Uses a k n. -4? reads up to four characters with echo and leaves their";
+"   address; the text ends with CR (13). The guard returns m for an empty line. The";
+"   loop reads digits into k and stops at the first character that is not one";
+"   (the CR at the latest). Then the smaller of k and m.";
+[ n! -4?a! a@,13=:(n@%0)\ 0k! 1( a@,:47>%58<&0=\ k@10* a@,48- +k! a`+; 1)
+   k@n@I] 26P
+
+"34: ( -- )  clear the command line, row 22, and put its bar at column 79 back.";
+[ 22 1Y`_ 22 79Y 124'] 34P
+
+"77: ( k -- address )  where the stock of good k is kept, here.";
+[ h@5G@8*++192+] 77P
+
+"28: ( q -- cost )  what q tonnes of good c cost to buy at a stock of s. The doc's";
+"   large trades: every tonne goes at the price the stock gives halfway through the";
+"   trade, s less q halved. q tonnes at most 100 at a price of at most 247 stay";
+"   below 32767.";
+"29: ( q -- total )  what q tonnes of good c fetch when sold at a stock of s: the";
+"   halfway stock is s plus q halved, but no more than 120, and a tonne sells at";
+"   seven eighths of the price to buy it there, so buying and selling in one place";
+"   loses money. The eighths are taken from the price before multiplying by q, so";
+"   nothing passes 32767.";
+[ :2/; s@%- c@%Q *] 28P
+[ :2/; s@+ 120I c@%Q 7*8/; *] 29P
+
+"32: ( k -- )  draw row k of the market (row k+3): the good, its price to buy and to";
+"   sell here, the stock and what you hold, each right-aligned in its column. Uses";
+"   s. The prices are 28 and 29 for one tonne.";
+[ :3+ 2Y :5Z :3+ 14Y :77Z,s! c! 1 28Z4A 1 29Z 6A s@6A c@6+G@6A] 32P
+
+"31: ( -- )  draw the market: the headings, the eight goods (32), a contract's";
+"   sealed cargo when there is one (row 8, which x sells), and the keys on the main";
+"   area's last row. Uses i, and 32's c s.";
+[ 2Z 2 2Y "Good          Buy  Sell Stock  Held"$
+   0i! 1( i@32Z i`+ 8<) 27G@1= 33G@0=&( 11 2Y "Sealed "$ 29G@5Z 11 33Y 30G@6A 0)
+   17 2Y "w s choose  b buy  x sell  c chart  y yard  ? help"$] 31P
+
+"27: ( -- )  buy the good on row w. Uses c d i j s, and 26's a k n.";
+"   c is the good and s its stock here. The most you can buy is j: first the";
+"   smaller of the stock and the room in the hold, then a binary search between";
+"   i and j for the largest number of tonnes the wallet pays for (28; the price";
+"   rises as the stock falls, so a straight division would not do). With none to";
+"   buy, a message says why. Otherwise the quantity is asked for, and q tonnes are";
+"   bought: the cash, the hold and the stock change, and the row, the status line";
+"   and the panel are drawn again.";
+[ w@7>:("Sealed cargo can only be sold."M F0)\ w@c! c@77Z,s! s@ 9Z V- I j! 0i!
+   1( i@j@<0=\ i@j@+1+2/; d! d@28Z W>( d@1- j! 0) d@28Z W>0=( d@i! 0) 1)
+   s@0=:("There is none for sale here."M F0)\
+   9Z V- 0=:("The hold is full."M F0)\
+   j@0=:("You can't pay for even a tonne."M F0)\
+   22 1Y "Buy "$ c@5Z ": how many (Return for "$ j@# ")? "$ j@26Z 34Z d!
+   d@0=\ d@28Z 0%- C d@c@6+G@+c@6+G! s@d@- c@77Z.
+   "Bought "M d@N" t of "T c@5Z" for "T d@28ZNU c@32Z S 12Z] 27P
+
+"30: ( -- )  sell the good on row w. Uses c d s, and 26's a k n. With none held a";
+"   message says so. Otherwise the quantity is asked for (up to all you hold), and";
+"   the cash, the hold and the stock (no more than 120) change.";
+[ w@7>:(68Z 0)\ w@c! c@77Z,s! c@6+G@0=:("You have none to sell."M F0)\
+   22 1Y "Sell "$ c@5Z ": how many (Return for "$ c@6+G@# ")? "$ c@6+G@26Z 34Z d!
+   d@0=\ d@29Z C c@6+G@d@- c@6+G! s@d@+120I c@77Z.
+   "Sold "M d@N" t of "T c@5Z" for "T d@29ZNU c@32Z S 12Z] 30P
+
+"The shipyard. Its rows k are 0 laser, 1 shield, 2 missiles, 3 cargo pods, 4 tank";
+"upgrades, 5 the hidden hold, 6 the escape pod, then 7 to 10 the four ship classes.";
+"The doc's prices: a laser or shield level costs 1000, 2500, 5000 or 9000 (the";
+"level being bought is one more than the one held, so the price is entry L of";
+"that list for level L held); a missile 500 (at most 4), a cargo pod 1500 (at most";
+"3), a tank upgrade 2000 (at most 2), the hidden hold 3000, the escape pod 2000.";
+"They are kept in units of 500, as letters 64 plus the value: BEJR and ACDFD.";
+"Upgrades are sold at industrial and high-tech systems, ships at high-tech only.";
+
+"35: ( k -- n )  what you have of upgrade k (0 to 6): the state cell for it, from";
+"   the letters OPQRSWV, which are 64 plus the cells 15 16 17 18 19 23 22.";
+"36: ( k -- n )  the most of upgrade k you may have: for the laser and the shield";
+"   the class's limit (stats 3 and 4 of B), for the rest 4 3 2 1 1 from DCBAA.";
+[ "OPQRSWV"+,64- G@] 35P
+[ :2<:(%3+14G@B%0)\ 2- "DCBAA"+,64-] 36P
+
+"37: ( k -- p )  the price of row k here, or -1 when it can't be bought: not sold";
+"   here, already at its limit, or (for a ship) the class you fly. Uses t.";
+"   The guard returns -1 at once when the row is not sold here: an upgrade (row";
+"   below 7) where the type is below 2, or a ship (row above 6) where it is below 3.";
+"   For an upgrade, one of the two blocks after the test have < most leaves the";
+"   price (in 500s from the tables, times 500) and the other -1. For a ship, the";
+"   doc's trade-in: its price less half the price of the ship you fly, which may";
+"   be below 0 when you buy a smaller one.";
+[ t! 5G@K3& :2<t@7<& %3<t@6>& | :(-1%0)\
+   t@7<( t@35Z t@36Z< :( t@2<(t@35Z"BEJR"+,64- 0) t@1>(t@2- "ACDFD"+,64- 0) 500* %0) 0=(-1 0) 0)
+   t@6>( t@7- 14G@= :(-1%0) 0=( 5 t@7-B 1000* 5 14G@B 500*- 0) 0)] 37P
+
+"55: ( k -- )  print the name of shipyard row k through E: an upgrade's from a table";
+"   (one word each, so X can print it), a ship's its class name.";
+[ :7<:(%13"Laser        Shield       Missile      Cargo-pod    Tank-upgrade Hidden-hold  Escape-pod   "X0)\ 7- 7Z] 55P
+
+"39: ( k -- )  draw row k of the shipyard (row k+3). Uses k, and 37's t. The name";
+"   (55). What you have: a count and its limit, or yes or no";
+"   for the hidden hold and the escape pod, or for a ship its cargo, tank and hull.";
+"   Then the price, or -- when it can't be bought (the guard prints that and";
+"   leaves).";
+[ k! k@3+ 2Y k@55Z
+   k@3+ 16Y k@5<( k@35Z# " of "$ k@36Z# 0) k@4> k@7<&( k@35Z("yes"$ 0) k@35Z0=("no "$ 0) 0)
+   k@6>( 0k@7-B10*# " t, tank "$ 1k@7-B# ", hull "$ 2k@7-B10*# 0)
+   k@3+ 45Y k@37Z :0<:(%; "    --"$ 0)\ 6A] 39P
+
+"38: ( -- )  draw the shipyard: the headings, the eleven rows, what is sold here and";
+"   the keys. Uses i, and 39's.";
+[ 2Z 2 2Y "Item          Have                         Price"$
+   0i! 1( i@39Z i`+ 11<)
+   15 2Y 5G@K3& :2<("Fuel and repairs only."$ 0) :2=("Upgrades here; ships at high-tech systems."$ 0)
+   3=("Upgrades and ships."$ 0)
+   17 2Y "w s choose  b buy  f fuel  r repair  c chart  ? help"$] 38P
+
+"40: ( -- )  buy row w of the shipyard. Uses c k p, and 37's t, 39's.";
+"   p is the price. When it is -1 a message says why: not sold here, the class you";
+"   fly, or at its limit (tested in that order, each a guard). A ship your cargo";
+"   would not fit in is refused too (the new class's cargo plus your pods, against";
+"   V). Then the price is paid. An upgrade adds one to its cell. A ship becomes";
+"   your class: the doc says the upgrades carry over, cut to the new class's limits";
+"   (the laser and shield levels; pods and tank upgrades are allowed in every";
+"   class), the hull is the new one's full hull, and the fuel no more than its";
+"   tank. The shipyard, the status line and the panel are drawn again.";
+[ w@k! k@37Z p! k@c!
+   p@0<:( 5G@K3& :2<c@7<& %3<c@6>& | :("That is not sold here."M F0)\
+          c@6>:("You fly one already."M F0)\ "You have as many as you can."M F 0)\
+   k@6> V 0k@7-B 18G@+10* >&:("Your cargo would not fit in it."M F0)\
+   p@W>:("You can't pay for that."M F0)\
+   p@0%-C k@7<( k@"OPQRSWV"+,64- G`+; 0)
+   k@6>( k@7- 14G! 15G@3 14G@B I 15G! 16G@4 14G@B I 16G!
+          11Z20G! 21G@10Z I 21G! 0)
+   "Bought: "M c@55Z U 38Z S 12Z] 40P
+
+"41: ( -- )  repair the hull as far as the cash goes, at 50 a point (the doc's";
+"   running costs). Uses n. As refuelling (25), but for the hull and its full hull.";
+[ 11Z20G@- W50/; I n!
+   11Z20G@=:("The hull needs no repair."M F0)\ n@0=:("You have no money for repairs."M F0)\
+   n@-50*C 20G@n@+20G! "Repaired "M n@N" points for "T n@50*NU S] 41P
+
+"Encounters and the duel. The duel cells: 34 the enemy's hull, 35 its full hull,";
+"36 its laser, 37 its shield, 38 its missiles, 39 the range (0 far, 1 close), 40";
+"its kind (0 pirate, 1 police, 2 debt collector), 41 its level.";
+
+"49: ( k -- )  print an enemy kind's name through E.";
+[ 10"pirate    police    collector "X] 49P
+
+"46: ( level shield -- d )  the damage of a laser hit: the level times a roll of 1";
+"   to 4, less the target's shield level, but at least 1 (the doc's combat part).";
+[ {4R1+*}- 1`>] 46P
+
+"44: ( kind level -- )  set up a duel with an enemy of that kind and level: the";
+"   level's row of a table of four letters (64 plus hull in tens, laser, shield,";
+"   missiles): level 0 is 30 1 0 0, 1 is 40 2 1 1, 2 is 60 3 2 1, 3 is 80 4 3 2, and";
+"   4 (the pirate a bounty contract sends you after) 100 4 4 3. The range starts";
+"   far. Uses i.";
+[ :41G! 4*i! 40G! i@"CA@@DBAAFCBAHDCBJDDC"+,64- 10*:34G!35G!
+   i@"CA@@DBAAFCBAHDCBJDDC"+1+,64- 36G! i@"CA@@DBAAFCBAHDCBJDDC"+2+,64- 37G!
+   i@"CA@@DBAAFCBAHDCBJDDC"+3+,64- 38G! 0 39G!] 44P
+
+"48: ( -- )  draw the duel's numbers: hull, shield, laser and missiles for you and";
+"   for the enemy, and the range.";
+[ 5 14Y 20G@4A 5 25Y 34G@4A 6 14Y 16G@4A 6 25Y 37G@4A
+   7 14Y 15G@4A 7 25Y 36G@4A 8 14Y 17G@4A 8 25Y 38G@4A
+   10 14Y 39G@("close"$ 0) 39G@0=("far  "$ 0)] 48P
+
+"53: ( d -- )  you are hit for d: the hull loses d, but goes no lower than 0.";
+"54: ( d -- )  the enemy is hit for d, the same way.";
+[ 20G@%- 0`> 20G!] 53P
+[ 34G@%- 0`> 34G!] 54P
+
+"51: ( t -- )  the enemy's turn; t is 2 after a failed flight, when it gets a free";
+"   laser shot whatever the range. Otherwise, as the doc says: below a quarter of";
+"   its hull it flees (e becomes 1, the duel's end); close in, it fires its laser;";
+"   far off, it fires a missile while it has one (15, which no shield stops), and";
+"   with none it closes in on a roll of 1 in 2 (to tune: if it always closed, you";
+"   could flee only on the first turn, as fleeing needs the far range). Uses e.";
+[ 2=:( 36G@16G@46Z :53Z "The "M 40G@49Z" hits you for "T NU0)\
+   34G@4* 35G@<:( "The "M 40G@49Z" flees."T F 1e! 0)\
+   39G@( 36G@16G@46Z :53Z "The "M 40G@49Z" hits you for "T NU 0)
+   39G@0=( 38G@( 38G`-; 15 53Z "A missile hits you for 15."M F 0)
+           38G@0=( 2R( 1 39G! "The "M 40G@49Z" closes in."T F 0) 0) 0)] 51P
+
+"50: ( -- )  pay the enemy off: e becomes 3 when it takes the payment. Uses i.";
+"   A pirate takes half of each good you hold (what is left is the half rounded";
+"   down), if you hold any; the sealed cargo of a contract is not yours to give.";
+"   The police take a bribe of 2000 and forget you (the wanted count goes to 0).";
+"   A debt collector takes all the cash you have, up to the debt.";
+[ 40G@0=( 0 6 1(:G@{%}%+%1+:14<); :( 6 1(:G:@2/;%! 1+:14<); "The pirate takes half your cargo and goes."M F 3e! 0)
+          0=("The pirate wants cargo, and you have none."M F 0) 0)
+   40G@1=( W 1999>( -2000C 0 24G! "The police take 2000 and let you go."M F 3e! 0)
+           W 2000<("You haven't 2000 for the police."M F 0) 0)
+   40G@2=( W 4G@I i! i@( i@0%-C 4G@i@- 4G! "The collector takes "M i@N" and goes."T F 3e! 0)
+           i@0=("You have nothing to pay with."M F 0) 0)] 50P
+
+"45: ( -- e )  the duel, until it ends: e is 0 when the enemy is destroyed, 1 when";
+"   it flees, 2 when you get away, 3 when it is paid off, 4 when you are destroyed.";
+"   Uses e k t, and 50's i. The main area shows both ships; each turn the numbers";
+"   are drawn (48), a key is read, and your move is made. t says whether it took";
+"   your turn: 0 for a move that can't be made (a message says why, and nothing";
+"   else happens), 1 for a move, 2 for a failed flight. The doc's moves: l fires";
+"   the laser (close only); m a missile (15, through shields); c closes in; p pulls";
+"   back; f flees (far only), which works on a roll of 1 in 2 and otherwise gives";
+"   the enemy a free shot; $ pays. Then, if the enemy still stands and you took";
+"   your turn, it takes its own (51), and a hull of 0 ends the duel.";
+[ 2Z 2 2Y "Duel: "$ 40G@49Z " ship, level "$ 41G@# 4 14Y "You       Them"$
+   5 2Y "Hull"$ 6 2Y "Shield"$ 7 2Y "Laser"$ 8 2Y "Missiles"$ 10 2Y "Range"$
+   17 2Y "l laser  m missile  c close  p pull back  f flee  $ pay"$ -1e!
+   1( 48Z 22 1Y "Your move? "$ 0? k! 34Z 0t!
+      k@108=( 39G@( 15G@37G@46Z :54Z "You hit it for "M NU 1t! 0) 39G@0=("Too far for the laser."M F 0) 0)
+      k@109=( 17G@( 17G`-; 15 54Z "Your missile hits for 15."M F 1t! 0) 17G@0=("You have no missiles."M F 0) 0)
+      k@99=( 39G@0=( 1 39G! "You close in."M F 1t! 0) 0)
+      k@112=( 39G@( 0 39G! "You pull back."M F 1t! 0) 0)
+      k@102=( 39G@("Too close to flee."M F 0) 39G@0=( 2R("You fail to get away."M F 2t! 0) t@0=("You get away."M F 2e! 0) 0) 0)
+      k@36=( 50Z 0)
+      34G@1<( 0e! 0) e@0< t@&( t@51Z 0) 20G@1<( 4e! 0)
+   e@0<) e@] 45P
+
+"43: ( -- )  a police scan, from the doc's law part. Uses a b c d i. Contraband in";
+"   the ordinary hold is always found; the hidden hold (10 tonnes) is filled first,";
+"   narcotics before weapons, and is missed 3 times in 4. c and d are the tonnes";
+"   of narcotics and weapons in the hidden hold, i is true when it is searched";
+"   too; then c and d become what is found. With nothing found you are waved on.";
+"   Otherwise you choose: s submits, and the contraband found is taken with a fine";
+"   of its base price a tonne (what the cash can't pay goes onto the loan); r";
+"   resists, which makes you wanted (20 days) and starts a duel with the police (a";
+"   becomes 1, the police's kind, at level 3).";
+[ 12G@ 23G@10* I c! 13G@ 23G@10*c@- I d! 4R0= i!
+   12G@ c@i@0=&- c! 13G@ d@i@0=&- d!
+   c@d@+0=:("The police scan your hold and wave you on."M F -1a! 0)\
+   "The police find "M c@d@+N" t of contraband. s submits, r resists."T F
+   1( 22 1Y "s or r? "$ 0? b! 34Z b@115= b@114=| 0=)
+   b@115=( 12G@c@- 12G! 13G@d@- 13G! c@120* d@140*+ :0%-C
+           2G@0<( 2G@10000*3G@+ 0%- 4G@+ 30000I 4G! 0 2G! 0 3G! 0)
+           "They take it and fine you "M NU -1a! 0)
+   b@114=( 20 24G! 3b! 1a! "You resist the police!"M F 0)] 43P
+
+"47: ( -- )  you are destroyed with an escape pod: the doc's losing. The pod is used";
+"   up; you lose the ship and the cargo (and any contract) and wake at home in a new";
+"   Courier, whose 5000 is added to the loan (up to 30000). The debt and the idol";
+"   parts are kept. Uses i, and 52's.";
+[ 6i! 1( 0i@G! i`+ 14<) 52Z 0 27G! 0 5G! 4G@5000+ 30000I 4G!
+   "Your ship is lost. The escape pod takes you home to a new Courier."M F] 47P
+
+"42: ( -- f )  what happens on arriving at a system (cell 5); f is true if a duel";
+"   used the main area. Uses a b c n p s, and the routines' own. On day 999 the";
+"   game ends instead, as the doc says (q is 4), with a false flag.";
+"   a is the encounter: -1 none, 0 pirates, 1 police who attack, 2 debt collectors,";
+"   3 a police scan; b the enemy's level. The doc's chances: once the debt is at";
+"   its cap of 30000, collectors on 1 jump in 4 (to tune). Otherwise a roll of 20R";
+"   below 2, 5 or 8 by the safety s (10%, 25% and 40%), or 3 (15%) in a policed";
+"   system while you are wanted. In a policed system the police scan you, or attack";
+"   if you are wanted (level 3); elsewhere pirates attack, of level safety less 1";
+"   plus a roll of 0 or 1 (to tune): 0 or 1 on the frontier, 1 or 2 when lawless. A bounty contract for this system always meets its pirate, of";
+"   level 4. A scan (43) may turn into a duel. After a duel (45): a win pays a";
+"   bounty of 250 times the level plus one (to tune) for a pirate or a collector,";
+"   and may bring salvage: on a roll of 1 in 2, 1 to 5 tonnes of a random good, as";
+"   much as the hold has room for. A win against the police leaves you wanted. A";
+"   loss uses the escape pod (47), or without one ends the game (q is 2): the";
+"   flag is tested once, as 47 takes the pod away. A won";
+"   duel at a bounty contract's system pays the contract (69).";
+[ 1G@998>:(4q! 0%0)\ 5G@p! p@K4/;3& s! -1a!
+   4G@29999> 4R0=&( 2a! 2b! 0)
+   a@0<( 20R "258"s@+,48- s@0= 24G@0>&- <( s@0=( 24G@(1a! 3b! 0) 24G@0=(3a! 0) 0) s@( 0a! s@1- 2R+ b! 0) 0) 0)
+   27G@2= 28G@p@=&( 0a! 4b! 0)
+   a@3=( 43Z 0)
+   a@-1> a@3<&( a@b@44Z 45Z
+      :0=( a@1=( 20 24G! "You destroy the police ship. You are wanted."M F 0)
+           a@1=0=( b@1+250* :C "You win. A bounty of "M NU
+                   27G@2= 28G@p@=&( 69Z "The bounty contract pays "M NU 0 27G! 0)
+                   2R( 9Z V- 5R1+ I n! n@( 8R c! c@6+G@n@+c@6+G! "You salvage "M n@N" t of "T c@5ZU 0) 0) 0) 0)
+      4=( 22G@:(47Z 0)0=(2q! 0) 0) 0)
+   a@-1> a@3<&] 42P
+
+"The loan and the idol.";
+
+"57: ( -- )  the win, as the doc says: the loan repaid and all six parts held";
+"   (cell 25 is 63, six bits). q becomes 3, which ends the main loop.";
+[ 4G@0= 25G@63=&(3q! 0)] 57P
+
+"56: ( -- )  pay the loan, any amount, from the cash. Uses d, and 26's a k n. The";
+"   most is the debt or the wallet, whichever is smaller; Return pays that.";
+[ 4G@0=:("You owe nothing."M F0)\ W4G@I :0=:("You have no cash."M F%;0)\
+   22 1Y "Pay how much (Return for "$ :# ")? "$ 26Z 34Z d! d@0=\
+   d@0%-C 4G@d@- 4G! "You pay "M d@N" off the loan"T U S 57Z] 56P
+
+"62: ( p -- bit )  the bit of idol part p: 1 2 4 8 16 32, from letters 64 plus each.";
+[ "ABDHP`"+,64-] 62P
+
+"59: ( -- p )  the idol part that lies here and is not held, or -1. Uses i.";
+"   Each part whose system is this one and whose bit is not in cell 25 replaces";
+"   the -1 with its number.";
+[ -1 0i! 1( i@h@+832+,5G@= 25G@i@62Z&0=&(;i@ 0) i`+6<)] 59P
+
+"58: ( p -- )  the price of idol part p, in goods: a tonnes of b and c tonnes of d.";
+"   Uses a b c d. The doc's rule: two different goods, 10 to 30 tonnes each and at";
+"   most 40 in all. H draws them from the seed and 2000+p, so the price is the same";
+"   every time; the random state is put back after, as in L. The first good b is";
+"   any of the eight, so it is contraband one time in four; the second d is one of";
+"   the six ordinary goods, moved on by one (mod 6) if it is the same as b. The";
+"   second amount is 10 plus a roll below 31-a, so the two add up to 40 at most.";
+[ r@{ 2000+H 8R b! 21R10+ a! 6R d! d@b@=(d@1+6/%; d! 0) 31a@-R10+ c! }r!] 58P
+
+"60: ( -- )  print the price 58 found, through E: a t of b and c t of d.";
+[ a@N" t of "T b@5Z" and "T c@N" t of "T d@5Z] 60P
+
+"61: ( -- )  t: trade for the idol part here, or list the parts you know of.";
+"   Uses a b c d i j. With a part here (59) its price is found (58); if the hold has";
+"   enough of both goods they are handed over and the part is held: the parts held";
+"   are counted (23), and the game may be won (57). Without enough, the price is";
+"   shown. With no part here, each part known and not held is shown with where it";
+"   lies and its price.";
+[ 59Z :-1>:( %j! j@58Z b@6+G@a@< d@6+G@c@<| :("The Idol's "M j@8Z " wants "T 60Z U0)\
+      b@6+G@a@- b@6+G! d@6+G@c@- d@6+G! 25G@j@62Z|25G!
+      "You trade for the Idol's "M j@8Z ": "T 23ZN " of 6."T F S 12Z 57Z 0)\ ;
+   0i! 1( 26G@25G@~& i@62Z&( i@58Z "The Idol's "M i@8Z" lies at "T i@h@+832+,L ": "T 60Z U 0) i`+6<)
+   26G@25G@~&0=("You know of no part of the idol."M F 0)] 61P
+
+"Contracts and rumours. A contract is cells 27 to 33 (kind, destination, good,";
+"tonnes, deadline, pay, passengers); an offer being looked at is the same in 42";
+"to 48. One contract at a time, as the doc says.";
+
+"63: ( n -- c )  make offer n (1 or 2) of this system today, in cells 42 to 48, and";
+"   leave c, how many offers there are (0 to 2). Uses c d i n. H draws them from";
+"   the seed, the day and the system, so they are the same each time they are";
+"   looked at and nothing is stored; the random state is put back after. Offers 1";
+"   to n are drawn in turn, so offer 2 is always the same too. For each: a";
+"   destination other than here (a roll below 63, moved on by one from here up);";
+"   a bounty (kind 2) one time in three, else a carry (kind 1) of 5 to 20 tonnes of";
+"   one of the six ordinary goods, passengers one time in three. The doc's pay:";
+"   100 per unit of fuel distance (J of D, at most 32) plus 20 a tonne; a bounty";
+"   instead adds 1500 (to tune). The deadline is the trip's length, a day for each";
+"   5 units of distance rounded up, plus 3 to 6 days of slack.";
+[ r@{ n! 1G@67* 5G@+3000+H 3R c! 0i!
+   1( i@n@<0=\ 63R:5G@<0=- 43G! 3R0=0%- 1+ 42G! 6R 44G! 16R5+ 42G@1=& 45G! 3R0= 42G@1=& 1& 48G!
+      5G@43G@DJ d! d@100* 45G@20*+ 42G@2=1500&+ 47G! 1G@ d@4+5/;+ 3+ 4R+ 46G! i`+; 1)
+   c@ }r!] 63P
+
+"64: ( n -- )  show offer n as a message, if there is one. Uses j, and 63's.";
+[ j! j@63Z j@<:(0)\ "Offer "M j@N": "T
+   42G@1=( 45G@N 48G@(" passengers"T 0) 48G@0=(" t of "T 44G@5Z 0) " to "T 0)
+   42G@2=( "a pirate at "T 0) 43G@L ", by day "T 46G@N ", pay "T 47G@N U] 64P
+
+"66: ( -- )  k: take a contract. Uses e j, and 63's and 64's. With a contract";
+"   already, or no offers, a message says so. Otherwise the offers are shown again";
+"   and a key chooses one (1 or 2; anything else takes none). A carry needs room";
+"   in the hold. The offer's cells are copied to the contract's.";
+[ 27G@:("You have a contract already."M F0)\ 0 63Z :0=:("There are no offers here today."M F%;0)\
+   1 64Z 2 64Z 22 1Y "Take which? "$ 0? 48- e! 34Z e@0> %1+e@>&0=\ e@63Z;
+   42G@1= V45G@+ 9Z>&:("Your hold has no room for it."M F0)\
+   0j! 1( j@42+G@ j@27+G! j`+ 7<) "Contract taken"M U 12Z] 66P
+
+"69: ( -- p )  the contract's pay: all of it by the deadline, half when late.";
+[ 32G@ 1G@31G@>(2/; 0)] 69P
+
+"68: ( -- )  sell the sealed cargo of a carry contract. The doc allows it: you";
+"   become wanted, and the cargo's base value is added to your loan (up to 30000);";
+"   the contract ends. It sells as that many tonnes of its good would (29).";
+"   Uses c s, and 29's.";
+[ 29G@c! c@77Z,s! 30G@29Z :C 20 24G! s@30G@+120I c@77Z.
+   c@"ABCFHOLN"+,64- 10* 30G@* 4G@+ 30000I 4G! 0 27G!
+   "You sell the sealed cargo for "M N ". You are wanted, and owe more"T U 31Z S 12Z] 68P
+
+"65: ( -- )  the day's rumour, from H of the day and the system, as the doc says: one";
+"   of three kinds, always true. Uses c i j k. 2: where an idol part lies, one you";
+"   neither hold nor know (it becomes known); with none left, kind 0 instead. 1:";
+"   where pirates are thick, the first lawless system from a random one on; with";
+"   none, kind 0. 0: where a good is scarce: a random system and a good it really";
+"   consumes (its normal stock is 20), drawn until one is found (every type";
+"   consumes at least one). The random state is put back after.";
+[ r@{ 1G@71* 5G@+4000+H 3R k! k@2= 26G@25G@|63&63=&(0k! 0)
+   k@2=( 1( 6R:j! 62Z 26G@25G@|&) 26G@j@62Z|26G! "Rumour: the Idol's "M j@8Z " lies at "T j@h@+832+,L U 0)
+   k@1=( 64Rj! 0i! 1( j@K4/;3&2=\ j@1+63&j! i`+ 64<)
+         i@64<("Rumour: pirates are thick around "M j@L U 0) i@63>(0k! 0) 0)
+   k@0=( 64Rj! 1( 6R:c! j@O20=0=) "Rumour: "M c@5Z " is scarce at "T j@L U 0) }r!] 65P
+
+"The save code, from the doc's saving part. The code is 48 characters: a salt, 46";
+"characters of data and a check. The data is every value at its own bit width,";
+"most significant bit first, 6 bits to a character: the format version (4 bits,";
+"1 now; a code of another version is refused), the state cells 0 to 33 with the";
+"widths below (216 bits), then the stock of the 8 goods at the system you are";
+"docked at (7 bits each, so a loaded game has the same prices here): 276 bits, 46";
+"characters exactly. The widths, letters 64 plus each:";
+"P seed 16, J day 10, J cash high 10, N cash low 14, O debt 15, F position 6, G";
+"each cargo 7, B class 2, C laser 3, C shield 3, C missiles 3, B pods 2, B tank";
+"upgrades 2, G hull 7, D fuel 4, A escape pod 1, A hidden hold 1, E wanted 5, F";
+"idol parts held 6, F known 6, B contract kind 2, F destination 6, C good 3, G";
+"tonnes 7, J deadline 10, O pay 15, A passengers 1. Not saved, as the doc says:";
+"which systems were visited, the stock elsewhere (worked out again on arrival),";
+"and the random state (each jump starts its own from the seed).";
+"The values are put through a light obfuscation: each is XORed with a draw of R,";
+"started from the salt, so two near saves look different and the";
+"code can't simply be edited. The check is worked out over the salt and the data:";
+"c becomes 3c plus the value, mod 64, so any one changed character changes it.";
+"The alphabet: A-Z a-z 0-9 - and _ (no slash, which a string would need to";
+"escape). The pack uses a (bits so far) n (how many) b (where the next goes).";
+
+"70: ( v w -- )  pack the low w bits of v. v is first shifted up by 16-w places";
+"   (doubling it), so its bits come out of the top: each pass the sign of v is the";
+"   next bit, which goes into a (twice a, less the flag -1 or 0), and v is doubled.";
+"   Every 6 bits a is stored at b as one value of the code.";
+[ :{16%- 1(:1<\%:+%1- 1);} 1(%:0<a@:+%-a!:+% n`+6=(a@b@. b`+; 0a! 0n! 0) 1-:);;] 70P
+
+"71: ( w -- v )  unpack w bits into v: each pass takes the top bit of a (above 31,";
+"   with 6 bits in a), doubles a, and adds the bit to twice v. When a runs out (n";
+"   is 0) the next value is fetched from b.";
+[ 0% 1(%n@0=(b@,a! b`+; 6n! 0) a@31> a@:+63&a! n`-; %:+%- %1-:);] 71P
+
+"75: ( -- )  the obfuscation: XOR the 46 data values with draws of 64R, the random";
+"   state started from the salt. Doing it twice undoes it. Uses i.";
+"76: ( -- c )  the check over the salt and the data. Uses i.";
+[ h@1032+,r! 1i! 1( h@1032+i@+:,64R^%. i`+ 47<)] 75P
+[ 0 0i! 1( 3* h@1032+i@+,+63& i`+ 47<)] 76P
+
+"72: ( -- )  v: make the save code and show it as a message. Uses a b i n. The";
+"   values are packed from h+1033, the salt (whatever the random state's low 6";
+"   bits are) goes at h+1032, then the XOR and the check at h+1079; each value is";
+"   printed as its letter of the alphabet.";
+[ h@1033+b! 0a! 0n! 1 4 70Z
+   0i! 1( i@G@ i@"PJJNOFGGGGGGGGBCCCBBGDAAEFFBFCGJOA"+,64- 70Z i`+ 34<)
+   0i! 1( i@77Z, 7 70Z i`+ 8<)
+   r@63& h@1032+. 75Z 76Z h@1079+. "Save code: "M
+   0i! 1( h@1032+i@+, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"+,E i`+ 48<) F] 72P
+
+"73: ( address -- f )  read the save code typed at address, ending with CR; f is";
+"   true if it was good, and then the state cells hold it and h+1080 the stock.";
+"   Uses a b c f i n. Each guard returns false: not 48 characters; a character";
+"   not in the alphabet (each letter's value is worked out from its place in the";
+"   ASCII table, -1 when none fits, and f gathers the -1s); a check that doesn't";
+"   match; a version other than 1. Then the values are unpacked into the cells";
+"   and the stock.";
+[ a! 0i! 1( a@i@+,13=\ i`+; 1) i@48=0=:(0%0)\
+   0f! 0i! 1( a@i@+,c! -1 c@64>c@91<&(;c@65- 0) c@96>c@123<&(;c@71- 0)
+      c@47>c@58<&(;c@4+ 0) c@45=(;62 0) c@95=(;63 0) :0<f@|f! h@1032+i@+. i`+ 48<)
+   f@:(0%0)\ 76Z h@1079+,=0=:(0%0)\ 75Z h@1033+b! 0n! 4 71Z 1=0=:(0%0)\
+   0i! 1( i@"PJJNOFGGGGGGGGBCCCBBGDAAEFFBFCGJOA"+,64- 71Z i@G! i`+ 34<)
+   0i! 1( 7 71Z h@1080+i@+. i`+ 8<) -1] 73P
+
+"74: ( -- )  after a code is loaded and the galaxy made: the stock read from the";
+"   code is put at the system you are docked at, brought up to today. Uses i.";
+[ 0i! 1( h@1080+i@+, i@77Z. i`+ 8<) 1G@ 5G@:+h@+704+!] 74P
+
+"78: ( -- )  draw the help view: the goal, the keys, and how the game works.";
+[ 2Z 2 2Y "Repay the loan and hold all six parts of the idol,"$
+   3 2Y "which are bartered for goods (t). Fewer days score"$
+   4 2Y "better; the game ends at day 999."$
+   6 2Y "c chart: w s choose, Return jumps   l pay the loan"$
+   7 2Y "m market: w s choose, b buy, x sell  f refuel  r repair"$
+   8 2Y "y shipyard: upgrades and ships      k take a contract"$
+   9 2Y "t trade for a part, or list those known  v save code"$
+   10 2Y "duel: l laser (close)  m missile  c close  p pull back"$
+   11 2Y "      f flee (far)  $ pay off              q quits"$
+   13 2Y "A type makes some goods (cheap) and needs others"$
+   14 2Y "(dear). Narcotics and weapons are cheap far from home"$
+   15 2Y "and dear near it, where the police scan for them."$
+   16 2Y "Pirates are thicker far out. Stock moves prices, and"$
+   17 2Y "recovers day by day."$] 78P
+
+"Main program";
+
+"The title. While it waits for a key the interpreter stirs its seed, so how long";
+"the player takes to press it is the seed of a new galaxy (21 keeps it). n starts";
+"a new game (q is 1); l reads a save code (73), and a good one loads it (q is 2).";
+"Anything else waits again.";
+`^
+"IDOL"$ `'`' "A space trading game. Trade, smuggle, fight, and find the six parts"$ `'
+"of an ancient idol. n starts a new game, l loads a saved one."$ `'
+0q! 1( 0?
+   :110=(1q! 0) 108=( "Code: "$ -60? 73Z:(2q! 0)0=( `' "That code is not right."$ 0) `' 0)
+q@0=)
+
+"Start the game: a new one, or the galaxy of the loaded one with its stock here;";
+"then draw the screen with the chart, and arrive. The slots start as empty";
+"messages, a quote each.";
+q@1=(21Z 20Z 22Z 0) q@2=(20Z 22Z 74Z 0)
+34m@. 34m@80+. 34m@160+. 3Z S 0v! 12Z 13Z 19Z 0q!
+
+"The main loop: put the cursor on the choice, wait for a key, and run it. The keys";
+"are a fast switch: each case drops the key, runs, and breaks past the rest. When";
+"the loop ends q says why: 1 you quit (the save code is shown, so the game can go";
+"on later), 2 you were destroyed, 3 you won, 4 day 999 came.";
+1( 16Z 0? 1(
+     :99=:(%; 0v! 12Z 13Z 0)\
+     :109=:(%; 1v! 0w! 12Z 31Z 0)\
+     :121=:(%; 2v! 0w! 12Z 38Z 0)\
+     :114=:(%; 41Z 0)\
+     :108=:(%; 56Z 0)\
+     :116=:(%; 61Z 0)\
+     :107=:(%; 66Z 0)\
+     :118=:(%; 72Z 0)\
+     :13=:(%; v@0=(18Z 0) 0)\
+     :119=:(%; v@0=(-1 14Z 15Z 0) v@(w@0>w@+w! 0) 0)\
+     :115=:(%; v@0=(1 14Z 15Z 0) v@(w@ v@1= 7 27G@1=33G@0=&-& v@2=10&| <0%-w@+w! 0) 0)\
+     :98=:(%; v@1=(27Z 0) v@2=(40Z 0) 0)\
+     :120=:(%; v@1=(30Z 0) 0)\
+     :102=:(%; 25Z 0)\
+     :63=:(%; 3v! 12Z 78Z 0)\
+     :113=:(%; 1q! 0)\
+     ; 0)
+q@0=)
+q@1=( 72Z 0)
+q@2=( "Your ship is destroyed, and you with it. Game over."M F 0)
+q@3=( "The Idol of "M 64L " is whole and the loan is paid. You win in "T 1G@N " days!"T F 0)
+q@4=( "Day 999: the end. You held "M 23ZN " of the six parts of the Idol of "T 64L U 0)
+22 1Y "Press a key."$ 0?;
+`^ "Bye."$ `'

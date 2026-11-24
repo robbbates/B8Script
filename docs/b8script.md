@@ -68,7 +68,7 @@ Inside a string, `/` and the character after it are an escape. Escapes are decod
 | Escape | Gives | Examples |
 |---|---|---|
 | `/@` to `/_` | Control codes 00h–1Fh: the character with bit 6 cleared | `/M` CR, `/J` LF, `/[` ESC |
-| `/` before 20h–3Fh | That character | `/"` = `"`, `//` = `/`, `/?` = `?` |
+| `/` before 00h–3Fh | That character | `/"` = `"`, `//` = `/`, `/?` = `?` |
 | `/DEL` | `?` (DEL with bit 6 cleared) | |
 | `/a` to `/z` | That variable's value, printed as `#` prints it: signed decimal, no space. It is read when the string is printed | `"Score: /s"$` |
 | `/{` | Clear the screen; the cursor goes to the top left | |
@@ -728,7 +728,7 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 
 **The escapes**
 
-- **One range test.** After the `/`, compare with 60h and 7Fh: in between is an escape, and everything else falls through to the AND BFh that the old decoding did. Inside, subtracting 7Bh leaves `{` `|` `}` as 0, 1, 2, a borrow for `` ` `` and the letters, and a further add of 1Ah splits those two apart and leaves the letters as 0–25.
+- **One range test.** After the `/`, compare with 60h and 7Fh: in between is an escape, and everything else falls through to the AND BFh. Inside, subtracting 7Bh leaves `{` `|` `}` `~` as 0 to 3, a borrow for `` ` `` and the letters, and a further add of 1Ah splits those two apart and leaves the letters as 0–25.
 - **Reuse the number printer.** `/a` to `/z` are `#` on the variable's cell, and the ANSI `/~` prints its row and column with the same routine.
 - **Let each escape return into the loop.** Push the loop's address once, and each escape can end in a plain return or a tail jump into its last routine (such as "ESC [ and A").
 - **Keep `/~` away from return addresses.** Where `$` is a subroutine (in a checked build it shares its loop with the error report's texts), the two cells sit under the routine's return address. Throw that address away, take the cells, and call the loop again, rather than reach past it; and keep the string's original address (for a `Q` report) in a RAM cell rather than on the data stack.
@@ -750,7 +750,7 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 
 ### Build options
 
-An implementation may offer its variants as assembly switches. The existing sources use `CPM` (a CP/M .COM file or a generic ROM image), `CHECKED` and `EDITOR`. Which environments a build offers is up to the implementation; the smallest builds for vintage and homebrew machines are typically unchecked runners, with the loader left to the machine.
+An implementation may offer its variants as assembly switches. The existing sources use `CPM` (a CP/M .COM file or a generic ROM image), `CHECKED`, `EDITOR` and `ANSI` (how the console escapes reach the screen; see [The console](#the-console)). Which environments a build offers is up to the implementation; the smallest builds for vintage and homebrew machines are typically unchecked runners, with the loader left to the machine.
 
 [↑ Back to top](#b8script-spec)
 

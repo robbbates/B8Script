@@ -193,7 +193,7 @@ Printing a variable between two pieces of text is so common that strings have a 
 
 This prints `You have 75 coins left.` It is the same as `"You have "$ m@# " coins left./M/J"$`, just shorter. The value is read when `$` prints the string, so if m changes and you print the same string again, you see the new number.
 
-Two catches. It only works for a plain variable: to print a sum, or anything worked out on the stack, use `#` between two strings. And a slash before a small letter now always means a variable, so a slash meant as a slash is written twice: `"y//n"` prints `y/n`.
+Two catches. It only works for a plain variable: to print a sum, or anything worked out on the stack, use `#` between two strings. And a slash before a small letter always means a variable, so a slash meant as a slash is written twice: `"y//n"` prints `y/n`.
 
 Adding one to a counter is so common that you'll see `i@1+i!` everywhere. Remember it; the loops in Lesson 6 use it.
 

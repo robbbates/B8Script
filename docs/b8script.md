@@ -1052,12 +1052,12 @@ Under CP/M the pages sit after the image and the heap limit is the BDOS. The bre
 
 | Routine | Escape | Does | Gets | May change |
 |---|---|---|---|---|
-| `CONCLS` (FF0Ch) | `/{` | Clear the screen, cursor to the top left | | A |
-| `CONEOL` (FF0Fh) | `/}` | Clear from the cursor to the end of the line | | A |
-| `CONCUR` (FF12h) | `/\|`, `` /` `` | Show the cursor, or hide it | A = 0 to hide, anything else to show | A |
+| `CONCLS` (FF0Ch) | `/{` | Clear the screen, cursor to the top left | | A, DE |
+| `CONEOL` (FF0Fh) | `/}` | Clear from the cursor to the end of the line | | A, DE |
+| `CONCUR` (FF12h) | `/\|`, `` /` `` | Show the cursor, or hide it | A = 0 to hide, anything else to show | A, DE |
 | `CONAT` (FF15h) | `/~` | Cursor to a row and column, both from 0 | HL = the row, DE = the column (whole cells) | A, DE, HL |
 
-All four must keep BC and HL', and all but `CONAT` also DE and HL.
+All four must keep BC and HL', and all but `CONAT` also HL. The flags may change.
 
 **Screen size.** Whatever the terminal or the machine's routines give: the interpreter doesn't know it.
 
@@ -1067,7 +1067,7 @@ All four must keep BC and HL', and all but `CONAT` also DE and HL.
 
 Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (923 bytes; 977 with `ANSI = 1`), `b8s-8080-rom-checked-0000.bin` (1,376; 1,430), `B8S8080.COM` (1,046), `B8S8080C.COM` (1,514).
 
-The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 097Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, so the routines keep BC (and DE and HL where the Z80's do); and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
+The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers, without HL') and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 097Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, so the routines keep BC (and HL where the Z80's do); and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
 
 ## Appendix C: 6502
 
@@ -1118,6 +1118,8 @@ Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. 
 | Heap pointer cell (little-endian) | 827Ch | 33404 | −32132 |
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 8234h | 33332 | −32204 |
+
+**The return stack's guard band** (checked build). S is the hardware stack, so the 32 bytes between 8000h and the lowest allowed S, 8020h, take what a handler, the console routines and interrupts push while the return stack is full. The deepest point is inside the escapes of `$`: with all 112 entries in use, S at `CONOUT`'s entry can be as low as 800Ah (an ANSI `/~` printing a five-digit number), 800Ch (a variable escape) or 8010h (`#`). That leaves 10 bytes for `CONOUT` itself and any interrupt: less than an IRQ's 12-byte frame. A machine that needs more raises `RSLIM`, two bytes for each entry given up; the unchecked build has no guard band at all, since its return stack may use the whole page.
 
 **The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. The unchecked build prints nothing when it is stopped.
 

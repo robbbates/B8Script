@@ -125,7 +125,7 @@ To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6
 | With `ANSI = 0`: CONCLS (FF0Ch), CONEOL (FF0Fh) | clear the screen and home the cursor; clear to the end of the line | same | same |
 | CONCUR (FF12h) | show the cursor if A is not 0, hide it if A = 0 | show if the carry is set, hide if clear | as the Z80 |
 | CONAT (FF15h) | cursor to row HL, column DE, both from 0 | row A, column Y | row X, column D |
-| The four must keep | BC (and HL' on the Z80); DE and HL too, all but CONAT | X | Y, U, DP |
+| The four must keep | BC (and HL' on the Z80); HL too, all but CONAT | X | Y, U, DP |
 
 - There is one input routine, KEY. It replaces the earlier CONST and CONIN: `0?` waits by calling KEY until a key comes.
 - KEY is also called while a program runs, for the break key: once in every 256 word calls and loop-backs. A key it returns then is taken, so KEY must not wait, and should be quick.

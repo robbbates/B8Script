@@ -50,7 +50,7 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 The builds follow [`docs/b8script.md`](../docs/b8script.md) (2026-11-24). What the spec leaves to the implementation:
 
-- `-n?` (generic builds): Backspace takes a character back and is echoed as it is; every other key but CR is stored and echoed, control keys and DEL included. A count above 127 is taken as 127. The CP/M builds use BDOS 10, which does its own editing.
+- `-n?`: Backspace takes a character back and is echoed as it is; every other key but CR is stored and echoed, control keys and DEL included; CR ends the line and is not echoed. A count above 127 is taken as 127. The CP/M builds read the line the same way, with BDOS 6 a key at a time, not with BDOS 10: so a key held by the break check is the line's first, and the editing keys are the same on every build.
 - Dividing by zero in an unchecked build returns two cells of no meaning (different on each CPU), and the stack stays balanced.
 - `[` followed by anything but a letter is taken as `[ ` in an unchecked build.
 - The CP/M builds print through BDOS 6, which can't print the byte FFh (it means "read a key" there).

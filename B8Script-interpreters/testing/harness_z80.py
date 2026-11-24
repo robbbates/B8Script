@@ -25,8 +25,8 @@ is a program sitting in a key loop ('?', a line read, the editor), not the
 break check, whose looks are far apart. Keys to be pressed while the program
 is busy are given at once: `brk_at` presses Ctrl-C, and `timed` is a list of
 (n, keys): the keys are pressed once n characters have been printed.
-BDOS 10 is modelled as CP/M does it: Ctrl-C as the first key of a line is a
-warm boot.
+BDOS 10 is modelled as CP/M does it (Ctrl-C as the first key of a line is a
+warm boot), though no build calls it now: every build reads -n? itself.
 """
 import re
 import z80

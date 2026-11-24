@@ -46,7 +46,7 @@ class Ed:
         t = target or {}
         self.disk = t.get('disk', cpm)          # read and write use files
         self.pad = t.get('pad', cpm)            # a written file is padded with ^Z
-        self.refcpm = t.get('refcpm', cpm)      # -n? is BDOS 10
+        self.refcpm = t.get('refcpm', cpm)
         self.build = t.get('build', b'B8SZ80E')
         self.fname = t.get('fname')             # typed name -> the file's name
         self.lines = []                 # the program: each line with its CR LF

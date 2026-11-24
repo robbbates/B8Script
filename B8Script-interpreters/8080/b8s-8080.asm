@@ -140,7 +140,6 @@ KEYBUF  EQU     LET+7Ah         ; gap after z: a key read by the break check and
                                 ;   held for the next '?' (0: none);
 BRKOFF  EQU     LET+7Bh         ;   the break-off cell: a program that stores a
                                 ;   non-zero byte here gets Ctrl-C as a key
-LBHDR   EQU     LET+7Eh         ; CP/M BDOS 10 header: max, count
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
 RSTOP   EQU     RSPAGE*256+0E0h ; empty return stack: the 32 bytes above it
                                 ; take calls made while the data stack is full
@@ -722,31 +721,7 @@ kt3:    MOV     L,A
         MVI     H,0
         RST     6
 
-        IF      CPM
-        ; CP/M: BDOS 10 does the editing (the spec allows the platform's
-        ; own line editor). It doesn't store the CR, so it is added here.
-line:   LXI     D,127           ; TOS is minus the count: adding 127 carries
-        DAD     D               ;   only for 1 to 127, and leaves 127 - count
-        SBB     A
-        ANA     L               ; (0 for a count that is too big)
-        XRI     127             ; A = the count, 127 at most
-        STA     LBHDR
-        PUSH    B
-        LXI     D,LBHDR
-        MVI     C,10
-        CALL    BDOS
-        POP     B
-        LXI     H,LBHDR+1
-        MOV     A,M             ; the count typed (0-127)
-        INR     L               ; HL = LINEBUF, whose low byte is 80h:
-        ADD     L               ;   adding the count to L can't carry
-        MOV     L,A
-        MVI     M,13
-        MVI     L,LINEBUF & 0FFh
-        RST     6
-        ENDIF
-        IFN     CPM
-        ; Generic: Backspace takes the last character back (and is echoed as
+        ; Backspace takes the last character back (and is echoed as
         ; it is), CR ends (stored, not echoed), every other key is stored and
         ; echoed until the line is full. The line buffer starts at offset 80h
         ; of its page, so L alone is the place in the line: D holds the L of
@@ -781,7 +756,6 @@ ln4:    DCR     L               ; Backspace: one back, and echo it,
 ln5:    MOV     M,A             ; the CR
         MVI     L,LINEBUF & 0FFh
         RST     6
-        ENDIF
 
 ; =============================================================================
 ;  Dispatch table: the low byte of each handler's address, in code order.

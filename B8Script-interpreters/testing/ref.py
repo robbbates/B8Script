@@ -133,27 +133,16 @@ class Ref:
 
     def readline(self, n):
         """-n?: read a line of at most n characters, and 127 at the very most.
-        Generic builds: Backspace takes one character back and is echoed as
-        it is; every other key but CR is stored and echoed while there is
-        room. CP/M builds: BDOS 10 does the editing (Backspace and DEL erase
-        with BS, space, BS; other control keys are ignored; a full line ends
-        by itself; CR is echoed)."""
+        Every build (CP/M ones too) reads it the same way: Backspace takes one
+        character back and is echoed as it is; every other key but CR is
+        stored and echoed while there is room; CR ends the line and is stored,
+        not echoed."""
         buf = bytearray()
         n = min(n, 127)
         while True:
             c = self.key()
             if c == CR:
                 break
-            if self.cpm:
-                if c in (8, 127):
-                    if buf:
-                        buf.pop()
-                        self.out += b'\x08 \x08'
-                elif c >= 32:
-                    buf.append(c)
-                    self.emit(c)
-                    if len(buf) == n:   # BDOS 10 ends a full line by itself
-                        break
             elif c == 8:
                 if buf:
                     buf.pop()
@@ -161,8 +150,6 @@ class Ref:
             elif len(buf) < n:
                 buf.append(c)
                 self.emit(c)
-        if self.cpm:
-            self.emit(CR)
         buf.append(CR)
         self.m[self.lb:self.lb + len(buf)] = buf
         return self.lb

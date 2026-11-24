@@ -35,8 +35,8 @@ EDGEN   EQU     EDITOR*(1-CPM)  ; (the generic build with the editor)
                                 ; (IF takes any value but 0 as true, so
                                 ;  IF CHECKED+EDITOR means "either")
 TABP0   EQU     EDGEN*(1-CHECKED) ; (the build with its table in page zero)
-PTLATE  EQU     1-CPM           ; (1: the table goes after psgn and pdec, not
-                                ;   before them: wherever it doesn't cross a
+PTLATE  EQU     1-CPM*EDITOR*(1-CHECKED) ; (1: the table goes after psgn and pdec,
+                                ;   not before them: wherever it doesn't cross a
                                 ;   page. chktab.py says if it does)
 
 ; -----------------------------------------------------------------------------
@@ -161,7 +161,6 @@ KEYBUF  EQU     LET+7Ah         ; gap after z: a key read by the break check and
                                 ;   held for the next '?' (0: none);
 BRKOFF  EQU     LET+7Bh         ;   the break-off cell: a program that stores a
                                 ;   non-zero byte here gets Ctrl-C as a key
-LBHDR   EQU     LET+7Eh         ; CP/M BDOS 10 header: max, count
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
 RSTOP   EQU     RSPAGE*256+0E0h ; empty return stack: the 32 bytes above it
                                 ; take calls made while the data stack is full
@@ -826,27 +825,7 @@ kt3:    LD      L,A
         LD      H,0
         RST     30h
 
-        IF      CPM
-        ; CP/M: BDOS 10 does the editing (the spec allows the platform's
-        ; own line editor). It doesn't store the CR, so it is added here.
-line:   LD      DE,127          ; TOS is minus the count: adding 127 carries
-        ADD     HL,DE           ;   only for 1 to 127, and leaves 127 - count
-        SBC     A,A
-        AND     L               ; (0 for a count that is too big)
-        XOR     127             ; A = the count, 127 at most
-        LD      (LBHDR),A
-        LD      DE,LBHDR
-        LD      A,10
-        CALL    bdosx
-        LD      HL,LBHDR+1
-        LD      A,(HL)          ; the count typed (0-127)
-        INC     L               ; HL = LINEBUF, whose low byte is 80h:
-        ADD     A,L             ;   adding the count to L can't carry
-        LD      L,A
-        LD      (HL),13
-        ENDIF
-        IFN     CPM
-        ; Generic: Backspace takes the last character back (and is echoed as
+        ; Backspace takes the last character back (and is echoed as
         ; it is), CR ends (stored, not echoed), every other key is stored and
         ; echoed until the line is full. The line buffer starts at offset 80h
         ; of its page, so L alone is the place in the line: D holds the L of
@@ -879,7 +858,6 @@ ln4:    DEC     L               ; Backspace: one back, and echo it,
         INC     L               ;   upper half of the page)
         JR      ln2
 ln5:    LD      (HL),A          ; the CR
-        ENDIF
         LD      L,LINEBUF & 0FFh
         RST     30h
 
@@ -1663,7 +1641,7 @@ phalf:  SRL     H
 ;      a line that calls -n? and carries on afterwards runs what was typed.
 ;      (The stored program never comes back to the line, so it may.)
 ;    - The editor's own keys are not the program's: -n? is the plain line
-;      read of the other builds (BDOS 10 under CP/M).
+;      read of the other builds.
 ;
 ;  The data stack is the CPU's stack, so the editor works on top of whatever
 ;  the last line left there, with TOS pushed like the rest.

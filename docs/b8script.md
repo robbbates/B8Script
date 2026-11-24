@@ -165,7 +165,7 @@ Characters marked **†** have a catch, explained under *Marked characters* belo
   - CR ends the line;
   - the line lasts until the next -n?.
 
-  The rest is implementation-defined, so that a platform's own line reader (BDOS 10, a monitor's routine) can be used as it is: how Backspace is echoed, what Delete and other control keys do, whether a full line ends by itself, and whether the CR is echoed. -1? reads one character confirmed with CR. A key that arrives while no ? is running may be lost on machines without a UART; a one-byte UART keeps only the newest.
+  The rest is implementation-defined, so that a platform's own line reader (a monitor's routine, say) can be used, as long as a key held by the break check comes first in the line (see [The break key](#the-break-key)): how Backspace is echoed, what Delete and other control keys do, whether a full line ends by itself, and whether the CR is echoed. -1? reads one character confirmed with CR. A key that arrives while no ? is running may be lost on machines without a UART; a one-byte UART keeps only the newest.
 - `` ` `` **Two jobs, chosen by the next character.** A hex digit (`0`–`9`, `A`–`F` or `a`–`f`) loads bytes; anything else executes. Words `A`–`F` and variables `a`–`f` right after a grave count as hex, so to execute when one follows, put a space after the grave: `` x@` b@ ``.
 
 Besides digits, four characters look at the text after them: `"`, `-`, `[` and `` ` ``.
@@ -795,7 +795,7 @@ This section is a suggestion, so that line editors on different machines feel al
 
 - **Esc and arrow keys.** A lone Esc cancels. Arrow keys send Esc `[` and a letter, so after Esc the editor waits about 5 ms for another key; if `[` follows, it reads the sequence, acts on right and left, and ignores the rest.
 - **Keys to avoid.** ^S and ^Q are XON/XOFF flow control on many serial links and may never reach the program. ^Z is CP/M's end of file. ^I is Tab, which programs may use for indentation. ^H, ^J and ^M are Backspace, LF and CR.
-- **Its own line reader.** The editor reads keys itself, rather than through an OS line reader such as BDOS 10, which would swallow the command keys. `-n?` may still use the OS reader.
+- **Its own line reader.** The editor reads keys itself, rather than through an OS line reader such as CP/M's BDOS 10, which would swallow the command keys.
 - **After a run, an error or a break,** the editor comes back with words and variables kept. After an error or break both stacks are cleared.
 
 ### The screen editor

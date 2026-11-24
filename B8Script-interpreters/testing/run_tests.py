@@ -100,8 +100,6 @@ def break_tests(off):
 def check_break(runner, checked, off, verbose=False):
     fails = 0
     for n, p, i, timed, exp in break_tests(off):
-        if n == 'b_line' and getattr(runner, 'os_line', False):
-            continue                    # the OS reads the line there (BDOS 10), and Ctrl-C is its own affair
         out, ended = runner(p, i, timed=timed)
         if exp is not None:
             ok = out == exp

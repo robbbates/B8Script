@@ -102,8 +102,9 @@ EXIT    EQU     0FF09h          ; where to go when the program ends
 ;   Both are called with JSR. They may change A and CC and must preserve
 ;   B, X, Y, U and DP.
         IF      1-ANSI
-; With ANSI = 0 the console escapes of '$' call these, with JSR. All four
-; may change A, B, X and CC, and must keep Y, U and DP.
+; With ANSI = 0 the console escapes of '$' call these as subroutines (each
+; ends with RTS). All four may change A, B, X and CC, and must keep Y, U
+; and DP.
 CONCLS  EQU     0FF0Ch          ; /{  clear the screen, the cursor to the top left
 CONEOL  EQU     0FF0Fh          ; /}  clear from the cursor to the end of the line
 CONCUR  EQU     0FF12h          ; /| and /`  show the cursor if A is not 0, hide
@@ -165,13 +166,13 @@ sz:     CLR     ,X+
         DECB
         BNE     sz
         ENDIF
-        LDY     #PROG           ; the reading position
         IF      1-CHECKED
         CLR     <KEYBUF         ; no key held
         CLR     <BRKOFF         ; the break key is on
-        TFR     Y,X             ; the heap starts after the program's NUL
+        LDX     #PROG
         ENDIF
-sc:     LDA     ,X+
+        TFR     X,Y             ; the reading position; the heap starts
+sc:     LDA     ,X+             ;   after the program's NUL
         BNE     sc
         TFR     X,D
         STB     <HEAP           ; (little-endian)
@@ -342,8 +343,6 @@ rdnum:  CLRA
         PSHU    D
 rd1:    BSR     isdig
         BHS     ab9
-        LEAY    1,Y
-        PSHS    A
         LDD     ,U
         ASLB
         ROLA
@@ -352,8 +351,10 @@ rd1:    BSR     isdig
         ADDD    ,U              ; 5V
         ASLB
         ROLA                    ; 10V
-        ADDB    ,S+
+        ADDB    ,Y+             ; and the digit, read again
         ADCA    #0
+        SUBD    #30h            ; minus '0' (asm80 would put a quoted '0'
+                                ;   in the high byte of a 16-bit operand)
         STD     ,U
         BRA     rd1
 
@@ -915,16 +916,40 @@ h_emit: LDA     1,U             ; "'"
 h_drop: LEAU    2,U             ; ';'
         RTS
 
+; ---- more arithmetic ---------------------------------------------------------
+
+h_and:  LDD     ,U++
+        ANDA    ,U
+        ANDB    1,U
+        BRA     st
+
+h_add:  LDD     ,U++
+        ADDD    ,U
+st:     STD     ,U
+        RTS
+
+; '-' has two jobs: directly before a digit it starts a negative number.
+; (The checked build has it in the tail, near negnum: its report would be
+; in the way here.)
+        IF      1-CHECKED
+h_sub:  JSR     isdig
+        BLO     negnum
+        LDD     2,U
+        SUBD    ,U++
+        BRA     st
+        ENDIF
+
 ; '!' ( n addr -- ) is '.' with the high byte stored first. The cell in
 ; memory is little-endian.
 ; Checked: both bytes must be in the program's space, and they are tested
 ; before either is stored (chkst stops with O, the stack untouched).
-h_store:LDX     ,U
         IF      1-CHECKED
-        LDA     2,U
+h_store:PULU    X
+        LDA     ,U
         STA     1,X
         ENDIF
         IF      CHECKED
+h_store:LDX     ,U
         BSR     chkst
         LEAX    1,X
         BSR     chkst
@@ -933,13 +958,14 @@ h_store:LDX     ,U
         ; and fall into '.', which loads X again (and checks it again)
         ENDIF
         IF      1-CHECKED
-        FCB     8Ch             ; (CMPX #: steps over the LDX)
+        FCB     8Ch             ; (CMPX #: steps over the PULU)
+h_cstore:PULU   X               ; '.' ( c addr -- )
         ENDIF
-h_cstore:LDX    ,U              ; '.' ( c addr -- )
         IF      CHECKED
+h_cstore:LDX    ,U              ; '.' ( c addr -- )
         BSR     chkst
-        ENDIF
         LEAU    2,U
+        ENDIF
         PULU    D
         STB     ,X
         RTS
@@ -1030,7 +1056,7 @@ lc3:    LDD     <AT
         SUBD    ,U
         STD     ,U              ; the column
         PSHU    Y
-        JSR     pdec            ; the line
+        BSR     pdec            ; the line
         BSR     pmsg
         FCB     ','+80h
         BSR     pdec            ; the column
@@ -1098,57 +1124,26 @@ h_num:  TST     ,U
 ; pdec: print the top cell as unsigned and drop it, by recursion on /10
 pdec:   LDD     #10
         PSHU    D
+        IF      1-CHECKED
         BSR     udiv            ; NOS = quotient, TOS = digit
+        ENDIF
+        IF      CHECKED
+        LBSR    udiv            ; (out of a BSR's reach here)
+        ENDIF
         PULU    D               ; the digit
         PSHS    B
-        LDD     ,U
-        BEQ     pd1
-        BSR     pdec            ; (it drops the quotient)
-        FCB     8Ch             ; (CMPX #: steps over the LEAU)
-pd1:    LEAU    2,U             ; drop the zero quotient
-        PULS    A
+        LDD     ,U++            ; the quotient: if it is not 0, it goes
+        BEQ     pd1             ;   back for the rest of the digits
+        PSHU    D
+        BSR     pdec
+pd1:    PULS    A
         ADDA    #'0'            ; and fall into putc
 
 putc:   JMP     CONOUT
 
-; ---- more arithmetic ---------------------------------------------------------
-
-h_and:  LDD     ,U++
-        ANDA    ,U
-        ANDB    1,U
-        BRA     st
-
-h_add:  LDD     ,U++
-        ADDD    ,U
-st:     STD     ,U
-        RTS
-
-; '-' has two jobs: directly before a digit it starts a negative number.
-h_sub:  JSR     isdig
-        BLO     negnum
-        LDD     2,U
-        SUBD    ,U++
-        BRA     st
-
-; '$' prints the string at TOS, decoding escapes: '/' plus a character from
-; 60h to 7Eh is one of the escapes at pesc; '/' plus any other character
-; clears that character's bit 6 (/M is CR, /? is DEL's '?'; '/' and '"' have
-; no bit 6, so // and /" give themselves). The address comes off the stack
-; first, and Y walks the string (the IP waits on S), so that /~ finds its
-; row and column on top, and an escape may use A, B, X and the routines.
-; Checked: a NUL (not one escaped by '/') stops with Q, the string's
-; address put back on the stack (from PSAV) over what any /~ left.
-; (The loop is with the tail, past the second range.)
-h_print:PSHS    Y
-        PULU    Y
-        IF      CHECKED
-        STY     <PSAV
-        ENDIF
-        BRA     pr0
-
 ; ---- the tail ---------------------------------------------------------------
-; '/' is the last handler, so what follows its first byte may lie past the
-; second range: the divide itself and the routines after it.
+; '$' is the last handler, so what follows its first byte may lie past the
+; second range: its loop, the escapes, and the routines of '/'.
 
 ; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
@@ -1176,12 +1171,58 @@ dv1:    TST     ,S+
         BPL     ng9
         BRA     negt            ; r's sign
 
+; '$' prints the string at TOS, decoding escapes: '/' plus a character from
+; 60h to 7Eh is one of the escapes at pesc; '/' plus any other character
+; clears that character's bit 6 (/M is CR, /? is DEL's '?'; '/' and '"' have
+; no bit 6, so // and /" give themselves). The address comes off the stack
+; first, and Y walks the string (the IP waits on S), so that /~ finds its
+; row and column on top, and an escape may use A, B, X and the routines.
+; Checked: a NUL (not one escaped by '/') stops with Q, the string's
+; address put back on the stack (from PSAV) over what any /~ left.
+h_print:PSHS    Y
+        PULU    Y
+        IF      CHECKED
+        STY     <PSAV
+        ENDIF
+pr0:    LDA     ,Y+
+        IF      CHECKED
+        BEQ     prq
+        ENDIF
+        CMPA    #22h
+        BEQ     pr9
+        CMPA    #'/'
+        BNE     pr1
+        LDA     ,Y+
+        SUBA    #60h            ; ` 0, a-z 1-26, { 27, | 28, } 29, ~ 30
+        CMPA    #1Fh
+        BHS     pr2
+        BSR     pesc
+        BRA     pr0
+pr2:    ADDA    #60h            ; any other: bit 6 goes
+        ANDA    #0BFh
+pr1:    BSR     putc
+        BRA     pr0
+pr9:    PULS    Y,PC
+        IF      CHECKED
+prq:    LDX     <PSAV
+        PSHU    X
+        JMP     e_quote
+        ENDIF
+
+; '-', checked build (see the unchecked one, before '!').
+        IF      CHECKED
+h_sub:  JSR     isdig
+        BLO     negnum
+        LDD     2,U
+        SUBD    ,U++
+        BRA     ud3             ; (STD ,U / RTS)
+        ENDIF
+
 negnum: JSR     rdnum           ; a negative literal: read it, then negate
 negt:   TFR     U,X
-negx:   LDD     ,X              ; negx: negate the cell at X
-        NEGA
-        NEGB
-        SBCA    #0
+negx:   CLRA                    ; negx: negate the cell at X
+        CLRB
+        SUBD    ,X
         STD     ,X
 ng9:    RTS
 absx:   TST     ,X              ; absx: negate the cell at X if negative
@@ -1215,32 +1256,6 @@ ud2:    LEAX    -1,X
         BNE     ud1
 ud3:    STD     ,U
         RTS
-
-; The loop of '$' (see h_print).
-pr0:    LDA     ,Y+
-        IF      CHECKED
-        BEQ     prq
-        ENDIF
-        CMPA    #22h
-        BEQ     pr9
-        CMPA    #'/'
-        BNE     pr1
-        LDA     ,Y+
-        SUBA    #60h            ; ` 0, a-z 1-26, { 27, | 28, } 29, ~ 30
-        CMPA    #1Fh
-        BHS     pr2
-        BSR     pesc
-        BRA     pr0
-pr2:    ADDA    #60h            ; any other: bit 6 goes
-        ANDA    #0BFh
-pr1:    JSR     CONOUT
-        BRA     pr0
-pr9:    PULS    Y,PC
-        IF      CHECKED
-prq:    LDX     <PSAV
-        PSHU    X
-        JMP     e_quote
-        ENDIF
 
 ; pesc: the escapes of '$'. A = the character after the '/', minus 60h
 ; (0 to 30); Y points past it. Each returns to the loop with an RTS, its

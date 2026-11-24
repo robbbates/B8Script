@@ -82,7 +82,7 @@ def windows_only(exe, checked, editor, verbose):
             o = r.run()
             ms = r.waited
             ok(o == b'07' and ((1000 <= ms <= 1060) if hires else (1550 <= ms <= 1650))
-               and (r.calls.get('WaitForMultipleObjects', 0) >= 51) == hires
+               and (r.timerwaits >= 51) == hires
                and (r.calls.get('SetWaitableTimer', 0) >= 51) == hires,
                f'51 waits of 20 ms (timer: {hires}, waited {ms} ms)', r)
             r = Run(exe, b'1000?#', b'', timed=[(0, b'k')], hires=hires)

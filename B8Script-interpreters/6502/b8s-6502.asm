@@ -94,9 +94,6 @@ KEYBUF  EQU     LET+7Ah         ; a key held back by the break check (0: none)
 ; The error report runs after the program, so it may use the zero page that
 ; machine code has ($0A-$0F):
 CL      EQU     0Ah             ; 0A-0B the column being reported
-; '$' keeps the string's address meanwhile, for a Q report, in $0C-$0D
-; (machine code can't run while '$' does):
-PSAVE   EQU     0Ch
         ENDIF
 
 ; -----------------------------------------------------------------------------
@@ -227,7 +224,8 @@ next:
         ; it at 1Eh or 1Fh, an underflow wraps it to 01h (no handler pulls
         ; more than one entry). The data stack has when X is above DSE: an
         ; underflow moves X up to FDh or FEh (no handler moves X by more
-        ; than 2), and an overflow wraps it from 00h to FFh.
+        ; than 2, but '$', whose /~ escapes each look first), and an
+        ; overflow wraps it from 00h to FFh.
         ; S is kept in RSV, for the report's Rtn line (an error found inside
         ; a handler has its own calls on the hardware stack), and the place
         ; of the character about to run in PLACE.
@@ -610,10 +608,13 @@ sk3:    INC     D1
 sknul:  LDA     T0
         BNE     e_nest          ; ( and [ stop with N
         JMP     EXIT            ; \ ends the program
-e_qpr:  LDA     PSAVE           ; '$' ran into the end: the string's address
-        STA     TL              ;   is TOS again
-        LDA     PSAVE+1
+; The end of '$' (h_print): the string's address goes back into TOS; then a
+; closing quote drops it, and a NUL (the carry clear) is Q.
+pq:     PLA
+        STA     TL
+        PLA
         STA     TH
+        BCS     pdrop
 e_quote:LDA     #'Q'            ; a string runs into the end
         DB      2Ch             ; (BIT abs: hides the next instruction)
 e_nest: LDA     #'N'            ; a skip from ( or [ found the wrong closer
@@ -664,12 +665,13 @@ ss1:    CMP     #22h
 ; 60h to 7Eh is one of the escapes at pesc; '/' plus any other character
 ; clears that character's bit 6 (/M is CR, /? is DEL's '?'; '/' and '"' have
 ; no bit 6, so // and /" give themselves). TOS walks along the string; the
-; checked build keeps the address in PSAVE meanwhile, for a Q report.
+; checked build keeps the address on the hardware stack meanwhile, for a Q
+; report (see pq).
         IF      CHECKED
-h_print:LDA     TL
-        STA     PSAVE
-        LDA     TH
-        STA     PSAVE+1
+h_print:LDA     TH
+        PHA
+        LDA     TL
+        PHA
         BCC     pr0             ; always: the carry is clear on the way in
         ENDIF
         IF      1-CHECKED
@@ -678,10 +680,13 @@ h_print EQU     pr0
 pesc0:  JSR     pesc            ; (an escape, and back into the loop)
 pr0:    JSR     tosget
         CMP     #22h
+        IF      1-CHECKED
         BEQ     pdrop
+        ENDIF
         IF      CHECKED
+        BEQ     pq              ; the closing quote, with the carry set
         TAY                     ; (Y is free here)
-        BEQ     e_qpr
+        BEQ     pq              ; a NUL, with the carry clear
         ENDIF
         CMP     #'/'
         BNE     pr1
@@ -697,33 +702,6 @@ pr1:    JSR     CONOUT
 h_emit: LDA     TL              ; "'"
         JSR     CONOUT
 pdrop:  JMP     drop
-
-; '#' prints TOS as a signed decimal number, with no space after it. The
-; digits are divided off and held on the hardware stack, ended by a 0. udiv
-; leaves each remainder in the NOS cell, so a spare cell is opened for it.
-h_num:  LDA     TH
-        BPL     pn1
-        LDA     #'-'
-        JSR     CONOUT
-        JSR     neg
-pn1:    DEX                     ; the spare cell
-        LDA     #10
-        STA     D0
-        LDA     #0
-        STA     D1
-        PHA                     ; the end marker
-pn2:    JSR     udiv
-        LDA     DSL,X
-        ORA     #'0'
-        PHA
-        LDA     TL
-        ORA     TH
-        BNE     pn2
-        INX
-pn3:    PLA
-        BEQ     pdrop
-        JSR     CONOUT
-        JMP     pn3
 
 ; tosget: A = the byte at TOS, and TOS moves on.  inctos: TOS moves on.
 tosget: LDY     #0
@@ -741,43 +719,27 @@ tg1:    RTS
 ;    /|  /`  show the cursor, hide it
 ;    /~      ( row col addr -- addr ): the cursor to that row and column,
 ;            from 0. The two cells under TOS (the string's address) go.
+; A - 7Bh sorts them: { 0, | 1, } 2, ~ 3 with the carry set, and ` E5h, a-z
+; E6h-FFh with it clear.
         IF      1-ANSI
-pesc:   SBC     #7Ah            ; (the carry is clear: - 7Bh) { 0, | 1, } 2,
-        BCC     pe1             ;   ~ 3, with the carry; ` and a-z: E5h-FFh
+; With ANSI = 0 the machine's routines do the work.
+pesc:   SBC     #7Ah            ; (the carry is clear: - 7Bh)
+        BCC     pe1
         BEQ     pcls            ; {
         LSR                     ; | 0, } 1, ~ 1; the carry set for | and ~
         BEQ     pcur            ; |  show: the carry is set
         BCS     pat             ; ~
         JMP     CONEOL          ; }
 pcls:   JMP     CONCLS
-pe1:    CMP     #0E6h           ; ` is E5h
-        BCC     pcur            ; `  hide: the carry is clear
-        ADC     #39h            ; a-z: A = the letter - 41h, as step has it
-        JSR     lower           ;   for lower: the variable's address,
-        JSR     h_fetch         ;   its value,
-        JMP     h_num           ;   printed (and TOS is the string again)
-pcur:   JMP     CONCUR
-pat:
+pe1:    CMP     #0E6h
+        BCS     pvar
+pcur:   JMP     CONCUR          ; `  hide: the carry is clear
         ENDIF
-        IF      (1-ANSI)*CHECKED
-        CPX     #DSE-2          ; fewer than two cells under TOS: s
-        BCS     e_atu
-        ENDIF
-        IF      (1-ANSI)
-        LDY     DSL,X           ; the column
-        LDA     DSL+1,X         ; the row
-        INX
-        INX
-        JMP     CONAT
-        ENDIF
-        IF      (1-ANSI)*CHECKED
-e_atu:  JMP     e_stack         ; (X is FAh-FCh: an underflow)
-        ENDIF
-
         IF      ANSI
+; With ANSI = 1 they are sequences, each a message at MSG (see prs).
 pesc:   LDY     #M_CLS-MSG
-        SBC     #7Ah            ; (the carry is clear: - 7Bh) { 0, | 1, } 2,
-        BCC     pe1             ;   ~ 3, with the carry; ` and a-z: E5h-FFh
+        SBC     #7Ah            ; (the carry is clear: - 7Bh)
+        BCC     pe1
         BEQ     prs             ; {  ESC [ H ESC [ J
         LDY     #M_SHOW-MSG
         LSR                     ; | 0, } 1, ~ 1; the carry set for ~
@@ -785,29 +747,33 @@ pesc:   LDY     #M_CLS-MSG
         BCS     pat             ; ~
         LDY     #M_EOL-MSG      ; }  ESC [ K
         BNE     prs             ; always
-pe1:    CMP     #0E6h           ; ` is E5h
+pe1:    CMP     #0E6h
         BCS     pvar
         LDY     #M_HIDE-MSG     ; `  ESC [ ? 2 5 l
         BNE     prs             ; always
-pvar:   ADC     #39h            ; a-z: A = the letter - 41h, as step has it
-        JSR     lower           ;   for lower: the variable's address,
-        JSR     h_fetch         ;   its value,
-        JMP     h_num           ;   printed (and TOS is the string again)
-; /~ sends ESC [ row+1 ; col+1 H (ANSI counts from 1). The row's cell and TOS
-; change places first: then '#' prints the row and drops it, prints the
-; column and drops it, and TOS is the string's address again.
-pat:
         ENDIF
-        IF      ANSI*CHECKED
+; /~: the column is NOS, the row the cell under it.
+pat:
+        IF      CHECKED
         CPX     #DSE-2          ; fewer than two cells under TOS: s
         BCS     e_atu
         ENDIF
+        IF      1-ANSI
+        LDY     DSL,X           ; the column
+        LDA     DSL+1,X         ; the row
+        INX
+        INX
+        JMP     CONAT
+        ENDIF
         IF      ANSI
+; ESC [ row+1 ; col+1 H (ANSI counts from 1). The row's cell and TOS change
+; places first: then '#' prints the row and drops it, prints the column and
+; drops it, and TOS is the string's address again.
         INX
         JSR     h_swap
         DEX
         LDY     #M_CSI-MSG
-        JSR     prs
+        JSR     prs             ; ESC [
         JSR     inctos
         JSR     h_num           ; the row + 1
         LDA     #';'
@@ -817,9 +783,39 @@ pat:
         LDA     #'H'
         JMP     CONOUT
         ENDIF
-        IF      ANSI*CHECKED
+        IF      CHECKED
 e_atu:  JMP     e_stack         ; (X is FAh-FCh: an underflow)
         ENDIF
+; a-z: the carry is set. A + 3Ah is the letter - 41h, as step hands it to
+; lower: that pushes the variable's address, '@' fetches it, and '#' (next)
+; prints it and drops it: TOS is the string's address again.
+pvar:   ADC     #39h
+        JSR     lower
+        JSR     h_fetch
+
+; '#' prints TOS as a signed decimal number, with no space after it. The
+; digits are divided off and held on the hardware stack, ended by a 0.
+h_num:  LDA     TH
+        BPL     pn1
+        LDA     #'-'
+        JSR     CONOUT
+        JSR     neg
+pn1:    LDA     #10
+        STA     D0
+        LDA     #0
+        STA     D1
+        PHA                     ; the end marker
+pn2:    JSR     udiv
+        LDA     T0              ; the remainder
+        ORA     #'0'
+        PHA
+        LDA     TL
+        ORA     TH
+        BNE     pn2
+pn3:    PLA
+        BEQ     pdrop
+        JSR     CONOUT
+        JMP     pn3
 
         IF      CHECKED+ANSI
 ; prs: print the message at MSG+Y; its last byte has bit 7 set. Y ends just
@@ -903,7 +899,7 @@ rd1:    JSR     incip           ; (keeps A = the digit)
         STA     T0
         LDA     TH
         ADC     #0
-        STA     T1              ; T = x2 + digit
+        TAY                     ; Y:T0 = x2 + digit
         ASL     TL
         ROL     TH
         ASL     TL
@@ -912,8 +908,8 @@ rd1:    JSR     incip           ; (keeps A = the digit)
         LDA     TL
         ADC     T0
         STA     TL
-        LDA     TH
-        ADC     T1
+        TYA
+        ADC     TH
         STA     TH              ; x8 + x2 + digit
 rdnum:  JSR     isdig
         BCC     rd1
@@ -1126,9 +1122,9 @@ h_swap: LDY     DSL,X           ; '%'
         RTS
 
 ; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
-; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
-; of a. Unchecked, dividing by zero returns two cells of no meaning; checked,
-; it stops with Z.
+; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b, r is pushed
+; and gets the sign of a. Unchecked, dividing by zero returns two cells of no
+; meaning; checked, it stops with Z.
 h_div:
         IF      CHECKED
         LDA     TL
@@ -1144,13 +1140,14 @@ h_div:
         STA     D0
         LDA     TH
         STA     D1              ; D = |b|
-        JSR     drop            ; TOS = a (its cell stays, for udiv)
-        DEX
+        JSR     drop            ; TOS = a
         JSR     absv            ; TOS = |a|
-        JSR     udiv            ; TOS = q, NOS = r
+        JSR     udiv            ; TOS = q, T0/T1 = r
         PLA
         JSR     negm            ; q's sign
-        JSR     h_swap          ; r on top
+        LDA     T0
+        LDY     T1
+        JSR     pushay          ; r on top
         PLA
         JMP     negm            ; r's sign
 
@@ -1221,39 +1218,42 @@ chkst:  CMP     #LETPAGE
         RTS
         ENDIF
 
-; udiv: unsigned TOS / D (D <= 8000h). TOS becomes the quotient and the NOS
-; cell the remainder (whatever was there is lost).
+; udiv: unsigned TOS / D (D <= 8000h). TOS becomes the quotient and T0/T1
+; the remainder. The low byte of each trial subtraction waits on the
+; hardware stack.
 ; Dividing by 2 is one shift (the spec wants that fast).
 udiv:   LDA     #0
-        STA     DSL,X
-        STA     DSH,X
+        STA     T0
+        STA     T1
         LDA     D0
         EOR     #2
         ORA     D1
         BNE     ud0
         LSR     TH
         ROR     TL              ; the quotient
-        ROL     DSL,X           ; the remainder: the bit that fell out
+        ROL     T0              ; the remainder: the bit that fell out
         RTS
 ud0:    LDY     #16
 ud1:    ASL     TL
         ROL     TH
-        ROL     DSL,X
-        ROL     DSH,X
+        ROL     T0
+        ROL     T1
         SEC
-        LDA     DSL,X
+        LDA     T0
         SBC     D0
-        STA     T0
-        LDA     DSH,X
+        PHA
+        LDA     T1
         SBC     D1
         BCC     ud2
-        STA     DSH,X
-        LDA     T0
-        STA     DSL,X
+        STA     T1
+        PLA
+        STA     T0
         INC     TL              ; the quotient bit (TL's bit 0 is free)
-ud2:    DEY
+        DB      24h             ; (BIT zp: steps over the PLA)
+ud2:    PLA
+        DEY
         BNE     ud1
-ud9:    RTS
+        RTS
 
 ; =============================================================================
 ;  Console
@@ -1424,18 +1424,19 @@ er2:    LDY     #M_STK-MSG
         BCC     er3
         LDA     #8              ; more than 8: ": ..." and the top 8
         LDY     #M_CD-MSG
-er3:    STA     T1              ; T1 = how many cells to show
+er3:    STA     T2              ; T2 = how many cells to show (the place
+                                ;   is no longer needed)
         JSR     prs
         JSR     push            ; TOS into memory with the rest: cell i from
                                 ;   the top is at DSL+X+i now
-er4:    LDA     T1              ; cells T1-1 down to 0, the top last
+er4:    LDA     T2              ; cells T2-1 down to 0, the top last
         BEQ     er5
-        DEC     T1
+        DEC     T2
         LDA     #' '
         JSR     CONOUT
         TXA
         CLC
-        ADC     T1
+        ADC     T2
         TAY
         LDA     DSL,Y
         PHA

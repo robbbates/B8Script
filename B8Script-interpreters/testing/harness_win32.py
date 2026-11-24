@@ -8,9 +8,11 @@ first byte is hooked, so that the kernel32 function is done in Python just
 before the RET runs. The functions modelled are the ones the builds import
 (chkpe.py lists them): GetStdHandle, GetConsoleMode, SetConsoleMode,
 GetCommandLineA, CreateFileA, ReadFile, WriteFile, CloseHandle,
-WaitForSingleObject, ReadConsoleInputA, GetTickCount, ExitProcess. Anything
+WaitForSingleObject, WaitForMultipleObjects, CreateWaitableTimerExW,
+SetWaitableTimer, ReadConsoleInputA, GetTickCount, ExitProcess. Anything
 else the program calls, or a fault, ends the run. (The builds no longer
-import GetTickCount; it is kept here for a build that may.)
+import GetTickCount or WaitForSingleObject; they are kept here for a build
+that may.)
 
 Run(exe, prog, inp, timed=(), mode='runner', files=None, cmdline=None)
   mode 'runner': the program is the file PROG.B8S, named on the command
@@ -27,9 +29,11 @@ Run(exe, prog, inp, timed=(), mode='runner', files=None, cmdline=None)
   input handle). .modes lists the SetConsoleMode calls. With `outcon=False`
   standard output is not a console (redirected), so SetConsoleMode fails on it.
   With `hires=False` CreateWaitableTimerExW fails, as on Windows before 10
-  1803, and the timed waits are plain WaitForSingleObject ones. .calls counts
-  the calls of each function. A plain timed wait lasts to the next 15.625 ms
-  tick, as on Windows, so 1? there takes about 16 ms.
+  1803, and the timed waits are plain ones (WaitForSingleObject, or
+  WaitForMultipleObjects on the input alone). .calls counts the calls of
+  each function; .timerwaits the waits on the input and the timer. A plain
+  timed wait lasts to the next 15.625 ms tick, as on Windows, so 1? there
+  takes about 16 ms.
 
 Keys are typed as a person types them: a key of the input is given only
 when the program waits for one, which is a wait on the input handle with a
@@ -125,6 +129,7 @@ class Run:
         self.hires = hires              # the high-resolution timer exists
         self.tdue = None                # when the timer is due (ms, by now())
         self.calls = {}                 # how often each function was called
+        self.timerwaits = 0             # waits on the input and the timer
         if files is None:
             files = {b'PROG.B8S': prog} if mode == 'runner' else {}
         self.files = files
@@ -348,9 +353,13 @@ class Run:
 
     def k_WaitForMultipleObjects(self, n, ph, waitall, t):
         hs = [self.d(ph + 4 * i) for i in range(n)]
+        if hs == [HIN] and not waitall:
+            # the input alone: as WaitForSingleObject on it
+            return self.k_WaitForSingleObject(HIN, t)
         if hs != [HIN, HTIMER] or waitall or t != INFINITE or self.tdue is None:
             self.stop(f'fault WaitForMultipleObjects({hs}, {waitall}, {t:#x})')
             return 0xFFFFFFFF
+        self.timerwaits += 1
         # the input first, as Windows gives the lowest signalled index; the
         # timer ends the wait when its time is up
         return 0 if self.look(max(0, self.tdue - self.now())) else 1

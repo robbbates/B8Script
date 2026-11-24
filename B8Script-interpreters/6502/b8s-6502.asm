@@ -93,7 +93,7 @@ RSV     EQU     LET+35h         ; S as it was before this character
 KEYBUF  EQU     LET+7Ah         ; a key held back by the break check (0: none)
 ; The error report runs after the program, so it may use the zero page that
 ; machine code has ($0A-$0F):
-CL      EQU     0Ah             ; 0A-0B the column being reported
+CL      EQU     0Ah             ; 0A-0B where the reported line starts
         ENDIF
 
 ; -----------------------------------------------------------------------------
@@ -615,6 +615,9 @@ pq:     PLA
         PLA
         STA     TH
         BCS     pdrop
+        CPX     #DSE            ; a NUL: Q, unless '$' had nothing on the
+        LDA     #'s'            ;   stack at all (X at the empty mark): s
+        BCS     ejmp2
 e_quote:LDA     #'Q'            ; a string runs into the end
         DB      2Ch             ; (BIT abs: hides the next instruction)
 e_nest: LDA     #'N'            ; a skip from ( or [ found the wrong closer
@@ -1381,23 +1384,62 @@ exec:   LDA     TL
 ;   up to 16 characters from the place, raw, up to a CR, LF or NUL  CR LF
 ;   Stk n: [...] and the top 8 cells at most, bottom to top  CR LF
 ;   Rtn n CR LF
-; The numbers go through '#' (prnum), which pushes them over the data stack
-; and pops them again, so the stack is shown as it was.
+; The numbers go through '#' (h_num), each pushed over the data stack first
+; and popped again by '#', so the stack is shown as it was.
 error:  PHA                     ; the letter
         LDY     #M_ERR-MSG
         JSR     prs             ; CR LF "Err "
         PLA
         JSR     CONOUT
         JSR     prs             ; " @ " (it follows M_ERR)
-        JSR     lcol
-        LDA     D0
-        LDY     D1
-        JSR     prnum           ; the line
+; The line and the column of the place, both from 1. The line is counted in
+; a cell pushed over the data stack (TOS). A place below the program is in
+; the -n? line buffer: line 0, and the column is the place in the buffer.
+; Otherwise IP (free now: the program has stopped) runs from PROG to the
+; place, counting LFs; CL keeps where the last line started, and the column
+; is the place minus that, plus 1.
+        LDA     #<LINEBUF
+        STA     CL
+        LDA     #>LINEBUF
+        STA     CL+1
+        LDA     #0
+        TAY
+        JSR     pushay          ; TOS = the line, 0 so far
+        LDA     PLACE
+        CMP     #<PROG
+        LDA     PLACE+1
+        SBC     #>PROG
+        BCC     lc9             ; below the program: line 0
+        INC     TL
+        JSR     rstip
+lc3:    LDA     IP              ; a line starts here
+        STA     CL
+        LDA     IP+1
+        STA     CL+1
+lc1:    LDA     IP
+        CMP     PLACE
+        LDA     IP+1
+        SBC     PLACE+1
+        BCS     lc9             ; at the place
+        JSR     getc
+        CMP     #10
+        BNE     lc1
+        JSR     inctos          ; an LF: a new line starts after it
+        BNE     lc3             ; always (Z clear: fewer than 65536 lines)
+lc9:    JSR     h_num           ; the line (and it is dropped)
         LDA     #','
         JSR     CONOUT
-        LDA     CL
-        LDY     CL+1
-        JSR     prnum           ; the column
+        SEC
+        LDA     PLACE
+        SBC     CL
+        PHA
+        LDA     PLACE+1
+        SBC     CL+1
+        TAY
+        PLA
+        JSR     pushay
+        JSR     inctos          ; + 1
+        JSR     h_num           ; the column
         LDY     #M_NL-MSG
         JSR     prs
         LDY     #0              ; the text at the place
@@ -1462,50 +1504,4 @@ prnum8: LDY     #0
 prnum:  JSR     pushay
         JMP     h_num
 
-; lcol: the line (D0/D1) and the column (CL) of the place, both from 1. A
-; place below the program is in the -n? line buffer: line 0, and the column
-; is the place in the buffer. Otherwise IP (free now: the program has
-; stopped) runs from PROG to the place, counting LFs; CL keeps where the
-; last line started, and the column is the place minus that, plus 1.
-lcol:   LDA     #0
-        STA     D1
-        STA     D0
-        LDA     #<LINEBUF
-        STA     CL
-        LDA     #>LINEBUF
-        STA     CL+1
-        LDA     PLACE
-        CMP     #<PROG
-        LDA     PLACE+1
-        SBC     #>PROG
-        BCC     lc9             ; below the program: line 0
-        INC     D0
-        JSR     rstip
-lc3:    LDA     IP              ; a line starts here
-        STA     CL
-        LDA     IP+1
-        STA     CL+1
-lc1:    LDA     IP
-        CMP     PLACE
-        LDA     IP+1
-        SBC     PLACE+1
-        BCS     lc9             ; at the place
-        JSR     getc
-        CMP     #10
-        BNE     lc1
-        INC     D0              ; an LF: a new line starts after it
-        BNE     lc3
-        INC     D1
-        BNE     lc3             ; always
-lc9:    LDA     PLACE
-        SEC
-        SBC     CL
-        STA     CL
-        LDA     PLACE+1
-        SBC     CL+1
-        STA     CL+1
-        INC     CL              ; + 1
-        BNE     lc8
-        INC     CL+1
-lc8:    RTS
         ENDIF

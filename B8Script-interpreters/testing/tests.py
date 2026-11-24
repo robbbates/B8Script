@@ -165,6 +165,8 @@ ERRS = [
     ('e_atund2', b'5"/~x"$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
     ('e_atund3', b'1 2"/~/~/~/~/~x"$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
     ('e_atund4', b'[A 1 2 3 "/~/~"$ "no"$] A "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 1\r\n'),
+    # $ with nothing on the stack at all: s (it may print junk first)
+    ('e_dollar0', b'$ "no"$', b'', rb'.*' + PLACE % b's' + rb'Stk 0:\r\nRtn 0\r\n'),
     # $ running into a NUL after /~ took its two cells: the stack shows the rest
     ('e_atq', b'4_x! 47x@. 126x@1+. 65x@2+. 0x@3+. 1 2 3 4 x@$ "no"$', b'', None),
     # ... and when a /~ took cells that weren't there first, it is s (found

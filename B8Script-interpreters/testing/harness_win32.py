@@ -12,7 +12,8 @@ WaitForSingleObject, WaitForMultipleObjects, CreateWaitableTimerExW,
 SetWaitableTimer, ReadConsoleInputA, GetTickCount, ExitProcess. Anything
 else the program calls, or a fault, ends the run. (The builds no longer
 import GetTickCount or WaitForSingleObject; they are kept here for a build
-that may.)
+that may.) Each call returns its result in EAX and spoils ECX and EDX, which
+the Windows API need not keep, so a build that counts on them fails here.
 
 Run(exe, prog, inp, timed=(), mode='runner', files=None, cmdline=None)
   mode 'runner': the program is the file PROG.B8S, named on the command
@@ -57,7 +58,8 @@ with the end of the input.
 import os, re, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from unicorn import Uc, UcError, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE, UC_PROT_ALL
-from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ESP, UC_X86_REG_EIP
+from unicorn.x86_const import (UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EDX, UC_X86_REG_ESP,
+                               UC_X86_REG_EIP)
 import chkpe
 
 ARGS = {'GetStdHandle': 1, 'GetConsoleMode': 2, 'SetConsoleMode': 2, 'GetCommandLineA': 0,
@@ -251,6 +253,8 @@ class Run:
         self.calls[name] = self.calls.get(name, 0) + 1
         r = getattr(self, 'k_' + name)(*a)
         u.reg_write(UC_X86_REG_EAX, (r or 0) & 0xFFFFFFFF)
+        u.reg_write(UC_X86_REG_ECX, 0xDEADBEEF)     # (not kept by the API)
+        u.reg_write(UC_X86_REG_EDX, 0xBAADF00D)
 
     def k_GetStdHandle(self, n):
         return {0xFFFFFFF6: HIN, 0xFFFFFFF5: HOUT, 0xFFFFFFF4: HERR}.get(n, 0xFFFFFFFF)

@@ -455,7 +455,7 @@ prput:  CALLP   putc                    ; (/~ comes here with its 'H')
 %endmacro
 
 ; PESCCODE: prstr (checked builds) and the escapes of '$'. (After the
-; bodies of '[', '_' and '`' in an unchecked build, so that h_print's loop
+; bodies of '[' and '`' in an unchecked build, so that h_print's loop
 ; reaches pesc; after the report in a checked one.)
 %macro  PESCCODE 0
 %if CHECKED
@@ -1891,11 +1891,6 @@ ptrs:   PTR     putc
         PTR     pmsg
         PTR     pdec
         PTR     hexc
-
-; =============================================================================
-;  The letters and digits, the return stack's push, and the inner loop
-; =============================================================================
-
 
 ; =============================================================================
 ;  The inner loop: read one character and sort it by range.

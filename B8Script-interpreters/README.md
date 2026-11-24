@@ -19,10 +19,10 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 | CPU | Before | `ANSI = 0` | `ANSI = 1` | Checked, before | Checked, `ANSI = 0` | Checked, `ANSI = 1` |
 |---|---|---|---|---|---|---|
-| Z80 | 765 | 827 | 878 | 1,163 | 1,230 | 1,281 |
-| Z80 with the line editor | 1,488 | 1,358 | 1,409 | 1,796 | 1,765 | 1,816 |
+| Z80 | 765 | 827 | 876 | 1,163 | 1,230 | 1,279 |
+| Z80 with the line editor | 1,488 | 1,358 | 1,407 | 1,796 | 1,765 | 1,814 |
 | 8080 | 854 | 925 | 980 | 1,299 | 1,377 | 1,432 |
-| 6502, stack in pages 2-3 | 1,175 | 1,208 | 1,269 | 1,706 | 1,748 | 1,795 |
+| 6502, stack in pages 2-3 | 1,175 | 1,208 | 1,265 | 1,706 | 1,748 | 1,791 |
 | 6502, stack in zero page | 1,095 | 1,155 | 1,219 | 1,628 | 1,698 | 1,748 |
 | 6809 | 825 | 873 | 934 | 1,220 | 1,284 | 1,333 |
 
@@ -30,8 +30,8 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 | CPU | Before | Now | Checked, before | Checked, now |
 |---|---|---|---|---|
-| Z80 | 831 | 959 | 1,243 | 1,376 |
-| Z80 with the line editor | 1,663 | 1,595 | 1,987 | 2,014 |
+| Z80 | 831 | 957 | 1,243 | 1,374 |
+| Z80 with the line editor | 1,663 | 1,593 | 1,987 | 2,012 |
 | 8080 | 904 | 1,049 | 1,364 | 1,516 |
 
 **Windows .EXE files** (always ANSI):
@@ -47,7 +47,7 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 - A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 357, 343, 155 and 137 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
-- Where the bytes went with the escapes: on the Z80 the escapes cost an unchecked generic build 62 bytes with `ANSI = 0` and 113 with `ANSI = 1`, and the checked one 67 and 118. The CP/M builds also read `-n?` themselves now (15 bytes on the Z80, 19 on the 8080; see The language). The editor builds lost ^V, which saved about 170 bytes in the unchecked ones (the stack listing was there only for it) and 100 in the checked ones.
+- Where the bytes went with the escapes: on the Z80 the escapes cost an unchecked generic build 62 bytes with `ANSI = 0` and 111 with `ANSI = 1`, and the checked one 67 and 116. The CP/M builds also read `-n?` themselves now (15 bytes on the Z80, 19 on the 8080; see The language). The editor builds lost ^V, which saved about 170 bytes in the unchecked ones (the stack listing was there only for it) and 100 in the checked ones.
 - Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 60 to 80 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 280 to 470 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
 
 ## Files

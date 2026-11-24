@@ -735,23 +735,6 @@ pe1:    CMP     #0E6h
         BCS     pvar
 pcur:   JMP     CONCUR          ; `  hide: the carry is clear
         ENDIF
-        IF      ANSI
-; With ANSI = 1 they are sequences, each a message at MSG (see prs).
-pesc:   LDY     #M_CLS-MSG
-        SBC     #7Ah            ; (the carry is clear: - 7Bh)
-        BCC     pe1
-        BEQ     prs             ; {  ESC [ H ESC [ J
-        LDY     #M_SHOW-MSG
-        LSR                     ; | 0, } 1, ~ 1; the carry set for ~
-        BEQ     prs             ; |  ESC [ ? 2 5 h
-        BCS     pat             ; ~
-        LDY     #M_EOL-MSG      ; }  ESC [ K
-        BNE     prs             ; always
-pe1:    CMP     #0E6h
-        BCS     pvar
-        LDY     #M_HIDE-MSG     ; `  ESC [ ? 2 5 l
-        BNE     prs             ; always
-        ENDIF
 ; /~: the column is NOS, the row the cell under it.
 pat:
         IF      CHECKED
@@ -817,6 +800,24 @@ pn3:    PLA
         JSR     CONOUT
         JMP     pn3
 
+        IF      ANSI
+; With ANSI = 1 they are sequences, each a message at MSG, printed by prs,
+; which pesc runs on into. (It sits here, just above prs, for that.)
+pesc:   SBC     #7Ah            ; (the carry is clear: - 7Bh). Y is 0, as
+                                ;   tosget leaves it, and M_CLS is the first
+                                ;   message: Y already points at it
+        BCC     pe1
+        BEQ     prs             ; {  ESC [ H ESC [ J
+        LDY     #M_SHOW-MSG
+        LSR                     ; | 0, } 1, ~ 1; the carry set for ~
+        BEQ     prs             ; |  ESC [ ? 2 5 h
+        BCS     pat             ; ~
+        LDY     #M_EOL-MSG      ; }  ESC [ K
+        BNE     prs             ; always
+pe1:    CMP     #0E6h
+        BCS     pvar
+        LDY     #M_HIDE-MSG     ; `  ESC [ ? 2 5 l, and on into prs
+        ENDIF
         IF      CHECKED+ANSI
 ; prs: print the message at MSG+Y; its last byte has bit 7 set. Y ends just
 ; past it, at the next message.
@@ -832,7 +833,7 @@ prs:    LDA     MSG,Y
 MSG:
         ENDIF
         IF      ANSI
-M_CLS:  DB      27,'[','H',27,'[','J'+80h
+M_CLS:  DB      27,'[','H',27,'[','J'+80h ; (the first: pesc counts on it)
 M_SHOW: DB      27,'[','?','2','5','h'+80h
 M_HIDE: DB      27,'[','?','2','5','l'+80h
 M_EOL:  DB      27,'[','K'+80h

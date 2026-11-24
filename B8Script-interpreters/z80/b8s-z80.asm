@@ -977,14 +977,6 @@ pcon:   JP      Z,CONCLS        ; /{
         JP      PRAGAIN
 
 ; With ANSI = 1 they are sequences. The carry is clear on the way in.
-pcon:   DEC     A
-        JR      Z,pshow         ; /|
-        LD      A,'K'
-        JP      P,csia          ; /}  ESC [ K
-        LD      A,'H'           ; /{  ESC [ H ESC [ J
-        CALL    csia
-        LD      A,'J'
-        JR      csia
 pshow:  LD      E,'h'           ; /|  ESC [ ? 2 5 h
         DB      0DAh            ; (JP C,nn: with no carry it steps over two bytes)
 phide:  LD      E,'l'           ; /`  ESC [ ? 2 5 l
@@ -998,6 +990,14 @@ phide:  LD      E,'l'           ; /`  ESC [ ? 2 5 l
         RST     28h
         RET
 
+; pcon: /{ /| /}, with A = 0, 1, 2. /{ runs on into csia.
+pcon:   DEC     A
+        JR      Z,pshow         ; /|
+        LD      A,'K'
+        JP      P,csia          ; /}  ESC [ K
+        LD      A,'H'           ; /{  ESC [ H ESC [ J
+        CALL    csia
+        LD      A,'J'           ; (on into csia)
 ; csia: ESC [ and then A. csi: ESC [, keeping A.
 csia:   CALL    csi
         RST     28h

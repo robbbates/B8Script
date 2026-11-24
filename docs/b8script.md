@@ -1011,14 +1011,14 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 
 | Build | File | Bytes | Notes |
 |---|---|---|---|
-| Generic ROM | `b8s-z80-rom-0000.bin` | 827 | Starts at 0000h (reset); owns page zero. `ANSI = 0`; with `ANSI = 1`, 878 |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,230 | With `ANSI = 1`, 1,281 |
-| CP/M runner | `B8SZ80.COM` | 959 | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` | 1,376 |  |
+| Generic ROM | `b8s-z80-rom-0000.bin` | 827 | Starts at 0000h (reset); owns page zero. `ANSI = 0`; with `ANSI = 1`, 876 |
+| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,230 | With `ANSI = 1`, 1,279 |
+| CP/M runner | `B8SZ80.COM` | 957 | `B8SZ80 PROG.B8S` |
+| CP/M runner, checked | `B8SZ80C.COM` | 1,374 |  |
 | Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,358 | The suggested standard under [Environments](#environments); see the interpreters README |
 | The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,765 |  |
-| CP/M with the line editor | `B8SZ80E.COM` | 1,595 | `B8SZ80E PROG.B8S`, or with no file |
-| The same, checked | `B8SZ80EC.COM` | 2,014 |  |
+| CP/M with the line editor | `B8SZ80E.COM` | 1,593 | `B8SZ80E PROG.B8S`, or with no file |
+| The same, checked | `B8SZ80EC.COM` | 2,012 |  |
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), HL' is the return-stack pointer. A and DE are scratch.
 
@@ -1070,7 +1070,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
 | Bytes (unchecked, checked), `ANSI = 0` | 1,208 and 1,748 | 1,155 and 1,698 |
-| The same, `ANSI = 1` | 1,269 and 1,795 | 1,219 and 1,748 |
+| The same, `ANSI = 1` | 1,265 and 1,791 | 1,219 and 1,748 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
 | Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |

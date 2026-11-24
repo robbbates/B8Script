@@ -133,7 +133,7 @@ class Run:
         """A build with ANSI = 0 calls the machine's console routines for the
         escapes of '$'. Each is modelled as sending the ANSI sequence that an
         ANSI = 1 build sends, so the two print the same. Each then spoils
-        what its contract lets it change (A, and DE and HL for CONAT), so
+        what its contract lets it change (A and DE, and HL for CONAT), so
         that an interpreter that relies on more is caught. (The flags too:
         the contract says nothing of them.)"""
         m, k = self.m, self.cons[pc]
@@ -145,8 +145,8 @@ class Run:
             self.out += b'\x1b[?25h' if m.a else b'\x1b[?25l'
         else:                                   # CONAT: row HL, column DE
             self.out += b'\x1b[%d;%dH' % ((m.hl + 1) & 0xFFFF, (m.de + 1) & 0xFFFF)
-            m.hl, m.de = 0xA5A5, 0x5A5A
-        m.a, m.f = 0xEE, m.f ^ 0xFF
+            m.hl = 0xA5A5
+        m.a, m.f, m.de = 0xEE, m.f ^ 0xFF, 0x5A5A
 
     def mem(self, a):
         return self.m.memory[a & 0xFFFF]

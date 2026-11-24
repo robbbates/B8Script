@@ -282,8 +282,11 @@ pq:     PLA
         PLA
         STA     1,X
         BCS     pdrop           ; the closing quote: drop it
+        CPX     #DSE            ; a NUL: Q, unless '$' had nothing on the
+        LDA     #'s'            ;   stack at all (X at the empty mark): s
+        BCS     eq1
 e_quote:LDA     #'Q'            ; a NUL: '$' or a string ran into the end
-        JMP     error
+eq1:    JMP     error
 h_print:LDA     1,X
         PHA
         LDA     0,X

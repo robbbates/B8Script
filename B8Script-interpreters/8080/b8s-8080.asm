@@ -104,8 +104,8 @@ EXIT    EQU     0FF09h          ; where to go when the program ends
 ;   KEY and CONOUT must preserve BC, DE and HL.
         ENDIF
         IF      1-ANS
-; With ANSI = 0 the console escapes call these. All four must keep BC;
-; CONCLS, CONEOL and CONCUR also DE and HL.
+; With ANSI = 0 the console escapes call these. All four must keep BC, and
+; all but CONAT also HL. They may change A, DE and the flags.
 CONCLS  EQU     0FF0Ch          ; /{  clear the screen, the cursor to the top left
 CONEOL  EQU     0FF0Fh          ; /}  clear from the cursor to the end of the line
 CONCUR  EQU     0FF12h          ; /| and /`  show the cursor if A is not 0, hide

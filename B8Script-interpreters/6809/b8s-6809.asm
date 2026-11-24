@@ -1123,7 +1123,12 @@ h_num:  TST     ,U
         BPL     pdec
         LDA     #'-'
         BSR     putc
+        IF      CHECKED
+        LBSR    negt            ; (long: the checked h_print is in between)
+        ENDIF
+        IF      1-CHECKED
         BSR     negt
+        ENDIF
 ; pdec: print the top cell as unsigned and drop it, by recursion on /10
 pdec:   LDD     #10
         PSHU    D
@@ -1186,7 +1191,9 @@ dv1:    TST     ,S+
 h_print:PSHS    Y
         PULU    Y
         IF      CHECKED
-        STY     <PSAV
+        CMPU    #DSTOP          ; '$' with nothing on the stack: s, before it
+        LBHI    e_ds            ;   prints from an address of no meaning (N
+        STY     <PSAV           ;   is clear: an underflow)
         ENDIF
 pr0:    LDA     ,Y+
         IF      CHECKED

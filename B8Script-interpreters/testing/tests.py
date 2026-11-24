@@ -59,8 +59,9 @@ SUITE = [
     ('evalline', b'[X{] -72?:{1(:,13=\\1+1)93%.}X', b'1 2+#\r'),
     ('ignored', b'1\x01\x7f 2+#\x7f', b''),
     ('highstr', b'"caf\xe9 \x80\xfe"$ 0( \xc1 "\x90" ) 1#', b''),
-    ('deepstk', b'0i! 1( i@ i@1+:i! 100<) 0 1( + i@1-:i! 0>) #', b''),
-    ('deeprs', b'[R :( 1- R 0)] 50 R #', b''),
+    # the depths every build guarantees: 64 data cells, 64 return-stack entries
+    ('deepstk', b'0i! 1( i@ i@1+:i! 60<) 0 1( + i@1-:i! 0>) #', b''),
+    ('deeprs', b'[R :( 1- R 0)] 31 R #', b''),
 ]
 
 # Machine-code tests, per CPU (expected output given directly)

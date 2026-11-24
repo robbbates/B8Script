@@ -66,9 +66,11 @@ ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
 ;  Memory map. Everything the interpreter writes is in four RAM areas:
 ;
 ;    8000h-80FFh  return stack (S); empty = 8100h. Unchecked: 127 entries.
-;                 Checked: 112 entries (S down to 8020h); the 32 bytes below
-;                 are a guard band for what a handler and an interrupt push
-;                 on top of a full stack before the check runs.
+;                 Checked: 96 entries (S down to 8040h); the 64 bytes below
+;                 are a guard band for what a handler, the console routines
+;                 and interrupts push on top of a full stack before the check
+;                 runs (the escapes of '$' take up to 22 of them, so 42 are
+;                 left for CONOUT and interrupts).
 ;    8100h-81FFh  data stack (U). Unchecked: 127 cells, empty = 8200h.
 ;                 Checked: 125 cells (U from 81FCh, empty, down to 8102h):
 ;                 the 4 bytes above are a guard band, so a handler that runs
@@ -143,7 +145,7 @@ BRKOFF  EQU     7Bh             ; the break-off cell (827Bh, z9+): 0 = the
                                 ;   break key is on
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
 RSTOP   EQU     RSPAGE*256+100h ; empty return stack
-RSLIM   EQU     RSPAGE*256+20h  ; checked: S may go no lower between characters
+RSLIM   EQU     RSPAGE*256+40h  ; checked: S may go no lower between characters
 RSREP   EQU     RSTOP-16        ; checked: S while the error report runs
 DSTOP   EQU     DSPAGE*256+100h-4*CHECKED ; empty data stack (a guard if checked)
 DSLIM   EQU     DSPAGE*256+2    ; checked: U may go no lower between characters

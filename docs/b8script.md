@@ -1112,7 +1112,7 @@ Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. 
 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|
-| Return stack (S, 127 entries; 112 in the checked build) | 8000h page | 32768 | −32768 |
+| Return stack (S, 127 entries; 96 in the checked build) | 8000h page | 32768 | −32768 |
 | Data stack (U, 127 cells; 125 in the checked build) | 8100h page | 33024 | −32512 |
 | Letter page (DP) | 8200h | 33280 | −32256 |
 | Program text | 8300h | 33536 | −32000 |
@@ -1121,7 +1121,7 @@ Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. 
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 8234h | 33332 | −32204 |
 
-**The return stack's guard band** (checked build). S is the hardware stack, so the 32 bytes between 8000h and the lowest allowed S, 8020h, take what a handler, the console routines and interrupts push while the return stack is full. The deepest point is inside the escapes of `$`: with all 112 entries in use, S at `CONOUT`'s entry can be as low as 800Ah (an ANSI `/~` printing a five-digit number), 800Ch (a variable escape) or 8010h (`#`). That leaves 10 bytes for `CONOUT` itself and any interrupt: less than an IRQ's 12-byte frame. A machine that needs more raises `RSLIM`, two bytes for each entry given up; the unchecked build has no guard band at all, since its return stack may use the whole page.
+**The return stack's guard band** (checked build). S is the hardware stack, so the 64 bytes between 8000h and the lowest allowed S, 8040h, take what a handler, the console routines and interrupts push while the return stack is full. The deepest point is inside the escapes of `$`: with all 96 entries in use, S at `CONOUT`'s entry can be as low as 802Ah (an ANSI `/~` printing a five-digit number), 802Ch (a variable escape) or 8030h (`#`). That leaves 42 bytes for `CONOUT` itself and any interrupts, more than three IRQ frames. A machine that needs more raises `RSLIM`, two bytes for each entry given up; the unchecked build has no guard band at all, since its return stack may use the whole page.
 
 **The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. The unchecked build prints nothing when it is stopped.
 

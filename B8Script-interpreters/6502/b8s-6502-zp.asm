@@ -937,8 +937,17 @@ pe1:    CMP     #0E6h
         BCS     pvar
 pcur:   JMP     CONCUR          ; `  hide: the carry is clear
         ENDIF
+; a-z: the carry is set. A + 3Ah is the letter - 41h, as step hands it to
+; lower: that pushes the variable's address, '@' fetches it, and '#' prints
+; it and drops it: TOS is the string's address again.
+pvar:   ADC     #39h
+        JSR     lower
+        JSR     h_fetch
+        JMP     h_num
+
         IF      ANSI
-; With ANSI = 1 they are sequences, each a message at MSG (see prs).
+; With ANSI = 1 they are sequences, each a message at MSG, printed by prs,
+; which pesc runs on into.
 pesc:   LDY     #M_CLS-MSG
         SBC     #7Ah            ; (the carry is clear: - 7Bh)
         BCC     pe1
@@ -951,17 +960,8 @@ pesc:   LDY     #M_CLS-MSG
         BNE     prs             ; always
 pe1:    CMP     #0E6h
         BCS     pvar
-        LDY     #M_HIDE-MSG     ; `  ESC [ ? 2 5 l
-        BNE     prs             ; always
+        LDY     #M_HIDE-MSG     ; `  ESC [ ? 2 5 l, and on into prs
         ENDIF
-; a-z: the carry is set. A + 3Ah is the letter - 41h, as step hands it to
-; lower: that pushes the variable's address, '@' fetches it, and '#' prints
-; it and drops it: TOS is the string's address again.
-pvar:   ADC     #39h
-        JSR     lower
-        JSR     h_fetch
-        JMP     h_num
-
         IF      CHECKED+ANSI
 ; prs: print the message at MSG+Y; its last byte has bit 7 set. Y ends just
 ; past it, at the next message.

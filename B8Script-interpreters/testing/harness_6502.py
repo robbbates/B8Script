@@ -1,4 +1,3 @@
-import os
 """Run a 6502 B8Script build in py65.
 
 The image is ROM at E000h (the reset entry is `start`), the program text is
@@ -19,7 +18,7 @@ of '$' (CONCLS, CONEOL, CONCUR, CONAT, when the listing has them). They are
 traps too: each appends the ANSI sequence that an ANSI = 1 build sends, so
 the two print the same, and then spoils what its contract lets it change.
 """
-import sys
+import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from py65.devices.mpu6502 import MPU
 from harness_z80 import load_hex, symbols

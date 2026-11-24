@@ -8,36 +8,36 @@ Thirty-one B8Script games, in three sizes, and one that runs over:
 
 Each one is a complete program, with no line breaks and nothing left out. Paste it into a runner and play.
 
-The files are in `games/` (at the root of the repository): [`b8sms/`](../games/b8sms/), [`tweet140/`](../games/tweet140/) and [`tweet280/`](../games/tweet280/), plus [`longer/`](../games/longer/) for one over the limit. `test_tweets.py` in `testing/` checks each folder's limit and plays every game with scripted keys on the checked reference interpreter; `test_tweets.py --all` adds the check that Tic-tac-toe never loses, which plays all 201 legal games against it. All of them were developed and tested on `ref.py`. None has been run on a real CPU build yet: `gamecheck.py` covers only `games/*.B8S`.
+The files are in `games/` (at the root of the repository): [`b8sms/`](../games/b8sms/), [`tweet140/`](../games/tweet140/) and [`tweet280/`](../games/tweet280/), plus [`longer/`](../games/longer/) for one over the limit. `test_tweets.py` in `testing/` checks each folder's limit and plays every game with scripted keys on the checked reference interpreter; `test_tweets.py --all` adds the check that Tic-tac-toe never loses, which plays all 201 legal games against it. All of them were developed and tested on `ref.py`. `gamecheck.py`, which compares the CPU builds with it, covers only `games/*.B8S`.
 
 | Game | SMS | 140 | Kind | You press |
 |---|---|---|---|---|
-| [Hi-Lo](#hi-lo) | 159 | 140 | Guessing | Digits, Return |
-| [Lander](#lander) | 151 | 137 | Physics, turn by turn | 0–9 |
-| [Nim](#nim) | 159 | 137 | Strategy against a perfect opponent | 1–3 |
-| [Reflex](#reflex) | 151 | 139 | Reaction time | Any key |
+| [Hi-Lo](#hi-lo) | 158 | 139 | Guessing | Digits, Return |
+| [Lander](#lander) | 139 | 125 | Physics, turn by turn | 0–9 |
+| [Nim](#nim) | 155 | 137 | Strategy against a perfect opponent | 1–3 |
+| [Reflex](#reflex) | 150 | 138 | Reaction time | Any key |
 | [Ski](#ski) | 158 | 137 | Real-time scroller | j, l |
 | [Rock Paper Scissors](#rock-paper-scissors) | 153 | 137 | Against an AI that learns | 1–3 |
-| [Simon](#simon) | 159 | 140 | Memory | Digits |
-| [Pig](#pig) | 160 | 139 | Push your luck | h, any key |
-| [Tron](#tron) | 159 | 138 | Real-time, 2D | `,` and `.` |
+| [Simon](#simon) | 157 | 138 | Memory | Digits |
+| [Pig](#pig) | 150 | 132 | Push your luck | h, any key |
+| [Tron](#tron) | 132 | 128 | Real-time, 2D | `,` and `.` |
 | [Lights Out](#lights-out) | 159 | 139 | Puzzle | a–y |
 
 | Game | 280 | Kind | You press |
 |---|---|---|---|
-| [Snake](#snake) | 275 | Real-time, 2D | `,` and `.` |
-| [Mastermind](#mastermind) | 275 | Deduction | Four digits, Return |
+| [Snake](#snake) | 256 | Real-time, 2D | `,` and `.` |
+| [Mastermind](#mastermind) | 271 | Deduction | Four digits, Return |
 | [Nim 3-5-7](#nim-3-5-7) | 273 | Strategy against a perfect opponent | Heap, then count |
-| [Duel](#duel) | 267 | Real-time, against the computer | `,` and `.` |
-| [Kingdom](#kingdom) | 280 | Economic strategy | A number, Return |
+| [Duel](#duel) | 236 | Real-time, against the computer | `,` and `.` |
+| [Kingdom](#kingdom) | 267 | Economic strategy | A number, Return |
 | [Tic-tac-toe](#tic-tac-toe) | 277 | Against an unbeatable opponent | 1–9 |
-| [Blackjack](#blackjack) | 280 | Cards | h, any key |
-| [Copter](#copter) | 244 | Real-time, one key | Any key |
-| [Breakout](#breakout) | 279 | Real-time arcade | j, l |
-| [Hangman](#hangman) | 271 | Words | Letters |
-| [Maze](#maze) | 280 | A new maze every game | i j k l |
+| [Blackjack](#blackjack) | 276 | Cards | h, any key |
+| [Copter](#copter) | 243 | Real-time, one key | Any key |
+| [Breakout](#breakout) | 265 | Real-time arcade | j, l |
+| [Hangman](#hangman) | 268 | Words | Letters |
+| [Maze](#maze) | 258 | A new maze every game | i j k l |
 
-Ski, Tron, Snake, Duel, Copter and Breakout are real-time, and Tron, Snake, Duel and Breakout draw with the cursor-position escape, so they need an ANSI console (see [The console](b8script.md#the-console)). Simon clears its line with ESC `[K`. The rest are plain teletype games.
+Ski, Tron, Snake, Duel, Copter and Breakout are real-time. Tron, Snake, Duel, Breakout and Maze clear the screen with `/{` and draw with the cursor escape `/~`, MINE390 redraws its board from the top left with `/~`, and Simon clears its line with `/}`, so those need a console that does the screen escapes (see [The console](b8script.md#the-console)). The rest are plain teletype games.
 
 ## The tricks that make them fit
 
@@ -47,6 +47,8 @@ These come up again and again.
 - **A generator you can replay.** `r@75*74+:r!256/;` is a linear congruential generator; its high byte is usable, but its low bit never changes, so the code always takes the high byte. Set `r` to the same seed and you get the same numbers again. Simon uses this to store nothing: it replays the sequence to show it, and again to check your answer.
 - **The stack as a variable.** A counter that lives on the stack under a loop costs one character to update (`1-`), where a variable costs six (`t@1-t!`). Hi-Lo's tries, Reflex's rounds and Lights Out's move count all live there.
 - **Flags are −1.** A true flag is all ones, so it is arithmetic. `:106=%108=-` turns the keys j and l into −1 and +1 with no branch. `flag 32&` is 32 or nothing, which is how Lights Out picks upper or lower case.
+- **Numbers inside the string.** `/h` in a string prints the variable h as `#` would, so Lander's status line is one string, `"/M/Jh/h v/v f/f ?"$`, with no `#` at all. It prints the value the variable has when the string is printed; a number worked out on the stack still needs `#`.
+- **The cursor place comes off the stack.** `/~` takes a row and a column, both from 0, from under the string's address, and a map index divided by the map's width leaves just those two, quotient then remainder. So `:64/"/~O"$` draws Tron's bike at its place in a 64-wide map. Snake and Duel do the same, Breakout divides by 32, and Maze by 41.
 - **Pick the string, then print it.** `" CRASH"%5<(;" LANDED"0)$` pushes one message, swaps in the other if needed, and prints whichever is left: an if-else with one `$`.
 - **Padding instead of edge tests.** Lights Out's grid has a dead border, as Conway's Life does in the spec, so pressing a corner toggles border cells that are never shown. Tron goes the other way: its arena is a torus, so `1023&` is the only bounds check it needs.
 - **`1:(` is a value and a true flag.** `(` needs a flag, and a nonzero count is one, so `4:(` starts a loop with 4 on the stack in three characters. Tic-tac-toe uses it three times.
@@ -59,7 +61,7 @@ These come up again and again.
 ### Hi-Lo
 
 ```text
-[N0 1(0?:13=\:'48-%10*+1);]"Key=go. 0-127, 7 tries"$0 1(1+127&1?0=)s!7 1(13'10'N:g!s@<(" up"$0)g@s@>(" down"$0)1-:0>g@s@=0=&);g@s@=:(" WIN"$0)0=(" LOSE "$s@#0)
+[N0 1(0?:13=\:'48-%10*+1);]"Key=go. 0-127, 7 tries"$0 1(1+127&1?0=)s!7 1(13'10'N:g!s@<(" up"$0)g@s@>(" down"$0)1-:0>g@s@=0=&);g@s@=:(" WIN"$0)0=(" LOSE /s"$0)
 ```
 
 Press a key to start, then type guesses and press Return. The number is 0–127 and you get 7 tries, and 2⁷ = 128, so a perfect binary search always wins and one wasted guess can lose. That makes it a game rather than a quiz.
@@ -71,7 +73,7 @@ Press a key to start, then type guesses and press Return. The number is 0–127 
 ### Lander
 
 ```text
-"LANDER burn 0-9, land under 5"$1000h!0v!99f!1("/M/Jh"$h@#" v"$v@#" f"$f@#" ?"$0?15&:f@>(;f@0):f@%-f!v@%- 3+v!h@v@-h!h@0>)v@:#" CRASH"%5<(;" LANDED"0)$
+"LANDER burn 0-9, land under 5"$1000h!0v!99f!1("/M/Jh/h v/v f/f ?"$0?15&:f@>(;f@0):f@%-f!v@%- 3+v!h@v@-h!h@0>)v@:#" CRASH"%5<(;" LANDED"0)$
 ```
 
 You start at height 1000 with no speed and 99 fuel. Each turn press 0–9 to burn that much fuel. Gravity adds 3 to your downward speed and a burn takes it off. Touch down at under 5 to land.
@@ -84,7 +86,7 @@ The numbers are tuned so the classic trick, a **suicide burn**, is needed: the l
 ### Nim
 
 ```text
-"NIM take 1-3, last loses. Key"$0 1(1+1?0=)7&20+n!1("/M/J"$n@#" take "$0?:'3&:0=-n@%-:n!1<:(" you lose"$0)\" I take "$n@1- 4/%;:0=-:#n@%-:n!1<:(" I lose"$0)0=)
+"NIM take 1-3, last loses. Key"$0 1(1+1?0=)7&20+n!1("/M/J/n take "$0?:'3&:0=-n@%-:n!1<:(" you lose"$0)\" I take "$n@1- 4/%;:0=-:#n@%-:n!1<:(" I lose"$0)0=)
 ```
 
 Press a key to start: there are 20 to 27 sticks. You and the computer take 1–3 in turn, and whoever takes the last stick loses. The computer plays perfectly. It always tries to leave a number that is 1 more than a multiple of 4, so it takes (n − 1) mod 4, or 1 when that is 0. You can beat it only by finding that rule and getting there first, and on 2 starts in 8 (21 and 25) the position is already lost.
@@ -95,7 +97,7 @@ Press a key to start: there are 20 to 27 sticks. You and the computer take 1–3
 ### Reflex
 
 ```text
-[W0 1(1+1?0=)]"REFLEX: 5 rounds, hit a key at GO. Key"$Wt!0s!5 1("/M/Jwait.."$t@2047&999+?:{(" early"$999 0)}0=(" GO! "$W:#0):t!s@+s!1-:);" total "$s@#
+[W0 1(1+1?0=)]"REFLEX: 5 rounds, hit a key at GO. Key"$Wt!0s!5 1("/M/Jwait.."$t@2047&999+?:{(" early"$999 0)}0=(" GO! "$W:#0):t!s@+s!1-:);" total /s"$
 ```
 
 Five rounds. After a random pause it says GO!, and you hit a key as fast as you can. Pressing during the pause costs 999. Lowest total wins.
@@ -134,20 +136,20 @@ The computer learns. It keeps a 9-entry table indexed by your last two moves, ho
 ### Simon
 
 ```text
-[Dr@75*74+:r!256/;7&49+]"SIMON repeat the digits. Key"$0 1(1+1?0=)s!1n!1("/M/J"$s@r!n@1(D'1-:);999?;"/M/[[K"$s@r!-1n@1(%0?:'D=&%1-:);:(n@1+n!0))" score "$n@1-#
+[Dr@75*74+:r!256/;7&49+]"SIMON repeat the digits. Key"$0 1(1+1?0=)s!1n!1("/M/J"$s@r!n@1(D'1-:);999?;"/M/}"$s@r!-1n@1(%0?:'D=&%1-:);:(n@1+n!0))" score "$n@1-#
 ```
 
 A string of digits flashes for a second and is wiped. Type it back. Each round adds a digit. One mistake and the game is over.
 
 It stores no sequence at all. The digits are generator output from a fixed seed, so resetting `r` to the seed replays them: once to show them, and again to check what you type. The sequence is unlimited and costs no memory.
 
-- `"/M/[[K"` goes back to the start of the line and clears it, hiding the digits.
+- `"/M/}"` goes back to the start of the line and clears it, hiding the digits.
 - The check is an AND of all the comparisons, so a wrong digit doesn't stop you typing the rest; the round just fails at the end.
 
 ### Pig
 
 ```text
-"PIG to 100, h=hold"$0y!0s!1t!1("/M/J"$t@#32'y@#"+"$s@#32'0 0 1(;1+:5>(;0 0)1?:0=)104=%1+d!:0=(d@#0):s@&y@+y!d@1=|:(0s!t@1+t!0)0=(d@s@+s!0)y@100<)t@1-#" turns"$
+"PIG to 100, h=hold"$0y!0s!1t!1("/M/J/t /y+/s "$0 0 1(;1+:5>(;0 0)1?:0=)104=%1+d!:0=(d@#0):s@&y@+y!d@1=|:(0s!t@1+t!0)0=(d@s@+s!0)y@100<)t@1-#" turns"$
 ```
 
 The dice game Pig, solo: reach 100 in as few turns as you can. Each line shows the turn number, your banked score, the points riding on this turn, and the last roll. Any key rolls the die; a 1 loses the turn's points. Press h to bank them and end the turn. A common rule of thumb is to bank at about 20, but the end game is subtler.
@@ -158,14 +160,14 @@ The dice game Pig, solo: reach 100 in as few turns as you can. Each line shows t
 ### Tron
 
 ```text
-"/[[2J"$1024_g!0 1(:g@+0%.1+:1024<);520i!0d!0t!1(99?:46=%44=-d@%- 3&:d!:1&63*1+%2&1%-*i@+1023&:i!:64/27'91'%1+#59'1+#72'79'g@+:,%1%.t@1+t!0=)"/[[18Hscore "$t@#
+"/{"$0_g!1024 1(0 1_.1-:);520i!0d!0t!1(99?:46=%44=-d@%- 3&:d!:1&63*1+%2&1%-*i@+1023&:i!:64/"/~O"$g@+:,%1%.t@1+t!0=)17 0"/~score /t"$
 ```
 
 A light cycle that never stops, leaving a wall behind it. `,` turns left and `.` turns right. Run into the wall, anywhere along it, and you're done. The arena is 64 × 16 and wraps at the edges, so the danger is only ever the trail. Survive as long as you can.
 
 - The arena is a 1024-byte map in the heap, cleared at the start. Position `i` is one number, so one `1023&` both wraps the edges and keeps the index in the map.
 - The direction `d` is 0–3, and a turn is `d ± 1` masked with `3&`. The step comes from `d` with no table: `(d&1)·63 + 1` is 1 or 64, and `1 − (d&2)` gives the sign.
-- Drawing is `ESC [ row ; col H` then `O`, with row and column from one `64/`.
+- Drawing is one string, `"/~O"`: one `64/` leaves the row and the column, and `/~` takes them.
 - The crash test reads the cell and marks it in one go: `g@+:,%1%.` leaves the old value, nonzero if you had been there.
 
 ### Lights Out
@@ -186,7 +188,7 @@ This is the deepest game here. The puzzle is linear algebra over GF(2): the orde
 
 ## Tweet 140
 
-The same ten games, each cut by 11 to 20 characters. Most of the savings repeat:
+The same ten games, each cut by 11 to 21 characters. Most of the savings repeat:
 
 - **Titles shrink to a name and the keys.** The rules move here, into the doc.
 - **Counters move to the stack.** Ski's score, Nim's stick count, Pig's turn count and Tron's score each lose a variable.
@@ -196,15 +198,15 @@ The same ten games, each cut by 11 to 20 characters. Most of the savings repeat:
 What the cuts cost:
 
 - Pig no longer shows the turn number on each line, only at the end.
-- Tron starts in the top left corner, and Ski shows no title.
+- Ski shows no title.
 
 The files are in [`games/tweet140/`](../games/tweet140/).
 
 ```text
-[N0 1(0?:13=\:'48-%10*+1);]"0-127, 7 tries. Key"$0 1(1+127&1?0=)s!7 1(13'10'N:g!s@-:0<%0>- 61+'1-:0>g@s@-&);g@s@-:(" was "$s@#0)0=(" WIN"$0)
+[N0 1(0?:13=\:'48-%10*+1);]"0-127, 7 tries. Key"$0 1(1+127&1?0=)s!7 1(13'10'N:g!s@-:0<%0>- 61+'1-:0>g@s@-&);g@s@-:(" was /s"$0)0=(" WIN"$0)
 ```
 
-That is Hi-Lo at exactly 140.
+That is Hi-Lo, at 139.
 
 ## Tweet 280
 
@@ -213,7 +215,7 @@ Eleven games that don't fit in 160, several of them ones I had called out of rea
 ### Snake
 
 ```text
-"/[[2J"$0_g!1024 1(0 1_.1-:);1023m![P64/"/[["$%1+#59'1+#"H"$][Rr@75*74+:r!64/;m@&][F0 1(;R:g@+,):g@+128%.P"*"$][D:1&63*1+%2&1%-*]0r!0i!0j!0d!0l!F1(99?R;:46=%44=-d@%- 3&:d!1+i@g@+.d@Di@+m@&:i!g@+,:7&\:(l@1+l!F0)0=(j@:P32':g@+:,1-D%0%.+m@&j!0)i@:g@+1%.P79'1);"/[[18Hscore "$l@#
+"/{"$0_g!1024 1(0 1_.1-:);1023m![P64/"/~"$][Rr@75*74+:r!64/;m@&][F0 1(;R:g@+,):g@+128%.P"*"$][D:1&63*1+%2&1%-*]0r!0i!0j!0d!0l!F1(99?R;:46=%44=-d@%- 3&:d!1+i@g@+.d@Di@+m@&:i!g@+,:7&\:(l@1+l!F0)0=(j@:P32':g@+:,1-D%0%.+m@&j!0)i@:g@+1%.P79'1);17 0"/~score /l"$
 ```
 
 Steer with `,` and `.`, eat the `*`, and don't bite yourself. The board is 64 × 16 and wraps at the edges, like Tron's. The score is your length.
@@ -225,7 +227,7 @@ Steer with `,` and `.`, eat the `*`, and don't bite yourself. The board is 64 ×
 ### Mastermind
 
 ```text
-[Rr@75*74+:r!256/;255&]"MASTERMIND: 4 digits 1-6, 10 tries. Key"$0 1(1+1?0=)r!5_s!4_c!4 1(1-:s@+R6/%;49+%.:);34s@4+.10 1("/M/J"$-4?a!s@@c@!s@2+@c@2+!0b!4 1(1-:s@+,{:}%a@+,=b@%-b!:);0w!4 1(1-:a@+,v!4 1(1-:c@+:,:v@=:w@%-w!:{0=&%.}\:);:);" "$b@#"B"$w@b@-#"W"$1-:0>b@4<&);" "$s@$
+[Rr@75*74+:r!256/;255&]"MASTERMIND: 4 digits 1-6, 10 tries. Key"$0 1(1+1?0=)r!5_s!4_c!4 1(1-:s@+R6/%;49+%.:);34s@4+.10 1("/M/J"$-4?a!s@@c@!s@2+@c@2+!0b!4 1(1-:s@+,{:}%a@+,=b@%-b!:);0w!4 1(1-:a@+,v!4 1(1-:c@+:,:v@=:w@%-w!:{0=&%.}\:);:);" /bB"$w@b@-#"W"$1-:0>b@4<&);" "$s@$
 ```
 
 Type four digits from 1 to 6 and press Return. B is the number in the right place, W the number of right digits in the wrong place. Repeats are allowed in the code and in guesses. The code is shown at the end.
@@ -248,7 +250,7 @@ Three heaps of 3, 5 and 7. Press a heap (1–3), then how many to take. Whoever 
 ### Duel
 
 ```text
-"/[[2J"$0_g!1024 1(0 1_.1-:);[D:1&63*1+%2&1%-*][P64/"/[["$%1+#59'1+#"H"$][S{D+1023&:P}':g@+:,%1%.][ADj@+1023&g@+,]520i!0d!556j!2e!1(99?:46=%44=-d@%- 3&:d!i@%79S%i!p!e@A(e@1+3&e!0)e@A(e@2+3&e!0)j@e@88S%j!q!p@q@|0=)"/[[18H WIN"p@(;"/[[18H LOSE"0)q@p@&(;"/[[18H DRAW"0)$
+"/{"$0_g!1024 1(0 1_.1-:);[D:1&63*1+%2&1%-*][S{D+1023&:64/"/~"$}':g@+:,%1%.][ADj@+1023&g@+,]520i!0d!556j!2e!1(99?:46=%44=-d@%- 3&:d!i@%79S%i!p!e@A(e@1+3&e!0)e@A(e@2+3&e!0)j@e@88S%j!q!p@q@|0=)17 0"/~"$" WIN"p@(;" LOSE"0)q@p@&(;" DRAW"0)$
 ```
 
 Tron for two: you are `O`, the computer is `X`, and you start facing each other. Last one moving wins.
@@ -259,7 +261,7 @@ Tron for two: you are `O`, the computer is `X`, and you start facing each other.
 ### Kingdom
 
 ```text
-[N0 1(0?:13=\:'48-%10*+1);][M:g@>(;g@0)]"KINGDOM: eat 20, plant 10 each"$99p!4999g!0r!1y!1("/M/J"$y@#": pop "$p@#" grain "$g@#" feed? "$N:r@+r!M:g@%-g!20/;:p@2/;<:q!\p@-:0>(2/;0)p@+p!p@10*M:999>(;999 0)r@75*74+:r!256/;3&1+:" yield "$1+#*g@+g!y@1+:y!11<)q@(;" Overthrown"$0)" "$p@#
+[N0 1(0?:13=\:'48-%10*+1);][M:g@>(;g@0)]"KINGDOM: eat 20, plant 10 each"$99p!4999g!0r!1y!1("/M/J/y: pop /p grain /g feed? "$N:r@+r!M:g@%-g!20/;:p@2/;<:q!\p@-:0>(2/;0)p@+p!p@10*M:999>(;999 0)r@75*74+:r!256/;3&1+:" yield "$1+#*g@+g!y@1+:y!11<)q@(;" Overthrown"$0)" /p"$
 ```
 
 Hamurabi in a tweet. Each year, type how much grain to feed your people. Each person needs 20. Whatever is left is planted: each person can plant 10, on at most 999 acres, and each planted bushel returns 2–5. If fewer than half are fed, you are overthrown. Food beyond 20 a head draws newcomers: half the surplus in people. Score: your population after ten years.
@@ -286,7 +288,7 @@ The computer can't be beaten. It is `O` and opens in the centre. You are `X`: pr
 ### Blackjack
 
 ```text
-[Rr@75*74+:r!256/;255&13/%;][CR:"A23456789TJQK"+,'1+:10>(;10 0)][HC%{:1=}|{+}][V{:12<}&10&+][S{:}%{:}%V][D0 0HH]"BLACKJACK. Key"$0 1(1+1?0=)r!100b!1("/M/J$"$b@#" You "$D1(S:32'#21<:(;" h?"$0?104=0):(;H-1 0))V:21>(;-1 0)" Me "$D1(S17<:(;H-1 0))V:32'#:21>(;0 0)-:0<%0>- 10*b@+:b!0>)
+[Rr@75*74+:r!256/;255&13/%;][CR:"A23456789TJQK"+,'1+:10>(;10 0)][HC%{:1=}|{+}][V{:12<}&10&+][S{:}%{:}%V][D0 0HH]"BLACKJACK. Key"$0 1(1+1?0=)r!100b!1("/M/J$/b You "$D1(S:32'#21<:(;" h?"$0?104=0):(;H-1 0))V:21>(;-1 0)" Me "$D1(S17<:(;H-1 0))V:32'#:21>(;0 0)-:0<%0>- 10*b@+:b!0>)
 ```
 
 You start with $100 and bet $10 a hand. Press h to hit, any other key to stand. The dealer draws to 17. Ties push, and the game runs until you're broke.
@@ -297,7 +299,7 @@ You start with $100 and bet $10 a hand. Press h to hit, any other key to stand. 
 ### Copter
 
 ```text
-"COPTER: any key pushes left/M/J"$[S1(:1<\32'1- 1);]9p!56x!0v!0t!0r!1(r@75*74+:r!:0<%256/;31&p@<%-p@+p!12t@50/;-:5<(;5 0)w!99?:r@+r!(-4v!0)v@1+:3>(;3 0):v!x@+:x!4/;p@-:0>%w@<&0=\p@S"|"$x@4/;p@- 1-S"H"$p@w@+x@4/;- 1-S"|/M/J"$t@1+t!1)"score "$t@#
+"COPTER: any key pushes left/M/J"$[S1(:1<\32'1- 1);]9p!56x!0v!0t!0r!1(r@75*74+:r!:0<%256/;31&p@<%-p@+p!12t@50/;-:5<(;5 0)w!99?:r@+r!(-4v!0)v@1+:3>(;3 0):v!x@+:x!4/;p@-:0>%w@<&0=\p@S"|"$x@4/;p@- 1-S"H"$p@w@+x@4/;- 1-S"|/M/J"$t@1+t!1)"score /t"$
 ```
 
 The one-key game. A cave scrolls past, and gravity pulls your craft, `H`, to the right. Any key gives a push left. It has inertia, so you feather it rather than steer it. The cave narrows from 12 to 5 as you go.
@@ -308,21 +310,21 @@ The one-key game. A cave scrolls past, and gravity pulls your craft, `H`, to the
 ### Breakout
 
 ```text
-[Y27'91'%#59'#72'][Z:@0%-%!]"/[[2J"$0_g!736 1(0 1_.1-:);96 1(1-:64+:g@+1%.32/2+Y35':);12:y!x!1d!-1e!0s!1p!1(250?:106=%108=-:+p@+:32767&30<(:p!0);20p@Y"  ====  "$y@x@Y32'x@2=x@33=|(dZ0)y@1=(eZ0)x@d@+x!y@e@+y!y@32*x@+2-g@+:,(:0%.eZs@1+s!0);x@p@- 2+4/;1=y@20=&(eZ0)y@x@Y111'y@21<)s@#
+[Z:@0%-%!]"/{"$0_g!736 1(0 1_.1-:);96 1(1-:32+:g@+1%.32/1+"/~#"$:);11:y!x!1d!-1e!0s!0p!1(250?:106=%108=-:+p@+:32767&30<(:p!0);19p@"/~  ====  "$y@x@"/~ "$x@1=x@32=|(dZ0)y@0=(eZ0)x@d@+x!y@e@+y!y@32*x@+1-g@+:,(:0%.eZs@1+s!0);x@p@- 2+4/;1=y@19=&(eZ0)y@x@"/~o"$y@20<)s@#
 ```
 
 Three rows of 32 bricks; j and l move the paddle. Keep the ball in play. The score is the number of bricks broken.
 
 - **The ball erases what it breaks.** A brick the ball hits isn't drawn over: the ball moves into its cell and reverses, and next frame the ball's old cell is wiped, brick and all.
 - **The paddle erases its own trail.** It is drawn with two blanks on each side, as `"  ====  "`, and moves 2 a frame. It has to move faster than the ball, or the ball can outrun it, and a first version found that out.
-- The paddle's place stays odd, starting at 1 and stepping by 2, so it can never reach 0. That leaves only one bound to clamp, with the unsigned test `32767&30<`.
+- The paddle's place starts at 0 and steps by 2, so it stays even, 0 to 28, and one unsigned test, `32767&30<`, clamps both ends: a step left from 0 gives −2, which the mask turns into a large number.
 - `Z` negates a variable in place: `dZ` and `eZ` are the bounces.
 - A bot that predicts where the ball will land kept it in play for over 1100 frames and broke 41 bricks.
 
 ### Hangman
 
 ```text
-"HANGMAN, 6 misses. Key"$0 1(1+1?0=)7&6*"STACKSBINARYMEMORYCURSORSYNTAXPARSERBUFFERKERNEL"+w!7_b!6 1(1-:b@+95%.:);34b@6+.0m!6u!1("/M/J"$b@$32'm@#" ?"$0?95&c!0f!6 1(1-:w@+,c@=(:b@+:,95=u@+u!c@%.-1f!0):);f@0=(m@1+m!0)u@0>m@6<&)"/M/J"$w@6 1(%:,'1+%1-:);;" won"u@(;" lost"0)$
+"HANGMAN, 6 misses. Key"$0 1(1+1?0=)7&6*"STACKSBINARYMEMORYCURSORSYNTAXPARSERBUFFERKERNEL"+w!7_b!6 1(1-:b@+95%.:);34b@6+.0m!6u!1("/M/J"$b@$" /m ?"$0?95&c!0f!6 1(1-:w@+,c@=(:b@+:,95=u@+u!c@%.-1f!0):);f@0=(m@1+m!0)u@0>m@6<&)"/M/J"$w@6 1(%:,'1+%1-:);;" won"u@(;" lost"0)$
 ```
 
 Guess the word a letter at a time; six misses and you lose. Eight six-letter words, all from the machine room: STACKS, BINARY, MEMORY, CURSOR, SYNTAX, PARSER, BUFFER, KERNEL.
@@ -335,7 +337,7 @@ Guess the word a letter at a time; six misses and you lose. Eight six-letter wor
 ### Maze
 
 ```text
-[P42+41/"/[["$%#59'#"H"$]"MAZE ijkl. Key"$0 1(1+1?0=)r!0_g!0 1(:41/%;:39=3&%39<25&+10+1_.1+:779<);34 1_.1y!1(1x!1(y@41*x@+g@+:32%.y@1=x@37<r@75*74+:r!0<&|42&41-+32%.x@2+:x!38<)y@2+:y!18<)32g@697+."/[[2J/[[H"$g@$79i!1(i@P64'0?3&"Q'Oy"+,80-:i@+g@+,32=&i@P32'i@+:i!697-)"/[[21HOut!"$
+"MAZE ijkl. Key"$0 1(1+1?0=)r!0_g!0 1(:41/%;:39=3&%39<25&+10+1_.1+:779<);34 1_.1y!1(1x!1(y@41*x@+g@+:32%.y@1=x@37<r@75*74+:r!0<&|42&41-+32%.x@2+:x!38<)y@2+:y!18<)32g@697+."/{"$g@$79i!1(i@41/"/~@"$0?3&"Q'Oy"+,80-:i@+g@+,32=&i@41/"/~ "$i@+:i!697-)20 0"/~Out!"$
 ```
 
 A new 19 × 9 maze every game. You are `@`, in the gap at the top right; get out through the gap at the bottom left. i, j, k and l move up, left, down and right.
@@ -351,7 +353,7 @@ A new 19 × 9 maze every game. You are `@`, in the gap at the top right; get out
 Minesweeper, with the flood fill that opens blank areas. It doesn't fit in 280, and is here as an example of what a little more room buys. It is 390 characters. The repository's own Minesweeper, `MINES.B8S`, is the full-size version.
 
 ```text
-[O"012:<DEF"+,59-a@+][Ca!0 8 1(1-:O,16&{%}+%:);16/;][Ea!8 1(1-:O:,32|%.:);][D"/[[H"$0c!11 1(:g@+,32&(c@1+c!0):10/%;:9=(13'10'0):9<%0>&(:g@+:,32&:{(:C:0=(%:E%0)48+%;'0)}0=(;35'0)0)1+:89<);c@]"MINES: row, column. Key"$0 1(1+1?0=)r!0_g!0m!0 1(:10/:9<%0>&%:9<%0>&&:r@75*74+:r!7168&0=16&&%0=96&|:16=m@+m!1_.1+:100<);1(0 1(D:{=0=}%)m@78+=\0?48- 10*0?48-+g@+:,16&:q!\:,32|%.1)" WIN"q@(;;" BOOM"0)$
+[O"012:<DEF"+,59-a@+][Ca!0 8 1(1-:O,16&{%}+%:);16/;][Ea!8 1(1-:O:,32|%.:);][D0:c!:"/~"$11 1(:g@+,32&(c@1+c!0):10/%;:9=(13'10'0):9<%0>&(:g@+:,32&:{(:C:0=(%:E%0)48+%;'0)}0=(;35'0)0)1+:89<);c@]"MINES: row, column. Key"$0 1(1+1?0=)r!0_g!0m!0 1(:10/:9<%0>&%:9<%0>&&:r@75*74+:r!7168&0=16&&%0=96&|:16=m@+m!1_.1+:100<);1(0 1(D:{=0=}%)m@78+=\0?48- 10*0?48-+g@+:,16&:q!\:,32|%.1)" WIN"q@(;;" BOOM"0)$
 ```
 
 An 8 × 8 board with about one mine in eight. Type a row digit, then a column digit, both 1–8. A number is how many of the eight cells around it hold a mine. Open every safe cell to win.

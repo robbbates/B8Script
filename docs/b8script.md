@@ -1,6 +1,6 @@
 # B8Script Spec
 
-Nov 21, 2026 · @ROB8S
+Nov 24, 2026 · @ROB8S
 
 B8Script is a postfix stack language for 64 KB 8-bit computers. Every instruction is one ASCII character, and the source text runs directly, with no compile step.
 
@@ -37,8 +37,8 @@ A program is a byte string read left to right until a NUL byte. Each character a
 | Cell | 16 bits. Cells are untyped bit patterns: the same cell is a signed number (−32768 to 32767), an unsigned number or an address, depending on what reads it. Arithmetic wraps |
 | Truth | 0 is false, anything else true. Comparisons return −1 or 0 |
 | Memory | Byte-addressed 64 KB. Cells in memory are little-endian, unaligned |
-| Data stack | Operands and results. TOS is the top, NOS the one below |
-| Return stack | Return addresses, block starts and values parked with `{` |
+| Data stack | Operands and results. TOS is the top, NOS the one below. It holds at least 64 cells |
+| Return stack | Return addresses, block starts and values parked with `{`, one entry each. It holds at least 64 entries |
 | Ignored | Control characters (01h–1Fh), space and DEL (7Fh) |
 | Reserved | 80h–FFh outside strings. Programs must not use them there. Unchecked builds ignore them; checked builds stop with `X`. Inside strings they are allowed and printed as they are; what they look like is up to the terminal |
 | End | NUL. The end of a loaded file counts as NUL |
@@ -63,13 +63,22 @@ Operands follow written order: `a b -` is a − b. Effects are written `( before
 
 **Strings.** `"` pushes the address of the text after it and skips to the closing `"`. The text stays inline and nothing is copied. `$` prints it: `"Hi"$`.
 
-Inside a string, `/` plus a character clears that character's bit 6. Escapes are decoded only when printed; `>` is an ordinary character in strings.
+Inside a string, `/` and the character after it are an escape. Escapes are decoded only when `$` prints the string; `>` is an ordinary character in strings.
 
 | Escape | Gives | Examples |
 |---|---|---|
-| `/@` to `/_` | Control codes 00h–1Fh | `/M` CR, `/J` LF, `/[` ESC |
-| `` /` `` to `/DEL` | Space to `?` (20h–3Fh) | `/b` = `"`, `/o` = `/`, `/~` = `>` |
-| `/` before 20h–3Fh | That character | `/"` = `"`, `//` = `/` |
+| `/@` to `/_` | Control codes 00h–1Fh: the character with bit 6 cleared | `/M` CR, `/J` LF, `/[` ESC |
+| `/` before 00h–3Fh | That character | `/"` = `"`, `//` = `/`, `/?` = `?` |
+| `/DEL` | `?` (DEL with bit 6 cleared) | |
+| `/a` to `/z` | That variable's value, printed as `#` prints it: signed decimal, no space. It is read when the string is printed | `"Score: /s"$` |
+| `/{` | Clear the screen; the cursor goes to the top left | |
+| `/}` | Clear from the cursor to the end of the line | |
+| `/\|` | Show the cursor | |
+| `` /` `` | Hide the cursor | |
+| `/~` | Move the cursor to a row and column, both counted from 0, taken from the data stack under the string's address: `r c"/~*"$` is `( row col addr -- )` | `5 10"/~*"$` |
+| `/` before 80h–FFh | That character with bit 6 cleared | |
+
+Each `/~` in a string takes two more cells, in order: `1 2 3 4"/~a/~b"$` prints `a` at row 3, column 4, and `b` at row 1, column 2. The console escapes (`/{` `/}` `/|` `` /` `` `/~`) are described under [The console](#the-console).
 
 A skip steps over `/` and the character after it, so `/"` puts a quote in a string without ending it. The same rule means a `/` just before the closing quote escapes the quote: a string that ends in `/` must write it as `//`. This applies to comments too, since a comment is a string.
 
@@ -125,7 +134,7 @@ Characters marked **†** have a catch, explained under *Marked characters* belo
 | Char | Meaning | Effect |
 |---|---|---|
 | `"` **†** | Address of the inline string | `( -- addr )` |
-| `$` | Print string, decoding escapes | `( addr -- )` |
+| `$` **†** | Print string, decoding escapes | `( addr -- )` |
 | `'` | Emit a character (the low byte) | `( c -- )` |
 | `#` | Print signed decimal, with no space after | `( n -- )` |
 | `?` **†** | n > 0: wait up to about n ms for a key and return it, or 0 if none came. 0: wait until a key arrives. No echo. Negative: read a line (see `?` below) | `( n -- c )` or `( -n -- addr )` |
@@ -148,6 +157,7 @@ Characters marked **†** have a catch, explained under *Marked characters* belo
 - `[` **Looks at the next character.** An uppercase letter defines that word; a lowercase letter stores the body's address in that variable; a space pushes the body's address (an anonymous block). Either way it then skips to the matching `]`. Any other character is unsafe: a checked build stops with `W`. Executing `]` jumps to whatever address is on top of the return stack.
 - `A`–`Z` **Start undefined.** Calling a word that was never defined is unsafe: a checked build stops with `U`.
 - `"` **The address points into the program text.** An unclosed string runs on into memory (a checked build stops with `Q`).
+- `$` **Can take more than the address.** Each `/~` in the string takes a row and a column from under it: `r c"/~text"$` is `( row col addr -- )`. With too few cells that is a data stack underflow (a checked build stops with `s`). The `/a` to `/z` escapes read their variables as the string is printed, not when it was written.
 - `?` **Takes a count.** n? (n > 0) waits up to about n ms and returns 0 if no key came, so 1? is a quick check for real-time programs and 0? waits for a key. The timing need only be approximate. -n? reads a line of at most n characters with echo and returns its address. Every implementation guarantees:
   - the text ends with CR (13), which is stored;
   - at most n characters are stored before the CR; an implementation may cap n, but at no less than 127;
@@ -155,7 +165,7 @@ Characters marked **†** have a catch, explained under *Marked characters* belo
   - CR ends the line;
   - the line lasts until the next -n?.
 
-  The rest is implementation-defined, so that a platform's own line reader (BDOS 10, a monitor's routine) can be used as it is: how Backspace is echoed, what Delete and other control keys do, whether a full line ends by itself, and whether the CR is echoed. -1? reads one character confirmed with CR. A key that arrives while no ? is running may be lost on machines without a UART; a one-byte UART keeps only the newest.
+  The rest is implementation-defined, so that a platform's own line reader (a monitor's routine, say) can be used, as long as a key held by the break check comes first in the line (see [The break key](#the-break-key)): how Backspace is echoed, what Delete and other control keys do, whether a full line ends by itself, and whether the CR is echoed. -1? reads one character confirmed with CR. A key that arrives while no ? is running may be lost on machines without a UART; a one-byte UART keeps only the newest.
 - `` ` `` **Two jobs, chosen by the next character.** A hex digit (`0`–`9`, `A`–`F` or `a`–`f`) loads bytes; anything else executes. Words `A`–`F` and variables `a`–`f` right after a grave count as hex, so to execute when one follows, put a space after the grave: `` x@` b@ ``.
 
 Besides digits, four characters look at the text after them: `"`, `-`, `[` and `` ` ``.
@@ -293,7 +303,7 @@ B8Script comes in two kinds of build. An **unchecked** build checks nothing, for
 | Category | Includes |
 |---|---|
 | Required | Everything in this spec, for programs that stay inside it |
-| Implementation-defined | Stack sizes, heap start and limit, memory layout, starting values of variables and words, how often the break key is polled, the -n? details listed under `?`, system addresses, the machine-code contract, and which environments a build offers |
+| Implementation-defined | Stack sizes beyond the 64 data cells and 64 return-stack entries every build has, heap start and limit, memory layout, starting values of variables and words, how often the break key is polled, the -n? details listed under `?`, system addresses, the machine-code contract, and which environments a build offers |
 | Unsafe (anything may happen in an unchecked build) | Data or return stack underflow or overflow, heap collision, stores outside the program's space, calling an undefined word, unclosed strings, printing an address with no closing quote, `[` not followed by a letter or space, reserved bytes outside strings, dividing by zero, unbalanced or mismatched brackets, and anything machine code does |
 
 ### What a checked build adds
@@ -333,16 +343,14 @@ B8Script comes in two kinds of build. An **unchecked** build checks nothing, for
 
 ```
 Err X @ 4,16
-d@:*n@>\
-Stk 3: 1 2 42
-Rtn 1
+D:3: 1 2 42
+R:1
 ```
 
 - The report starts with CR LF, so it never lands in the middle of the program's output.
 - **Line 1:** `Err`, the code, `@`, then the line and column of the character that failed, both counted from 1. A line typed at a prompt or editor is line 0. Values up to 32767 are guaranteed; a build may print up to 65535. For `U` the place is the call; for `N` it is the opener where the skip started.
-- **Line 2:** up to 16 characters of the program text from that place, printed raw (escapes not decoded), stopping early at CR, LF or NUL.
-- **Line 3:** the data stack as it was when the error hit: `Stk`, the depth, then up to the top 8 values, bottom to top, so the top is last. More than 8 are shown as `…` and the top 8.
-- **Line 4:** `Rtn` and the return stack's depth.
+- **Line 2:** the data stack as it was when the error hit: `D:`, the depth and a colon, then up to the top 8 values, each after a space, bottom to top, so the top is last. More than 8 are shown as `…` and the top 8. For a `Q` from `$` the top is the string's address as `$` got it, not how far it had printed, over whatever cells its `/~` escapes left.
+- **Line 3:** `R:` and the return stack's depth.
 - The report goes to the console, or the platform's error channel where it has one, never into a program's redirected output.
 
 **After an error or a break,** a one-shot build returns to the OS or monitor. A build with a prompt or editor returns there, with both stacks cleared and words and variables kept.
@@ -376,32 +384,33 @@ Output is a stream of bytes: `'`, `$` and `#` write to it, and a line ends with 
 | LF (0Ah) | Cursor down one line; on the bottom line the screen scrolls up |
 | BS (08h) | Cursor left one place, without erasing |
 | BEL (07h) | A beep, or nothing |
-| ESC (1Bh) | Starts an escape sequence (below) |
 
-What the other control codes do (TAB among them) is implementation-defined: a machine may show them as glyphs. So is what happens after a character is written in the last column: the cursor may wrap to the next line or stay. Programs that draw to the edge of the screen should place the cursor themselves.
+What the other control codes do (TAB and ESC among them) is implementation-defined: a machine may show them as glyphs. So is what happens after a character is written in the last column: the cursor may wrap to the next line or stay. Programs that draw to the edge of the screen should place the cursor themselves.
 
-**Screen control.** B8Script has no screen commands of its own. Programs use a small subset of the ANSI (VT100) escape sequences, written as strings, and every environment should make that subset work:
+**Screen control** is done with the console escapes of `$`:
 
-| Sequence | In a string | Does |
-|---|---|---|
-| ESC `[2J` | `"/[[2J"` | Clear the screen. The cursor may or may not move, so follow it with ESC `[H` |
-| ESC `[J` | `"/[[J"` | Clear from the cursor to the end of the screen |
-| ESC `[H` | `"/[[H"` | Cursor to the top left |
-| ESC `[`row`;`col`H` | `"/[[5;10H"` | Cursor to that row and column, counted from 1 |
-| ESC `[K` | `"/[[K"` | Clear from the cursor to the end of the line |
-| ESC `[2K` | `"/[[2K"` | Clear the whole line the cursor is on; the cursor stays where it is |
-| ESC `[?25l` | `"/[[?25l"` | Hide the cursor |
-| ESC `[?25h` | `"/[[?25h"` | Show the cursor |
+| Escape | Does |
+|---|---|
+| `/{` | Clear the screen and put the cursor at the top left, row 0, column 0 |
+| `/}` | Clear from the cursor to the end of its line. The cursor stays where it is |
+| `/~` | `( row col addr -- )` Move the cursor to that row and column, counted from 0 |
+| `/\|` | Show the cursor |
+| `` /` `` | Hide the cursor |
 
-- **Hiding the cursor.** Some terminals don't understand ESC `[?25l` and ESC `[?25h`. Put them at the very start and end of the program, each on its own line, so they are easy to delete or comment out for such a terminal (see *Screen* under Idioms). A program that hides the cursor must show it again before it ends, or the cursor stays hidden after it. After a break or an error the program can't, so an environment that goes back to a prompt or editor should show the cursor again itself, where its console understands the sequence.
-- **On an ANSI terminal or emulator** there is nothing to do: the bytes go straight out.
-- **Anywhere else** (a machine's own video, a non-ANSI terminal, or a console that needs a mode switch, as Windows does), the implementation or the machine's console driver translates the subset.
-- **Everything else is swallowed.** A translator must quietly swallow every other sequence of the ANSI shape (ECMA-48): ESC, `[`, any number of parameter bytes from 30h to 3Fh (digits, `;`, `<` `=` `>` `?`), any number of intermediate bytes from 20h to 2Fh, then one final byte from 40h to 7Eh. A program that uses more of ANSI (colours, say) then loses only the effect, and prints no garbage. ESC followed by anything other than `[` is implementation-defined.
-- **The existing builds:** the Z80, 8080, 6502 and 6809 interpreters send bytes unchanged, so on those machines the subset needs an ANSI terminal, or a console output routine (`CONOUT` or the machine's own) that translates it. The Windows builds switch the console into its ANSI mode (Appendix G).
+```text
+"/{"$ 0 30"/~Hello"$ 2 0"/~Score: /s/}"$
+```
+
+- **Hiding the cursor.** A program that hides the cursor must show it again before it ends, or the cursor stays hidden after it. After a break or an error the program can't, so an environment that goes back to a prompt or editor should show the cursor again itself.
+- **Rows and columns** run from 0 to one less than the screen's height and width. The cursor's place after `/~` with a row or column off the screen is undefined.
+- **How a build does it** is up to the build, and its appendix says. The existing interpreters have a build switch, `ANSI`:
+  - `ANSI = 1` sends ANSI (VT100) sequences: ESC `[H` ESC `[J` for `/{`, ESC `[K` for `/}`, ESC `[?25h` and ESC `[?25l` for `/|` and `` /` ``, and ESC `[` row+1 `;` col+1 `H` for `/~`.
+  - `ANSI = 0` calls four routines of the machine's own instead: clear the screen, clear to the end of the line, cursor on or off, and cursor to a row and column. Each appendix gives their interface.
+  - The generic builds default to `ANSI = 0`; the CP/M builds always send ANSI; the Windows builds send ANSI, which the console understands in the mode they set (Appendix G).
 - **Screen size** is implementation-defined and given in the appendix; 80 × 24 is the usual. Programs that assume a size should say so.
-- **More than the subset** (colours, reverse video, scrolling regions) works only on real ANSI terminals. Keep it optional in a program.
+- **More than this** (colours, reverse video, scrolling regions) has no escape. A program can still send a terminal's own sequences, with `/[` or `27'`, but they then work only on that kind of terminal. Keep them optional.
 
-Keep a program's screen control in a few words at the top (see *Screen* under Idioms). Moving the program to a machine with some other console then means rewriting those words and nothing else.
+Because a program's screen control is in the escapes and not in a terminal's codes, the same program draws the same screen on every console that a build supports.
 
 [↑ Back to top](#b8script-spec)
 
@@ -546,22 +555,25 @@ These assume you know your nesting depth: inside a block, the top of the return 
 | Name | Code |
 |---|---|
 | Comment | `"any text";` |
-| New line | `13'10'` |
+| New line | `13'10'`, or `/M/J` inside a string |
+| Print a variable in the text | `"You have /g gold and /h hit points./M/J"$` (the values as `#` prints them) |
 | Wait for a key | `0?` |
 | Random seed from key timing | `0r! [K0 1(;r@1+r!1?:0=)]` |
 | Read a number | `[N0v!1(0?:48<\48-:#v@10*+v!1);v@]` |
 | Read a line | `-72?a!` (the text at a ends with CR, 13) |
 | Run a typed line | `[X{] -72?:{1(:,13=\1+1)93%.}X` (writes `]` over the CR, then runs it) |
 
-**Screen** (the console subset; see [The console](#the-console))
+**Screen** (the console escapes; see [The console](#the-console))
 
 | Name | Code | Effect |
 |---|---|---|
-| Clear the screen | `[C"/[[2J/[[H"$]` | Clears and homes the cursor |
-| Clear to the end of the line | `[K"/[[K"$]` |  |
-| Clear the whole line | `"/[[2K"$` | The cursor stays put; send CR after it to start the line again |
-| Hide the cursor, show it again | `"/[[?25l"$` first, `"/[[?25h"$` last | Each on its own line at the start and end of the program, so it can be deleted for a terminal that doesn't know it |
-| Cursor to row, column | `[Y27'91'%#59'#72']` | `( row col -- )`, counted from 1: `5 10Y` sends ESC `[5;10H` |
+| Clear the screen | `"/{"$` | Clears it and puts the cursor at the top left |
+| Clear to the end of the line | `"/}"$` | The cursor stays put |
+| Cursor to row, column | `r c"/~"$` | Both from 0: `0 0"/~"$` is the top left |
+| Print at a place | `5 10"/~Hello"$` | The text starts at row 5, column 10 |
+| A status line | `0 0"/~Score /s  Lives /l/}"$` | Writes over the last one: `/}` clears what is left of it |
+| Hide the cursor, show it again | ``"/`"$`` first, `"/\|"$` before the program ends | A game that redraws looks steadier with the cursor hidden |
+| Cursor word | `[Y"/~"$]` | `( row col -- )`: `5 10Y`, for a program that places the cursor from the stack often |
 
 **Debugging**
 
@@ -582,7 +594,7 @@ If anything leaked, the top of the stack at the end isn't the sentinel. Add it w
 - **Store before you read.** Variables start with garbage. Seed a random counter with `0r!`.
 - **Prefer the stack to variables inside reusable words.** A word that stores into `n` or `d` clobbers any caller using them. The stack-only modulo `M` avoids this.
 - **Keep `{` and `}` paired inside a block** unless you mean a return-stack trick: `)` jumps to whatever is on top.
-- **Loop instead of recursing forever.** Each call grows the return stack; use a block or a tail call (`G`).
+- **Loop instead of recursing forever.** Each call grows the return stack; use a block or a tail call (`G`). A portable program stays within 64 return-stack entries and 64 data cells, the least every build holds: a word call, a block entered and a value parked with `{` each take an entry.
 - **Mask to make flags arithmetic.** True is all ones, so `flag 7&` gives 7 or 0 with no branch: `[D:9>7&+48+']` turns a nibble into a hex digit.
 - **Break with a value.** `cond:q!\` stores the flag and breaks in one step; test `q@\` after the closer to leave several levels.
 - **Build machine code in pieces.** Save the start with `:` or `{` before the first load, and drop the final address with `;`.
@@ -594,8 +606,9 @@ If anything leaked, the top of the stack at the end isn't the sentinel. Add it w
 - **Time real-time programs with the wait, not with a count of tiny waits.** Make each frame one `n?` with n about the frame you want (`20?` for 50 frames a second), act on the key if one came, and count frames for slower events such as gravity. A frame then lasts about n ms on every machine. A loop of `1?` with a large count to make a second runs at a different speed on every machine: each pass also costs the time its own code takes to run, which differs from machine to machine, and on some hosts the shortest wait is far longer than 1 ms (15.6 ms on Windows without a high-resolution timer). Keep each frame's work short, and remember that a key ends the wait early, so a frame with a key in it is shorter.
 - **`1?` is a quick look for a key**, for checking a break key in a long computation, not a clock. Look every few hundred steps rather than every step, as each look costs up to a millisecond.
 - **Reading addresses.** `#` prints signed, so an address above 7FFFh prints as a negative number: F000h prints as −4096. A decimal literal wraps, so `61440` and `-4096` are the same address. Every appendix lists its addresses in hex, unsigned and signed.
-- **Slashes in strings.** Write `//` for a slash: `"n/s/e/w"` would print `n3%7`.
-- **Keep screen control in words.** Put every escape sequence in a few words such as C, K and Y above, so a program moves to another console by rewriting only them.
+- **Slashes in strings.** Write `//` for a slash. A slash before a lowercase letter prints a variable, so `"Again (y/n)? "` prints `y` and then variable n's value: write `"Again (y//n)? "`, and `"n//s//e//w"` for `n/s/e/w`.
+- **The variable escape is for plain variables.** `/x` prints the cell of variable x, read at the moment the string is printed, the same as `x@#`. It can't print an expression, a cell of an array or a value on the stack: print those with `#` between two strings. A string that is printed later than it is built, or copied elsewhere and printed from there, prints the variable's value at that later time.
+- **Several `/~` in one string.** Each `/~` takes a row and a column, under the string's address and in that order. Several in one string take them pair by pair, the first pair nearest the address.
 - **Develop on a checked build, run on an unchecked one.** Then test once on the unchecked build too, for the reasons under Don't rely on.
 - **System values live in the appendices.** Heap limit, free memory, the break-off address and similar values are per build. A program that uses them is tied to that build.
 
@@ -608,8 +621,8 @@ These differ between builds or environments, so a portable program must not depe
 - keys typed while a program runs, other than through the held key;
 - how -n? echoes and treats keys other than Backspace and CR;
 - the result of dividing by 0;
-- where the cursor is after a clear screen, what happens after the last column, what control codes other than CR, LF, BS, BEL and ESC do, the screen's size, and any escape sequence outside the console subset;
-- memory layout, stack sizes and the heap limit.
+- what happens after the last column, what control codes other than CR, LF, BS and BEL do, the screen's size, where the cursor goes for a row or column off the screen, and what a terminal's own sequences (sent with `/[` or `27'`) do;
+- memory layout, the heap limit, and either stack holding more than 64 (data cells, or return-stack entries: a word call, a block entered and a value parked with `{` take one each).
 
 [↑ Back to top](#b8script-spec)
 
@@ -641,7 +654,7 @@ r@99M1+s! 0t!
    g@s@<( "  higher"$ 0)
    g@s@>( "  lower"$ 0)
    g@s@=0=)
-"/M/JGot it in "$ t@# " tries!/M/J"$
+"/M/JGot it in /t tries!/M/J"$
 ```
 
 **Machine code with the grave** (Z80 and 8080). Load once, call as often as needed. Each load needs one byte more than its code, for the RET.
@@ -666,7 +679,7 @@ This chapter is for anyone writing an interpreter. The first part lists what the
 - **Characters.** Every character in the Character reference, with exactly the effects given, including the look-ahead of `"`, `-`, `[` and `` ` ``.
 - **Cells.** 16-bit, little-endian in memory, unaligned; arithmetic wraps.
 - **Numbers.** Decimal only, wrapping at 16 bits; `-` before a digit negates.
-- **Strings.** The `/` escape is decoded only by `$`, and decoding is nothing more than clearing bit 6 of the character after the `/` (AND BFh). There are no other tests: whatever follows the `/` is accepted and printed with bit 6 cleared, so `//` and `/"` give themselves because they have no bit 6. Skips step over `/` and the next character.
+- **Strings.** The `/` escape is decoded only by `$`. A character from 60h to 7Eh after the `/` is one of the escapes in the table under [Literals](#literals): `/a` to `/z` print the variable as `#` does, reading it then, and the five console escapes do as [The console](#the-console) says, `/~` taking its two cells. Any other character after the `/` (below 60h, DEL, or 80h–FFh) is printed with bit 6 cleared (AND BFh), with no further tests, so `//` and `/"` give themselves because they have no bit 6. Skips step over `/` and the next character, whatever it is.
 - **Skipping.** The skipper as described under [How skipping works](#how-skipping-works): both bracket kinds counted together, strings stepped over whole.
 - **`/`.** Truncates toward zero, remainder on top with the dividend's sign; fast for 2 and −2.
 - **`_`.** Signed count; `0_` reads the top.
@@ -674,8 +687,9 @@ This chapter is for anyone writing an interpreter. The first part lists what the
 - **The hex loader.** Mixed case, an odd last digit dropped, the platform's RET byte written, its address left.
 - **The break key.** Ctrl-C stops every build, polled as described under The break key.
 - **Reserved bytes.** Ignored by unchecked builds, `X` in checked builds.
-- **The console.** The control codes and the console subset should work in every environment, translated where the console is not ANSI, with every other ANSI-shaped sequence swallowed (see [The console](#the-console)). An appendix says how its build meets this, and gives the screen size.
+- **The console.** The control codes CR, LF, BS and BEL, and the five console escapes, in every environment (see [The console](#the-console)). An appendix says how its build does the escapes, and gives the screen size.
 - **Checked builds.** The startup state, the error codes, the report format and the behaviour after an error, as in [Errors and checked builds](#errors-and-checked-builds).
+- **Stacks.** A data stack of at least 64 cells and a return stack of at least 64 entries. More is allowed; a program can't count on it.
 - **An appendix.** Each implementation documents its memory map, stack sizes, heap limit, machine-code contract, RET byte, system addresses (in hex, unsigned and signed decimal) and build options.
 
 ### How programs get in
@@ -692,8 +706,13 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 - **Group the punctuation.** The 32 punctuation characters sit in four ranges (21h–2Fh, 3Ah–40h, 5Bh–60h, 7Bh–7Eh). Subtracting a different constant for each range packs them into one table index of 0–31 with no gaps.
 - **Ignore cheaply.** Control characters, space, DEL and high bytes all go back to the top of the loop through one branch. NUL is the only control character that needs its own test.
 - **Keep TOS in a register.** On the Z80 and 8080 HL holds TOS, so `+` is `pop de` / `add hl,de`. Machine code never sees it there, because the code's own address was TOS and is consumed by the call.
-- **Make "next" one byte.** On the Z80 and 8080, `RST` routines in page zero give one-byte calls for "next character", "drop, then next", "pop the return stack", "negate" and "print A". A handler ends in one byte instead of three.
-- **Use a spare register pair for the return stack.** The Z80 keeps the return-stack pointer in HL' (the alternate HL), so only the return-stack routines need `EXX`. The data stack is the CPU stack, which is what the machine-code contract wants anyway.
+- **Walk with the IP.** The 6809's `$` parks the IP on the return stack and moves the string's address into the IP register, so the loop reads with the same post-increment addressing as the inner loop and one pull restores the IP and returns.
+- **Read a digit twice rather than save it.** The 6809's number reader adds the ASCII digit straight from the text and takes the `'0'` off at 16 bits, so the digit needs no register or stack slot of its own.
+- **Make "next" one byte.** On the Z80 and 8080, `RST` routines in page zero give one-byte calls for "next character", "drop, then next", "pop the return stack", "negate" and "print A". A handler ends in one byte instead of three. This is for a build that owns page zero: under CP/M, page zero is the system's.
+- **Without page zero, a register can hold "next".** The Z80 CP/M builds keep the address of the inner loop in IX for the whole run, so a handler ends with `JP (IX)`: two bytes, and faster than `JP`. Restore it after anything that may change it (the BDOS, machine code).
+- **Tail calls.** A routine that ends by calling another and returning can jump to it instead (`CALL putc / RET` is `JP putc`), and a routine whose last act is a call can be placed so that it falls into it.
+- **Use an index register for the return stack.** The Z80 keeps the return-stack pointer in IY. The data stack is the CPU stack, which is what the machine-code contract wants anyway.
+- **Leave the alternate registers alone.** Interrupt routines often use the Z80's alternate registers as their own, without saving them. An interpreter that kept state in them (as the Z80 one once kept its return-stack pointer in HL') can be corrupted at any moment on such a machine.
 
 **Dispatch tables**
 
@@ -705,15 +724,29 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 **Handlers**
 
 - **Share tails.** `,` is the last few instructions of `?`: both end by putting a byte into TOS. A `CP n` opcode byte can step over the one-byte entry of the next handler, so two entry points share code.
-- **Hide entries.** The checked builds' error entries each load their letter and then hide the next entry inside a 3-byte `LD HL,nn`, so all of them fall through to one error routine.
+- **Hide entries.** The checked builds' error entries each load their letter and then hide the next entry inside a 3-byte `LD HL,nn`, so all of them fall through to one error routine. On the 6502 the byte 24h (`BIT zp`) hides a one-byte instruction and 2Ch (`BIT abs`) a two-byte one; on the x86, 3Ch (`CMP AL,n`) hides one byte.
 - **Branchless compare.** Flip both sign bits, then `sbc hl,de` / `sbc hl,hl` gives −1 or 0 straight from the carry.
 - **Division by 2 as a shift.** Test for 2 and −2 before the 16-round loop, then shift and fix up the sign.
 - **Use addresses where they lie.** The zero-page 6502 uses a cell on the data stack as the pointer itself (`(0,X)`), so `@` and `!` need no copying, and a drop is two `INX`.
-- **One routine, called twice.** The zero-page 6502 does 16-bit operations a byte at a time through one short routine called for each half.
+- **One routine, called twice.** The zero-page 6502 does 16-bit operations a byte at a time through one short routine called for each half. To run a routine twice in a row, call it and then fall into it: `JSR nip` with `nip:` right after it drops two cells for one extra call.
+- **Push the return target before dispatching.** When every case of a dispatch ends by going to the same place, push that place first and each case ends in a plain return, or in a jump to its last routine, which then returns there. The Windows editor's commands all return to the editor's loop this way, and the escapes of `$` to the print loop.
+- **Pack a short sequence in a constant.** The Windows builds keep each console escape's tail in a 32-bit constant, low byte first, and print bytes while shifting right until nothing is left: one constant and a three-instruction loop instead of a string and its pointer.
+
+**The escapes**
+
+- **One range test.** After the `/`, compare with 60h and 7Fh: in between is an escape, and everything else falls through to the AND BFh. Inside, subtracting 7Bh leaves `{` `|` `}` `~` as 0 to 3, a borrow for `` ` `` and the letters, and a further add of 1Ah splits those two apart and leaves the letters as 0–25.
+- **Reuse the number printer.** `/a` to `/z` are `#` on the variable's cell, and the ANSI `/~` prints its row and column with the same routine.
+- **Let each escape return into the loop.** Push the loop's address once, and each escape can end in a plain return or a tail jump into its last routine (such as "ESC [ and A").
+- **Restart rather than return through frames.** When a routine called inside a loop must also change the stack under its caller's return address (as `/~` does inside the checked build's `$`), throw the return address away, do the work, and jump to a point that calls the routine again: nothing has to reach past a frame.
+- **Keep `/~` away from return addresses.** Where `$` is a subroutine (in a checked build it shares its loop with the error report's texts), the two cells sit under the routine's return address. Throw that address away, take the cells, and call the loop again, rather than reach past it; and keep the string's original address (for a `Q` report) in a RAM cell rather than on the data stack.
+- **Check each `/~` in a checked build.** One string can hold many `/~`, so a once-per-character stack test is not enough: look before each one that the cells are there, and report `s` if not, so that nothing is ever written past the stack's spare bytes.
+- **Share the start of the sequences.** In an ANSI build every console escape starts with ESC `[`: one routine sends it, and another sends it followed by one more character.
 
 **Checked builds**
 
 - **Test the stacks once per character, not in every handler.** Give each stack its own page, so an overrun is simply the pointer's high byte leaving that page, and put a guard band below each stack to absorb the cell or two before the test runs.
+- **A small difference from the low bytes.** When two addresses are known to be less than 256 apart, the difference of their low bytes is the whole difference, even across a page: the Z80 report works out the return stack's depth that way.
+- **Two stacks in one page, tested by bit 7.** With the 64 cells and 64 entries the spec asks for, both stacks fit in one 256-byte page, one in each half. A pointer that leaves its half, in either direction, flips bit 7 of its low byte, so one bit test per stack finds an overflow and an underflow alike. What spills into the other half does no harm, since an error clears both stacks anyway. Two catches. A stack that is the CPU's own (the Z80's and 8080's data stack, the 6809's return stack) takes calls and interrupts below its lowest point even when it is used correctly, so it needs free bytes there that the other stack never holds: a page can't give it those and still hold 64 of each, so such a stack wants room of its own below. And the page's two outer edges still need a few spare bytes, for what a character pushes or a call writes before the test sees it.
 - **Report the place cheaply.** Count lines and columns only when an error happens, by scanning from the program's start to the failing address; nothing is counted while the program runs.
 - **Save the opener for `N`.** The skip routine keeps the address where it started, so a bracket error reports the opener, not the closer it tripped on.
 - **Default word cells.** Point every word cell at one internal byte that stops with `U` and reports the return address on top of the return stack as the place. An unchecked build that wants a safe default can point them at a hidden `]` instead.
@@ -726,7 +759,7 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 
 ### Build options
 
-An implementation may offer its variants as assembly switches. The existing sources use `CPM` (a CP/M .COM file or a generic ROM image), `CHECKED` and `EDITOR`. Which environments a build offers is up to the implementation; the smallest builds for vintage and homebrew machines are typically unchecked runners, with the loader left to the machine.
+An implementation may offer its variants as assembly switches. The existing sources use `CPM` (a CP/M .COM file or a generic ROM image), `CHECKED`, `EDITOR` and `ANSI` (how the console escapes reach the screen; see [The console](#the-console)). Which environments a build offers is up to the implementation; the smallest builds for vintage and homebrew machines are typically unchecked runners, with the loader left to the machine.
 
 [↑ Back to top](#b8script-spec)
 
@@ -762,18 +795,17 @@ This section is a suggestion, so that line editors on different machines feel al
 | `n`^E | Edit | Put line n in the input line to edit; Return replaces it |
 | ^R, `name`^R | Read | Load. With storage, from the named file. Without, by paste: raw text until ^Z or ^@ replaces the program |
 | ^W, `name`^W | Write | Save. With storage, to the current or named file. Without, print the raw text for the terminal to capture |
-| ^N ^N | New | Clear the program (pressed twice in a row) |
-| ^V | View | Show both stacks, the program size, free memory, the line count, and the build's name and version |
+| ^N | New | Clear the program |
 | ^X | eXit | Leave to the OS or monitor |
 | Esc (^[) | — | Cancel the line being typed |
-| ^B, ^F, ← → | Back, Forward | Move the cursor in the line, with insert and delete mid-line |
+| ← → | — | Move the cursor in the line, with insert and delete mid-line |
 | Backspace, Delete | — | Delete the character before the cursor |
 | ^C | — | Break a running program |
 
 - **Esc and arrow keys.** A lone Esc cancels. Arrow keys send Esc `[` and a letter, so after Esc the editor waits about 5 ms for another key; if `[` follows, it reads the sequence, acts on right and left, and ignores the rest.
 - **Keys to avoid.** ^S and ^Q are XON/XOFF flow control on many serial links and may never reach the program. ^Z is CP/M's end of file. ^I is Tab, which programs may use for indentation. ^H, ^J and ^M are Backspace, LF and CR.
-- **Its own line reader.** The editor reads keys itself, rather than through an OS line reader such as BDOS 10, which would swallow the command keys. `-n?` may still use the OS reader.
-- **After a run, an error or a break,** the editor comes back with words and variables kept. After an error or break both stacks are cleared.
+- **Its own line reader.** The editor reads keys itself, rather than through an OS line reader such as CP/M's BDOS 10, which would swallow the command keys.
+- **After a run, an error or a break,** the editor comes back with words and variables kept. After an error or break both stacks are cleared, and the cursor is shown, in case the program had hidden it.
 
 ### The screen editor
 
@@ -792,8 +824,8 @@ Two longer programs, written as files with comments. Comments are strings droppe
 "Each grid has a border of dead cells (34 x 18 bytes), so the eight";
 "neighbours of a cell are always at fixed offsets from its address.";
 
-"Hide the cursor while it runs: delete the next line for a terminal without ESC [?25l.";
-"/[[?25l"$
+"Hide the cursor while it runs";
+"/`"$
 
 "Variables";
 "  g h  addresses of the current and next grids (one byte per cell, 0 or 1)";
@@ -814,10 +846,10 @@ Two longer programs, written as files with comments. Comments are strings droppe
 "R: point a just before the first cell of row j";
 [R j@34*g@+a!]
 
-"P: print grid g at the top of the screen";
-[P "/[[H"$
+"P: print grid g at the top of the screen, then the generation number";
+[P 0 0"/~"$
    1j! 1( R 32 1( a@1+:a!, ".O"+,' 1-: ); 13'10' j@1+:j! 17<)
-   "Generation "$ k@#]
+   "Generation /k"$]
 
 "G: compute the next generation into h, then swap the grids. A cell is";
 "   alive next exactly when (neighbours OR itself) = 3: 3 neighbours, or";
@@ -838,11 +870,11 @@ Two longer programs, written as files with comments. Comments are strings droppe
 3 2S 4 3S 2 4S 3 4S 4 4S
 
 "Clear the screen, then run until a key is pressed or 200 generations pass";
-"/[[2J"$ 0k!
+"/{"$ 0k!
 1( P G k@1+k! 1?0= k@200<&)
 
-"Show the cursor again: delete the next line too if the one at the start was deleted.";
-"/[[?25h"$
+"Show the cursor again";
+"/|"$
 ```
 
 **Star Trek** (`TREK.B8S`). A short version of the classic: one quadrant of 8 × 8 sectors, Klingons to destroy, a starbase to dock at.
@@ -964,7 +996,7 @@ Two longer programs, written as files with comments. Comments are strings droppe
 "Each turn: scan, show status, read a command and run it,";
 "let the Klingons fire, use up a stardate, then check for the end";
 1( S
-   "Energy "$ e@# "  Torpedoes "$ t@# "  Klingons "$ k@# "  Stardates "$ d@# L
+   "Energy /e  Torpedoes /t  Klingons /k  Stardates /d"$ L
    "Command: n s e w move, p phasers, t torpedo, q quit? "$ K:' L m!
    m@112=( H 0)
    m@116=( T 0)
@@ -982,22 +1014,22 @@ q@0=)
 
 ## Appendix A: Z80
 
-Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`.
+Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`, `ANSI`.
 
 **Builds**
 
 | Build | File | Bytes | Notes |
 |---|---|---|---|
-| Generic ROM | `b8s-z80-rom-0000.bin` | 765 | Starts at 0000h (reset); owns page zero |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,163 |  |
-| CP/M runner | `B8SZ80.COM` | 831 | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` | 1,243 |  |
-| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,488 | The suggested standard under [Environments](#environments); see the interpreters README |
-| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,796 |  |
-| CP/M with the line editor | `B8SZ80E.COM` | 1,663 | `B8SZ80E PROG.B8S`, or with no file |
-| The same, checked | `B8SZ80EC.COM` | 1,987 |  |
+| Generic ROM | `b8s-z80-rom-0000.bin` | 835 | Starts at 0000h (reset); owns page zero. `ANSI = 0`; with `ANSI = 1`, 886 |
+| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,219 | With `ANSI = 1`, 1,266 |
+| CP/M runner | `B8SZ80.COM` | 1,017 | `B8SZ80 PROG.B8S` |
+| CP/M runner, checked | `B8SZ80C.COM` | 1,414 |  |
+| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,355 | The suggested standard under [Environments](#environments); see the interpreters README |
+| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,742 |  |
+| CP/M with the line editor | `B8SZ80E.COM` | 1,646 | `B8SZ80E PROG.B8S`, or with no file |
+| The same, checked | `B8SZ80EC.COM` | 2,048 |  |
 
-**Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), HL' is the return-stack pointer. A and DE are scratch.
+**Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), IY is the return-stack pointer. A and DE are scratch. In the CP/M builds IX holds the inner loop's address, so a handler ends with `JP (IX)`. The alternate registers are not used, so an interrupt routine may use them.
 
 **Memory map (generic build)**
 
@@ -1013,27 +1045,41 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 827Ah | 33402 | −32134 |
 
-Under CP/M the pages sit after the image and the heap limit is the BDOS. The break-off cell is still at offset 7Bh of the letter page, which is the page below the program text: 077Bh (1915) in `B8SZ80.COM`, 087Bh (2171) in `B8SZ80C.COM`, 0A7Bh (2683) in `B8SZ80E.COM` and 0B7Bh (2939) in `B8SZ80EC.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
+Under CP/M the pages sit after the image and the heap limit is the BDOS. The break-off cell is still at offset 7Bh of the letter page, which is the page below the program text: 077Bh (1915) in `B8SZ80.COM`, 097Bh (2427) in `B8SZ80C.COM`, 0A7Bh (2683) in `B8SZ80E.COM` and 0B7Bh (2939) in `B8SZ80EC.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
 
 **The break key.** The keyboard is looked at on every word call, block entry, true `)` and `{`, one time in 256. A program that stores a non-zero byte in the break-off cell gets Ctrl-C as key 3; two within about 250 ms still stop it. An unchecked build prints nothing when it is stopped.
 
-**Console interface (generic build).** `KEY` returns a waiting key in A, or A = 0 if none is waiting, with the zero flag matching A. `CONOUT` prints A. Both must keep BC, DE, HL and HL'. `EXIT` is jumped to when the program ends; in a build with the editor a program that ends goes back to the editor, and `LEAVE` is where ^X goes. `MSLOOP` sets the loop passes per millisecond for `n?`. `KEY` is also called while a program runs, for the break key, so it must not wait.
+**Console interface (generic build).** `KEY` returns a waiting key in A, or A = 0 if none is waiting, with the zero flag matching A. `CONOUT` prints A. Both must keep BC, DE, HL and IY. `EXIT` is jumped to when the program ends; in a build with the editor a program that ends goes back to the editor, and `LEAVE` is where ^X goes. `MSLOOP` sets the loop passes per millisecond for `n?`. `KEY` is also called while a program runs, for the break key, so it must not wait.
 
-**Machine-code contract.** Entered by CALL, with the return address on top of the stack and the data cells above it. The code must keep BC and must leave 0008h–0033h intact (all of page zero on a generic build). A, DE, HL, IX, IY and the alternate registers may change; the interpreter saves HL' itself. It returns with RET (C9h), which the loader writes. On return, the cell on top of the stack becomes the new TOS. `RST 28h` prints the character in A and keeps BC, DE, HL and HL', on every Z80 build.
+**The console escapes.** Switch `ANSI`. With `ANSI = 1` they send the ANSI sequences through `CONOUT`; the CP/M builds always do. With `ANSI = 0` (the generic builds' default) they call four routines, at addresses set by equates:
+
+| Routine | Escape | Does | Gets | May change |
+|---|---|---|---|---|
+| `CONCLS` (FF0Ch) | `/{` | Clear the screen, cursor to the top left | | A, DE |
+| `CONEOL` (FF0Fh) | `/}` | Clear from the cursor to the end of the line | | A, DE |
+| `CONCUR` (FF12h) | `/\|`, `` /` `` | Show the cursor, or hide it | A = 0 to hide, anything else to show | A, DE |
+| `CONAT` (FF15h) | `/~` | Cursor to a row and column, both from 0 | HL = the row, DE = the column (whole cells) | A, DE, HL |
+
+All four must keep BC and IY, and all but `CONAT` also HL. The flags may change.
+
+**Screen size.** Whatever the terminal or the machine's routines give: the interpreter doesn't know it.
+
+**Machine-code contract.** Entered by CALL, with the return address on top of the stack and the data cells above it. The code must keep BC. A, DE, HL, IX, IY and the alternate registers may change; the interpreter restores IX and IY itself. It returns with RET (C9h), which the loader writes. On return, the cell on top of the stack becomes the new TOS. A generic build owns page zero: the code must leave it intact, and `RST 28h` prints the character in A, keeping BC, DE, HL and IY. A CP/M build doesn't use page zero, which is the system's: there, print through the BDOS.
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`. Builds: `b8s-8080-rom-0000.bin` (854 bytes), `b8s-8080-rom-checked-0000.bin` (1,299), `B8S8080.COM` (904), `B8S8080C.COM` (1,364).
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (926 bytes; 980 with `ANSI = 1`), `b8s-8080-rom-checked-0000.bin` (1,348; 1,402), `B8S8080.COM` (1,129), `B8S8080C.COM` (1,583).
 
-The memory map, the break key, the console interface and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 077Bh in `B8S8080.COM` and 097Bh in `B8S8080C.COM`), with these differences: there are no alternate registers, and the one-byte calls are `RST 1` to `RST 6` (the generic image uses 08h, 18h, 20h, 28h and 30h). `RST 5` (28h) prints A and keeps BC, DE and HL. A system whose interrupts use RST 1 to RST 6 can't run the CP/M builds, which copy those routines into page zero. The RET byte is C9h.
+The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers, without IY) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 0A7Bh in `B8S8080C.COM`), with these differences: the routines keep BC (and HL where the Z80's do); the return-stack pointer is a RAM cell; and the generic image's one-byte calls are `RST 1` to `RST 6` (08h, 18h, 20h, 28h and 30h), where `RST 5` (28h) prints A and keeps BC, DE and HL. The CP/M builds don't use page zero: there the same routines are CALLs and JMPs. The RET byte is C9h.
 
 ## Appendix C: 6502
 
-Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-6502-zp.asm` is smaller and keeps it in zero page. Switch: `CHECKED`. The image starts at E000h; point the reset vector at label `start`.
+Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-6502-zp.asm` is smaller and keeps it in zero page. Switches: `CHECKED`, `ANSI`. The image starts at E000h; point the reset vector at label `start`.
 
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
-| Bytes (unchecked, checked) | 1,175 and 1,706 | 1,095 and 1,628 |
+| Bytes (unchecked, checked), `ANSI = 0` | 1,208 and 1,707 | 1,155 and 1,673 |
+| The same, `ANSI = 1` | 1,265 and 1,750 | 1,217 and 1,721 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
 | Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |
@@ -1045,19 +1091,30 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 **The break key.** The keyboard is looked at on every word call, block entry and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
 
+**The console escapes.** Switch `ANSI`: with `ANSI = 1` they send the ANSI sequences through `CONOUT`; with `ANSI = 0` (the default) they call four routines, by JSR, at addresses set by equates. All four must keep X, and may change A, Y and the flags.
+
+| Routine | Escape | Does | Gets |
+|---|---|---|---|
+| `CONCLS` (FF0Ch) | `/{` | Clear the screen, cursor to the top left | |
+| `CONEOL` (FF0Fh) | `/}` | Clear from the cursor to the end of the line | |
+| `CONCUR` (FF12h) | `/\|`, `` /` `` | Show the cursor, or hide it | The carry set to show, clear to hide |
+| `CONAT` (FF15h) | `/~` | Cursor to a row and column, both from 0 | A = the row, Y = the column (the low bytes of the cells) |
+
+**Screen size.** Whatever the terminal or the machine's routines give: the interpreter doesn't know it.
+
 **Machine-code contract.** Entered as a subroutine (`JMP (T0)`, with a return address on the stack), ending in RTS (60h, written by the loader). The address has been dropped. The code must keep the reading position at $00/$01 and leave the hardware stack balanced.
 
 - **`b8s-6502.asm`:** X is the data-stack index; NOS is $0200,X (low) and $0300,X (high). To push: DEX, store TOS there, then set TOS. To drop: load TOS from there, then INX. The code may change A, X (consistently), Y, $04–$06 and $08–$09; $0A–$0F are free for its own use.
-- **`b8s-6502-zp.asm`:** X is the data-stack pointer. TOS is at 0,X (low) and 1,X (high), NOS at 2,X and 3,X. To push: DEX, DEX, then store. To drop: INX, INX. The code may change A, Y and X (consistently); $02, $03, $07 and $0A–$0D are free for its own use.
+- **`b8s-6502-zp.asm`:** X is the data-stack pointer. TOS is at 0,X (low) and 1,X (high), NOS at 2,X and 3,X. To push: DEX, DEX, then store. To drop: INX, INX. The code may change A, Y and X (consistently); $02, $03, $07 and $0A–$0D are free for its own use. $0C–$0D keep their values only while the code runs: a `$` that prints a variable escape with the data stack full writes there.
 
 ## Appendix D: 6809
 
-Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switch: `CHECKED`. Builds: `b8s-6809-rom-F000.bin` (825 bytes), `b8s-6809-rom-checked-F000.bin` (1,220). The image starts at F000h, with label `start`: point the reset vector at it.
+Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. Builds: `b8s-6809-rom-F000.bin` (873 bytes; 934 with `ANSI = 1`), `b8s-6809-rom-checked-F000.bin` (1,264; 1,313). The image starts at F000h, with label `start`: point the reset vector at it.
 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|
-| Return stack (S, 127 entries; 112 in the checked build) | 8000h page | 32768 | −32768 |
-| Data stack (U, 127 cells; 126 in the checked build) | 8100h page | 33024 | −32512 |
+| Return stack (S, 127 entries; 96 in the checked build) | 8000h page | 32768 | −32768 |
+| Data stack (U, 127 cells; 125 in the checked build) | 8100h page | 33024 | −32512 |
 | Letter page (DP) | 8200h | 33280 | −32256 |
 | Program text | 8300h | 33536 | −32000 |
 | Heap limit (default) | F000h | 61440 | −4096 |
@@ -1065,7 +1122,20 @@ Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switch: `CHECKED`. Builds: `b
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 8234h | 33332 | −32204 |
 
+**The return stack's guard band** (checked build). S is the hardware stack, so the 64 bytes between 8000h and the lowest allowed S, 8040h, take what a handler, the console routines and interrupts push while the return stack is full. The deepest point is inside the escapes of `$`: with all 96 entries in use, S at `CONOUT`'s entry can be as low as 802Ah (an ANSI `/~` printing a five-digit number), 802Ch (a variable escape) or 8030h (`#`). That leaves 42 bytes for `CONOUT` itself and any interrupts, more than three IRQ frames. A machine that needs more raises `RSLIM`, two bytes for each entry given up; the unchecked build has no guard band at all, since its return stack may use the whole page.
+
 **The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. The unchecked build prints nothing when it is stopped.
+
+**The console escapes.** Switch `ANSI`: with `ANSI = 1` they send the ANSI sequences through `CONOUT`; with `ANSI = 0` (the default) they call four routines, by JSR, at addresses set by equates. All four may change A, B, X and CC, and must keep Y, U and DP.
+
+| Routine | Escape | Does | Gets |
+|---|---|---|---|
+| `CONCLS` (FF0Ch) | `/{` | Clear the screen, cursor to the top left | |
+| `CONEOL` (FF0Fh) | `/}` | Clear from the cursor to the end of the line | |
+| `CONCUR` (FF12h) | `/\|`, `` /` `` | Show the cursor, or hide it | A = 0 to hide, anything else to show |
+| `CONAT` (FF15h) | `/~` | Cursor to a row and column, both from 0 | X = the row, D = the column (whole cells) |
+
+**Screen size.** Whatever the terminal or the machine's routines give: the interpreter doesn't know it.
 
 **Machine-code contract.** Entered by a jump, with the dispatcher's return address on S, so the code ends in RTS (39h, written by the loader). U points at the top data cell, which becomes TOS on return. Cells on the data stack are big-endian (6809 order); cells in memory stay little-endian, as the spec says. The code may change A, B, X, CC and U (consistently). It must keep Y (the reading position) and DP, and leave S balanced.
 
@@ -1087,8 +1157,8 @@ Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`,
 |---|---|---|---|
 | Runner | `B8SWIN.EXE` | 2,560 | `B8SWIN PROG.B8S` |
 | Runner, checked | `B8SWINC.EXE` | 3,072 |  |
-| With the line editor | `B8SWINE.EXE` | 3,584 | `B8SWINE PROG.B8S`, or with no file. The suggested standard under [Environments](#environments) |
-| The same, checked | `B8SWINEC.EXE` | 4,096 |  |
+| With the line editor | `B8SWINE.EXE` | 3,072 | `B8SWINE PROG.B8S`, or with no file. The suggested standard under [Environments](#environments) |
+| The same, checked | `B8SWINEC.EXE` | 3,584 |  |
 
 **Memory map.** The machine is the 64 KB one of this spec, held in the last 64 KB of the program's image (at 00410000h). A B8Script address is an offset into it.
 
@@ -1105,9 +1175,9 @@ Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`,
 
 The stacks are outside the 64 KB. The data stack is the program's own Windows stack, one 32-bit slot per cell: 127 cells in a checked build, as much as Windows gives (1 MB) in an unchecked one. The return stack holds 112 entries in a checked build. Memory starts as zeros in every build.
 
-**Console.** Output goes to standard output, and a checked build's report to standard error. Keys come from the console unechoed, Ctrl-C among them; when input is redirected, bytes are read from it instead, by `?`, `-n?` and the editor only. `-n?` is the plain line read of the generic builds. At startup the output's console mode is set to 7 (processed output, wrap at the end of a line, and virtual terminal processing), so the console subset and the rest of ANSI work in the Windows 10 and later console as on a terminal. On older Windows, or when the output is redirected, the call fails and the bytes go out unchanged. The mode is left on at the end, which does no harm.
+**Console.** Output goes to standard output, and a checked build's report to standard error. Keys come from the console unechoed, Ctrl-C among them; when input is redirected, bytes are read from it instead, by `?`, `-n?` and the editor only. `-n?` is the plain line read of the generic builds. At startup the output's console mode is set to 7 (processed output, wrap at the end of a line, and virtual terminal processing), so the ANSI sequences that the console escapes send (and any others a program sends) work in the Windows 10 and later console as on a terminal. On older Windows, or when the output is redirected, the call fails and the bytes go out unchanged. The screen size is the console window's. The mode is left on at the end, which does no harm.
 
-**The break key.** The keyboard is looked at on every word call and true `)`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
+**The break key.** The keyboard is looked at on every word call, block entry, true `)` and `{`, one time in 256. The break-off cell works as on the Z80. An unchecked build prints nothing when it is stopped.
 
 **Time.** A plain timed wait on Windows ends only on the system's tick, every 15.6 ms. So `n?` uses a high-resolution waitable timer (Windows 10 1803 and later), set once for the whole wait, which ends on a key or when the timer is due, to about a millisecond. On older Windows the waits are plain ones, to the tick. The builds start on Windows Vista and later.
 

@@ -2,7 +2,8 @@
 
 usage: chktab.py LISTING...
 
-- The RST routines sit at their vectors (image start + 08h, 18h, 20h, 28h, 30h).
+- In a generic build (image at 0000h), the RST routines sit at their vectors
+  (08h, 18h, 20h, 28h, 30h). A CP/M build leaves page zero alone.
 - PTAB does not cross a page.
 - PTAB holds only the low byte of each handler's address, so every handler
   must start in the page the dispatcher expects: the first NPG1 entries in
@@ -18,7 +19,7 @@ def check(lst):
     base = sym['BASE']
     bad = []
     for name, off in (('RPOP', 0x08), ('RST18', 0x18), ('NEG16', 0x20), ('RST28', 0x28), ('RST30', 0x30)):
-        if sym.get(name) != base + off:
+        if base == 0 and sym.get(name) != base + off:
             bad.append(f'{name} is at {sym.get(name, 0):04X}h, not {base + off:04X}h')
     if sym['PTAB'] >> 8 != (sym['PTABEND'] - 1) >> 8:
         bad.append('PTAB crosses a page')

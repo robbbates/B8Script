@@ -14,6 +14,8 @@ Everything here runs from this folder.
 ./build.sh Z80   ../z80/b8s-z80.asm   out/z80       # all four variants
 VARIANTS=$'0 0 1\n0 1 1\n1 0 1\n1 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80   # and the four editor builds
 python3 run_z80.py z80 out/z80                     # PASS/FAIL per variant
+ANSI=1 VARIANTS=$'0 0\n0 1\n0 0 1\n0 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80a   # the generic ones with ANSI = 1
+python3 run_z80.py z80 out/z80a                    # (do the same for each CPU)
 ./build.sh I8080 ../8080/b8s-8080.asm out/8080
 python3 run_8080.py out/8080
 VARIANTS=$'0 0\n0 1' ./build.sh C6502 ../6502/b8s-6502.asm out/6502
@@ -37,6 +39,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 ```
 
 - A variant line for `build.sh` is `CPM CHECKED`, then `EDITOR` for the Z80. A build is named after its source, plus `-gen` or `-cpm` (with the editor: `-ed` or `-cpm-ed`), plus `-chk` if checked.
+- `ANSI=1 ./build.sh ...` builds with `ANSI = 1` (the console escapes send ANSI sequences); the default is `ANSI = 0`, where they call the machine's routines. The CP/M builds send ANSI either way. Build the generic variants both ways, into two folders, and test both: in an `ANSI = 0` build the harness traps the four routines (`CONCLS`, `CONEOL`, `CONCUR`, `CONAT`) and records the ANSI bytes each stands for, so the output compares with `ref.py`'s just the same.
 - `run_z80.py` tests the editor builds by typing at them (`test_editor.py`, which can also be run by itself: `python3 test_editor.py out/z80`).
 - Run the layout and branch checks after every change. They catch mistakes the assembler lets through and the tests may not reach.
 - Each CPU's full run takes a few minutes at most.
@@ -48,7 +51,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `ref.py` | Reference interpreter written from the spec. It produces the expected output for every test. With `checked=True` it is a checked build: it stops on every error in the spec's table and prints the report |
 | `tests.py` | The suite: `SUITE` (program, input), `MC` (machine-code tests per CPU), `LOOSE` (unchecked builds only), `CHK` (checked builds only), `ERRS` (checked-build errors: the whole output is compared with `ref.py`'s, or with a pattern for the stack overruns) |
 | `run_tests.py` | `check()` runs one build against everything, including Tiny BASIC and the break-key tests (`break_tests()`, for unchecked and checked builds alike) |
-| `harness_z80.py` | Z80/8080 emulator wrapper. In generic builds it traps KEY/CONOUT/EXIT; in CP/M builds it emulates BDOS 6, 10, 15, 16, 19 to 22 and 26, with a small disk of files (the program is the file PROG.B8S). Its editor modes type the input a chunk at a time |
+| `harness_z80.py` | Z80/8080 emulator wrapper. In generic builds it traps KEY/CONOUT/EXIT; in CP/M builds it emulates BDOS 6, 15, 16, 19 to 22 and 26 (any other call stops the run), with a small disk of files (the program is the file PROG.B8S). Its editor modes type the input a chunk at a time |
 | `harness_6502.py`, `harness_6809.py` | The same wrapper for py65 and MC6809 |
 | `run_z80.py`, `run_8080.py`, `run_6502.py`, `run_6809.py` | Run every build in a folder through `check()`. `run_6502.py` holds the two 6502 machine-code tests, one per interpreter |
 | `test_editor.py` | Types sessions at the Z80 editor builds, each step when the editor is waiting for it, and compares the output byte for byte with a model of the editor (which follows the source key for key, and uses `ref.py` for whatever a line runs). Generic builds get paste and print sessions, CP/M builds file ones (the disk is compared too), checked builds error ones; a few sessions with keys pressed while a program is busy are compared with patterns |
@@ -65,6 +68,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `b8strip.py` | Strips a program of comments and white space, keeping a space only where B8Script needs one (`b8strip.py ../../games/NAME.TXT ../../games/NAME.B8S` after editing a game). `--same A B` checks that two files hold the same code |
 | `esc2slash.py` | Converts older programs to the `/` escape |
 | `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files next to each source |
+| `cpmsim.py` | Runs the CP/M builds under real CP/M 2.2 (Digital Research's BDOS and CCP) in z80pack's `cpmsim`: `cpmsim.py suite out B8SZ80 B8SZ80C` runs the suite's programs and compares each output with `ref.py`'s; `cpmsim.py type out STEP...` types at CP/M, for the editors. `-8` runs on an 8080 instead of the Z80 (which traps undocumented opcodes). Needs z80pack (set `Z80PACK`) and cpmtools; see its header. Not part of the regular run: it takes about ten minutes a build |
 
 Notes on the harnesses:
 - **Keys are typed as a person types them:** a key from the input is given only when the program is waiting for one, which the harness takes to be two looks at the keyboard close together (`GAP`: clock ticks on the Z80 and 8080, instructions on the others). Every build looks at the keyboard now and then for the break key, and holds only the newest key it finds, so a queue of keys handed over at every look would mostly be lost.

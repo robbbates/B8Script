@@ -19,6 +19,5 @@ for hexf in sorted(glob.glob(d + '/*.hex')):
         o = r.run()
         runner.last = r
         return o, r.ended
-    runner.os_line = cpm      # -n? is BDOS 10 there
     total += check(runner, os.path.basename(base), cpu, cpm, checked, 0xC9, verbose=verbose, plat=plat(base + '.lst', cpm))
 sys.exit(1 if total else 0)

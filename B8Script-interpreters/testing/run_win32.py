@@ -82,7 +82,7 @@ def windows_only(exe, checked, editor, verbose):
             o = r.run()
             ms = r.waited
             ok(o == b'07' and ((1000 <= ms <= 1060) if hires else (1550 <= ms <= 1650))
-               and (r.calls.get('WaitForMultipleObjects', 0) >= 51) == hires
+               and (r.timerwaits >= 51) == hires
                and (r.calls.get('SetWaitableTimer', 0) >= 51) == hires,
                f'51 waits of 20 ms (timer: {hires}, waited {ms} ms)', r)
             r = Run(exe, b'1000?#', b'', timed=[(0, b'k')], hires=hires)
@@ -116,7 +116,7 @@ def windows_only(exe, checked, editor, verbose):
             r = Run(exe, b'', [b' "abc"$ 1 0/\r'], mode='editor', files={})
             o = r.run()
             k = o.find(b'\r\nErr')
-            j = o.find(b'Rtn 0\r\n') + 7
+            j = o.find(b'R:0\r\n') + 5
             ok(k > 0 and set(r.handles[k:j]) == {'err'} and set(r.handles[:k]) == {'out'},
                'the editor\'s report goes to stderr, the echo to stdout', r)
     return fails

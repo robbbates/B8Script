@@ -1,23 +1,26 @@
 ; =============================================================================
 ;  B8Script interpreter for the Motorola 6809
-;  Spec: docs/b8script.md (2026-11-21).
+;  Spec: docs/b8script.md (2026-11-24).
 ;  Follows the design of the Z80 interpreter (z80/b8s-z80.asm).
 ;
-;  Two builds, selected by the CHECKED line below (CPM is always 0: the 6809
-;  has no CP/M; the line is kept only so that build.sh works):
+;  Two switches, in the EQU lines below (CPM is always 0: the 6809 has no
+;  CP/M; the line is kept only so that build.sh works):
 ;    CHECKED  0 = no checks (spec: an unchecked build checks nothing)
 ;             1 = a checked build: variables start at 0, words start
 ;                 undefined, and every error in the spec's table stops the
-;                 program with the four-line report, then goes to EXIT:
+;                 program with the three-line report, then goes to EXIT:
 ;                   Err X @ line,col
-;                   <up to 16 characters of the text at the place>
-;                   Stk n: ... v v v      (n = depth, then the top 8 values)
-;                   Rtn n
+;                   D:n: ... v v v      (n = depth, then the top 8 values)
+;                   R:n
 ;                 S/s data stack over/underflow, R/r return stack over/
 ;                 underflow, H heap, O store outside the program's space,
 ;                 W bad character after [, U undefined word, Q no closing
 ;                 quote, X reserved byte, Z divide by zero, N unbalanced or
 ;                 mismatched brackets, B Ctrl-C.
+;    ANSI     what the console escapes of '$' (/{ /} /| /` /~) do:
+;             1 = send ANSI (VT100) sequences through CONOUT
+;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
+;                 CONAT (see the equates)
 ;
 ;  In both builds Ctrl-C stops a running program (the unchecked build goes
 ;  to EXIT without a word): see the console layer below for the rules, the
@@ -28,6 +31,7 @@
 
 CPM     EQU     0               ; always 0 (no CP/M on the 6809)
 CHECKED EQU     0               ; 1 = checked build
+ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
 
 ; -----------------------------------------------------------------------------
 ;  Register use, everywhere in the interpreter
@@ -61,16 +65,21 @@ CHECKED EQU     0               ; 1 = checked build
 ;  Memory map. Everything the interpreter writes is in four RAM areas:
 ;
 ;    8000h-80FFh  return stack (S); empty = 8100h. Unchecked: 127 entries.
-;                 Checked: 112 entries (S down to 8020h); the 32 bytes below
-;                 are a guard band for what a handler and an interrupt push
-;                 on top of a full stack before the check runs.
+;                 Checked: 96 entries (S down to 8040h); the 64 bytes below
+;                 are a guard band for what a handler, the console routines
+;                 and interrupts push on top of a full stack before the check
+;                 runs (the escapes of '$' take up to 22 of them, so 42 are
+;                 left for CONOUT and interrupts).
 ;    8100h-81FFh  data stack (U). Unchecked: 127 cells, empty = 8200h.
-;                 Checked: 126 cells (U from 81FCh, empty, down to 8100h):
+;                 Checked: 125 cells (U from 81FCh, empty, down to 8102h):
 ;                 the 4 bytes above are a guard band, so a handler that runs
 ;                 on an empty stack writes there and not on the letter
-;                 cells. A push past the last cell lands on the return
-;                 stack's bottom entry (80FEh), and the program stops with S
-;                 before anything reads it.
+;                 cells. A push past the last cell lands on 8100h, still in
+;                 this page, and the program stops with S. (It must not
+;                 reach 80FEh: with the return stack empty, the handler's
+;                 own return address is there. pdec's cell for its divisor,
+;                 under '#' or a /a in '$' on a full stack, lands on 8100h
+;                 too.)
 ;    8200h-82FFh  letter page (LET): A..Z at +00h..+33h, a..z at +40h..+73h
 ;                 (a word cell is always 64 bytes below its variable), the
 ;                 heap pointer at +7Ch (= z10+), interpreter variables in the
@@ -80,8 +89,9 @@ CHECKED EQU     0               ; 1 = checked build
 ;                 after the NUL and grows to HEAPLIM*256 (F000h)
 ;    F000h-       this image (ROM). The reset vector (FFFEh) must point to
 ;                 `start` (see the listing); the image does not contain it.
-;    FF03h-FF0Bh  the console routines (CONOUT, KEY) and EXIT are supplied
-;                 by the system and need no space here.
+;    FF03h-FF17h  the console routines (CONOUT, KEY, and with ANSI = 0
+;                 CONCLS, CONEOL, CONCUR, CONAT) and EXIT are supplied by
+;                 the system and need no space here.
 ;
 ;  The stacks sit below the letter page, so "the program's own space" (what
 ;  the checked build lets ! and . write) is the single range LET..HEAPLIM*256.
@@ -95,6 +105,17 @@ CONOUT  EQU     0FF03h          ; print the character in A
 EXIT    EQU     0FF09h          ; where to go when the program ends
 ;   Both are called with JSR. They may change A and CC and must preserve
 ;   B, X, Y, U and DP.
+        IF      1-ANSI
+; With ANSI = 0 the console escapes of '$' call these as subroutines (each
+; ends with RTS). All four may change A, B, X and CC, and must keep Y, U
+; and DP.
+CONCLS  EQU     0FF0Ch          ; /{  clear the screen, the cursor to the top left
+CONEOL  EQU     0FF0Fh          ; /}  clear from the cursor to the end of the line
+CONCUR  EQU     0FF12h          ; /| and /`  show the cursor if A is not 0, hide
+                                ;     it if A = 0
+CONAT   EQU     0FF15h          ; /~  the cursor to row X, column D, both counted
+                                ;     from 0
+        ENDIF
 RSPAGE  EQU     80h
 DSPAGE  EQU     81h
 LETPAGE EQU     82h
@@ -117,14 +138,16 @@ PEND    EQU     38h             ; checked: the program's end, the first byte
                                 ;   after its NUL (big-endian): the heap's floor
 SSAV    EQU     3Ah             ; checked: S as each character starts (big-
                                 ;   endian): the return stack an error reports
+PSAV    EQU     3Ch             ; checked: the address '$' prints from (big-
+                                ;   endian), put back on the stack for a Q
 BRKOFF  EQU     7Bh             ; the break-off cell (827Bh, z9+): 0 = the
                                 ;   break key is on
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
 RSTOP   EQU     RSPAGE*256+100h ; empty return stack
-RSLIM   EQU     RSPAGE*256+20h  ; checked: S may go no lower between characters
+RSLIM   EQU     RSPAGE*256+40h  ; checked: S may go no lower between characters
 RSREP   EQU     RSTOP-16        ; checked: S while the error report runs
 DSTOP   EQU     DSPAGE*256+100h-4*CHECKED ; empty data stack (a guard if checked)
-DSLIM   EQU     DSPAGE*256      ; checked: U may go no lower between characters
+DSLIM   EQU     DSPAGE*256+2    ; checked: U may go no lower between characters
 
         ORG     0F000h
 
@@ -147,13 +170,13 @@ sz:     CLR     ,X+
         DECB
         BNE     sz
         ENDIF
-        LDY     #PROG           ; the reading position
         IF      1-CHECKED
         CLR     <KEYBUF         ; no key held
         CLR     <BRKOFF         ; the break key is on
-        TFR     Y,X             ; the heap starts after the program's NUL
+        LDX     #PROG
         ENDIF
-sc:     LDA     ,X+
+        TFR     X,Y             ; the reading position; the heap starts
+sc:     LDA     ,X+             ;   after the program's NUL
         BNE     sc
         TFR     X,D
         STB     <HEAP           ; (little-endian)
@@ -324,8 +347,6 @@ rdnum:  CLRA
         PSHU    D
 rd1:    BSR     isdig
         BHS     ab9
-        LEAY    1,Y
-        PSHS    A
         LDD     ,U
         ASLB
         ROLA
@@ -334,8 +355,10 @@ rd1:    BSR     isdig
         ADDD    ,U              ; 5V
         ASLB
         ROLA                    ; 10V
-        ADDB    ,S+
+        ADDB    ,Y+             ; and the digit, read again
         ADCA    #0
+        SUBD    #30h            ; minus '0' (asm80 would put a quoted '0'
+                                ;   in the high byte of a 16-bit operand)
         STD     ,U
         BRA     rd1
 
@@ -897,41 +920,40 @@ h_emit: LDA     1,U             ; "'"
 h_drop: LEAU    2,U             ; ';'
         RTS
 
-; '$' prints the string at TOS, decoding escapes: '/' plus a character
-; clears that character's bit 6 (/M is CR, /` is space; '/' and '"' have no
-; bit 6, so // and /" give themselves).
-; Checked: a NUL (not one escaped by '/') stops with Q, the string's address
-; still on the stack.
-h_print:LDX     ,U
-pr0:    LDA     ,X+
-        IF      CHECKED
-        LBEQ    e_quote
-        ENDIF
-        CMPA    #22h
-        BEQ     h_drop
-        CMPA    #'/'
-        BNE     pr1
-        LDA     ,X+
-        ANDA    #0BFh
-pr1:
+; ---- more arithmetic ---------------------------------------------------------
+
+h_and:  LDD     ,U++
+        ANDA    ,U
+        ANDB    1,U
+        BRA     st
+
+h_add:  LDD     ,U++
+        ADDD    ,U
+st:     STD     ,U
+        RTS
+
+; '-' has two jobs: directly before a digit it starts a negative number.
+; (The checked build has it in the tail, near negnum: its report would be
+; in the way here.)
         IF      1-CHECKED
-        BSR     putc
+h_sub:  JSR     isdig
+        BLO     negnum
+        LDD     2,U
+        SUBD    ,U++
+        BRA     st
         ENDIF
-        IF      CHECKED
-        JSR     CONOUT
-        ENDIF
-        BRA     pr0
 
 ; '!' ( n addr -- ) is '.' with the high byte stored first. The cell in
 ; memory is little-endian.
 ; Checked: both bytes must be in the program's space, and they are tested
 ; before either is stored (chkst stops with O, the stack untouched).
-h_store:LDX     ,U
         IF      1-CHECKED
-        LDA     2,U
+h_store:PULU    X
+        LDA     ,U
         STA     1,X
         ENDIF
         IF      CHECKED
+h_store:LDX     ,U
         BSR     chkst
         LEAX    1,X
         BSR     chkst
@@ -940,13 +962,14 @@ h_store:LDX     ,U
         ; and fall into '.', which loads X again (and checks it again)
         ENDIF
         IF      1-CHECKED
-        FCB     8Ch             ; (CMPX #: steps over the LDX)
+        FCB     8Ch             ; (CMPX #: steps over the PULU)
+h_cstore:PULU   X               ; '.' ( c addr -- )
         ENDIF
-h_cstore:LDX    ,U              ; '.' ( c addr -- )
         IF      CHECKED
+h_cstore:LDX    ,U              ; '.' ( c addr -- )
         BSR     chkst
-        ENDIF
         LEAU    2,U
+        ENDIF
         PULU    D
         STB     ,X
         RTS
@@ -979,10 +1002,8 @@ e_quote:LDA     #'Q'            ; " or $ ran into the NUL
 ;
 ;     CR LF
 ;     Err X @ line,col CR LF
-;     <up to 16 raw characters from the place, ending early at CR, LF, NUL>
-;     CR LF
-;     Stk n:[ ...][ v]*  CR LF     (the top 8 cells, bottom to top, signed)
-;     Rtn n CR LF
+;     D:n:[ ...][ v]*  CR LF     (the top 8 cells, bottom to top, signed)
+;     R:n CR LF
 ;
 ;  and goes to EXIT. Line and column count from 1: the line is one more
 ;  than the LFs between PROG and the place, the column the distance from the
@@ -990,8 +1011,8 @@ e_quote:LDA     #'Q'            ; " or $ ran into the NUL
 ;  line 0, column = its offset there + 1. Numbers other than the cells are
 ;  printed unsigned (pdec), the cells signed (h_num).
 ;
-;  The data stack may be one cell past its limit (S, U = 80FEh): the
-;  report's own cells then reach 8 bytes further down, to 80F6h, into the
+;  The data stack may be one cell past its limit (S, U = 8100h): the
+;  report's own cells then reach 6 bytes further down, to 80FAh, into the
 ;  return stack page, so the report runs on a fresh return stack at RSREP
 ;  (80F0h), below those bytes.
 ; =============================================================================
@@ -1037,26 +1058,12 @@ lc3:    LDD     <AT
         SUBD    ,U
         STD     ,U              ; the column
         PSHU    Y
-        JSR     pdec            ; the line
+        BSR     pdec            ; the line
         BSR     pmsg
         FCB     ','+80h
         BSR     pdec            ; the column
         BSR     pmsg
-        FCB     13,10+80h
-        ; the text at the place
-        LDX     <AT
-        LDB     #16
-tx1:    LDA     ,X+
-        BEQ     tx9
-        CMPA    #10
-        BEQ     tx9
-        CMPA    #13
-        BEQ     tx9
-        BSR     putc
-        DECB
-        BNE     tx1
-tx9:    BSR     pmsg
-        FCB     13,10,"Stk",' '+80h
+        FCB     13,10,"D",':'+80h
         ; the data stack: its depth, then its top 8 cells, from Y down to
         ; the program's top cell, at ,U.
         PSHS    U               ; where the walk ends
@@ -1081,7 +1088,7 @@ sl2:    CMPY    ,S
         BSR     h_num
         BRA     sl2
 sl9:    BSR     pmsg
-        FCB     13,10,"Rtn",' '+80h
+        FCB     13,10,"R",':'+80h
         LDD     #RSTOP          ; the return stack's depth, (RSTOP - S) / 2,
         SUBD    <SSAV           ;   S as it was when this character began
         BSR     pdh
@@ -1101,45 +1108,35 @@ h_num:  TST     ,U
         BPL     pdec
         LDA     #'-'
         BSR     putc
+        IF      CHECKED
+        LBSR    negt            ; (long: the checked h_print is in between)
+        ENDIF
+        IF      1-CHECKED
         BSR     negt
+        ENDIF
 ; pdec: print the top cell as unsigned and drop it, by recursion on /10
 pdec:   LDD     #10
         PSHU    D
+        IF      1-CHECKED
         BSR     udiv            ; NOS = quotient, TOS = digit
+        ENDIF
+        IF      CHECKED
+        LBSR    udiv            ; (out of a BSR's reach here)
+        ENDIF
         PULU    D               ; the digit
         PSHS    B
-        LDD     ,U
-        BEQ     pd1
-        BSR     pdec            ; (it drops the quotient)
-        FCB     8Ch             ; (CMPX #: steps over the LEAU)
-pd1:    LEAU    2,U             ; drop the zero quotient
-        PULS    A
+        LDD     ,U++            ; the quotient: if it is not 0, it goes
+        BEQ     pd1             ;   back for the rest of the digits
+        PSHU    D
+        BSR     pdec
+pd1:    PULS    A
         ADDA    #'0'            ; and fall into putc
 
 putc:   JMP     CONOUT
 
-; ---- more arithmetic ---------------------------------------------------------
-
-h_and:  LDD     ,U++
-        ANDA    ,U
-        ANDB    1,U
-        BRA     st
-
-h_add:  LDD     ,U++
-        ADDD    ,U
-st:     STD     ,U
-        RTS
-
-; '-' has two jobs: directly before a digit it starts a negative number.
-h_sub:  JSR     isdig
-        BLO     negnum
-        LDD     2,U
-        SUBD    ,U++
-        BRA     st
-
 ; ---- the tail ---------------------------------------------------------------
-; '/' is the last handler, so what follows its first byte may lie past the
-; second range: the divide itself and the routines after it.
+; '$' is the last handler, so what follows its first byte may lie past the
+; second range: its loop, the escapes, and the routines of '/'.
 
 ; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
@@ -1167,12 +1164,61 @@ dv1:    TST     ,S+
         BPL     ng9
         BRA     negt            ; r's sign
 
+; '$' prints the string at TOS, decoding escapes: '/' plus a character from
+; 60h to 7Eh is one of the escapes at pesc; '/' plus any other character
+; clears that character's bit 6 (/M is CR, '/' and DEL is '?'; '/', '"'
+; and '?' have no bit 6, so //, /" and /? give themselves). The address
+; comes off the stack first, and Y walks the string (the IP waits on S), so
+; that /~ finds its row and column on top, and an escape may use A, B, X
+; and the routines.
+; Checked: a NUL (not one escaped by '/') stops with Q, the string's
+; address put back on the stack (from PSAV) over what any /~ left.
+h_print:PSHS    Y
+        PULU    Y
+        IF      CHECKED
+        CMPU    #DSTOP          ; '$' with nothing on the stack: s, before it
+        LBHI    e_ds            ;   prints from an address of no meaning (N
+        STY     <PSAV           ;   is clear: an underflow)
+        ENDIF
+pr0:    LDA     ,Y+
+        IF      CHECKED
+        BEQ     prq
+        ENDIF
+        CMPA    #22h
+        BEQ     pr9
+        CMPA    #'/'
+        BNE     pr1
+        LDA     ,Y+
+        SUBA    #60h            ; ` 0, a-z 1-26, { 27, | 28, } 29, ~ 30
+        CMPA    #1Fh
+        BHS     pr2
+        BSR     pesc
+        BRA     pr0
+pr2:    ADDA    #60h            ; any other: bit 6 goes
+        ANDA    #0BFh
+pr1:    BSR     putc
+        BRA     pr0
+pr9:    PULS    Y,PC
+        IF      CHECKED
+prq:    LDX     <PSAV
+        PSHU    X
+        JMP     e_quote
+        ENDIF
+
+; '-', checked build (see the unchecked one, before '!').
+        IF      CHECKED
+h_sub:  JSR     isdig
+        BLO     negnum
+        LDD     2,U
+        SUBD    ,U++
+        BRA     ud3             ; (STD ,U / RTS)
+        ENDIF
+
 negnum: JSR     rdnum           ; a negative literal: read it, then negate
 negt:   TFR     U,X
-negx:   LDD     ,X              ; negx: negate the cell at X
-        NEGA
-        NEGB
-        SBCA    #0
+negx:   CLRA                    ; negx: negate the cell at X
+        CLRB
+        SUBD    ,X
         STD     ,X
 ng9:    RTS
 absx:   TST     ,X              ; absx: negate the cell at X if negative
@@ -1206,5 +1252,97 @@ ud2:    LEAX    -1,X
         BNE     ud1
 ud3:    STD     ,U
         RTS
+
+; pesc: the escapes of '$'. A = the character after the '/', minus 60h
+; (0 to 30); Y points past it. Each returns to the loop with an RTS, its
+; own or that of the routine it ends by jumping to. A, B and X are free.
+;    /a-/z   print the variable, as '#' does
+;    /{      clear the screen, the cursor to the top left
+;    /}      clear from the cursor to the end of the line
+;    /|  /`  show the cursor, hide it
+;    /~      ( row col -- ) the cursor to that row and column, from 0
+pesc:   CMPA    #27
+        BHS     pcon
+        ASLA                    ; (` leaves A = 0: hide)
+        BEQ     phide
+        LDX     #LET+40h-2      ; the variable's cell (little-endian)
+        LDD     A,X
+        EXG     A,B
+        PSHU    D
+        JMP     h_num
+        IF      1-ANSI
+pcon:   LBEQ    CONCLS          ; /{
+        CMPA    #29
+        LBEQ    CONEOL          ; /}
+        BHI     pat
+phide:  JMP     CONCUR          ; /|  (A = 28: show), /`  (A = 0: hide)
+        ENDIF
+pat:
+        IF      CHECKED
+        ; /~ checks first that there are a row and a column (with less it
+        ; is s, and the stack counts as empty): U is never let past the
+        ; top of the stack, however many /~ there are.
+        CMPU    #DSTOP-4
+        LBHI    e_ds            ; (N is clear: an underflow)
+        ENDIF
+        IF      1-ANSI
+        PULU    D,X             ; /~  D = the column, X = the row
+        JMP     CONAT
+        ENDIF
+        IF      ANSI
+; /~  ESC [ row+1 ; col+1 H (ANSI counts from 1)
+        PULU    D,X             ; D = the column, X = the row
+        ADDD    #1
+        LEAX    1,X
+        PSHU    D
+        PSHU    X
+        BSR     csi
+        JSR     pdec
+        BSR     pm
+        FCB     ';'+80h
+        JSR     pdec
+        BSR     pm
+        FCB     'H'+80h
+        RTS
+pcon:   BEQ     pcls            ; /{
+        CMPA    #29
+        BEQ     peol            ; /}
+        BHI     pat
+        BSR     pcsi            ; /|  ESC [ ? 2 5 h
+        FCB     "?25",'h'+80h
+        RTS
+phide:  BSR     pcsi            ; /`  ESC [ ? 2 5 l
+        FCB     "?25",'l'+80h
+        RTS
+pcls:   BSR     pcsi            ; /{  ESC [ H ESC [ J
+        FCB     'H'+80h
+        BSR     pcsi
+        FCB     'J'+80h
+        RTS
+peol:   BSR     pcsi            ; /}  ESC [ K
+        FCB     'K'+80h
+        RTS
+; pcsi: ESC [ and then the text after the call, as pmsg. csi: ESC [.
+csi:    BSR     pm
+        FCB     27,'['+80h
+        RTS
+pcsi:   BSR     csi
+        ENDIF
+        IF      ANSI*(1-CHECKED)
+; pmsg: print the text after the call, up to and including the character
+; that has bit 7 set (it is printed without it), then return after it.
+; (The checked build has its own, with the report: pm leads to it.)
+pm:
+pmsg:   PULS    X
+pm1:    LDA     ,X
+        ANDA    #7Fh
+        JSR     CONOUT
+        TST     ,X+
+        BPL     pm1
+        JMP     ,X
+        ENDIF
+        IF      ANSI*CHECKED
+pm:     JMP     pmsg
+        ENDIF
 
 imgend:

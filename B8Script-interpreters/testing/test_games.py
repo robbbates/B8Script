@@ -377,6 +377,39 @@ TESTS += [
 ]
 
 
+# The games with no play test above: a short run each, mostly to check what the
+# variable escapes of $ (/t, /m ...) print, against the numbers the same run
+# printed with # before the games used them.
+TESTS += [
+    # Mastermind, seed 1: the code is 1234
+    ('MASTER', 'cracked', b'x1111222233334444555566661234n',
+     [b' 1: 1111   1 black, 0 white', b' 5: 5555   0 black, 0 white', b' 7: 1234   4 black, 0 white',
+      b'Cracked in 7 tries!', b'Bye.']),
+    ('MASTER', 'out of tries', b'x' + b'4321' * 10 + b'n',
+     [b' 9: 4321   0 black, 4 white', b'10: 4321   0 black, 4 white', b'Out of tries. The code was 1234', b'Bye.']),
+    # Hangman, seed 1: the word is abandon
+    ('HANGMAN', 'hanged', b'xetaoinshrn', [b'Misses: 1 of 6     Tried: e', b'Misses: 6 of 6', b'Hanged! The word was abandon', b'Bye.']),
+    ('HANGMAN', 'guessed', b'xeabndonn', [b'Misses: 1 of 6     Tried: abdeno', b'You got it!', b'Bye.']),
+    ('CONNECT4', 'it wins', b'x111111122n', [b'I played 1. Your move (1-7): ', b'I played 6.', b'I win!', b'Bye.']),
+    # Space Trader, seed 1: food at Sol, sold at Vega
+    ('TRADER', 'a trade, a refuel', b'xb130\rt2s130\rfq',
+     [b'Day 1 of 40', b'Credits 320   Fuel 17/20   Hold 30/30', b'Day 3 of 40', b'Refuelled.',
+      b'Credits 1115  Fuel 20/20   Hold 0/30', b'GAME OVER on day 3', b'Final credits: 1115',
+      b'You made a profit of 615 credits.']),
+    # Super Star Trek, seed 1: one warp north-west finds a Klingon, which fires back
+    ('SUPERTRK', 'phasers, shields', b'xj41\rxp50\rxz500\rxq',
+     [b'Stardates  53', b'Energy     3000', b'Klingons   23', b'Condition  RED', b'Klingon at 4,3 hit for 25.',
+      b'Klingon at 4,3 fires: 37 units.', b'Shields    500', b'Time is up. The Klingons win.']),
+    ('DUNGEON', 'the monsters win', b'xddddddddssssssssaaaaaaaawwwwwwwwq',
+     [b'DUNGEON  Level 1  HP 20/20  Gold 0  Potions 0  Sword none  Armor none', b'A monster hits you!',
+      b'DUNGEON  Level 1  HP 9/20  Gold 0  Potions 0  Sword none  Armor none',
+      b'You died on level 1 with 0 gold.']),
+    ('LIFE', 'ten generations, then a key', b'\0' * 10 + b'x', [b'Generation 0', b'Generation 10']),
+    ('TETRIS', 'two pieces, quit', b'x' + b'\0' * 30 + b'a' + b'\0' * 20 + b' ' + b'\0' * 10 + b'ddddd \0' + b'\0' * 9 + b'qn',
+     [b'Level 0', b'Lines 0', b'GAME OVER. Lines: 0   Play again? (y/n) ']),
+]
+
+
 def idol_state(r):
     """The saved part of Idol's state, read from the reference machine."""
     cell = lambda c: r.r(r.let + 2 * (ord(c) - 0x41))

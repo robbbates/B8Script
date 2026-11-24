@@ -4,6 +4,12 @@ The image is ROM at F000h (taken from the hex file), the program text is
 loaded at PROG (from the listing) and NUL-terminated. KEY, CONOUT and EXIT
 are traps: when the PC reaches one, the harness does the job and simulates
 an RTS. KEY returns a waiting key in A, or 0, with the Z flag matching A.
+Each spoils what its contract lets it change (CONOUT: A and CC; KEY: V and
+C), so that an interpreter that relies on more is caught.
+In a build with ANSI = 0, CONCLS, CONEOL, CONCUR and CONAT (the console
+escapes of '$') are traps too: each adds to the output the ANSI sequence an
+ANSI = 1 build sends, so both are compared with ref.py's output unchanged,
+and then spoils A, B, X and CC, which the contract lets it change.
 Execution starts at the symbol `start`.
 
 Keys are typed as a person types them: only when the program is waiting for
@@ -30,6 +36,7 @@ GAP = 1000           # instructions: two looks at the keyboard closer than this
                      # are a key loop (one pass of one is about a dozen; 256
                      # loop-backs or word calls are many thousands)
 IDLE = 20000         # empty looks in a row before a run counts as waiting
+CONS = ('CONCLS', 'CONEOL', 'CONCUR', 'CONAT')   # the console routines (ANSI = 0)
 
 
 class Cfg(BaseConfig):
@@ -88,6 +95,24 @@ class Run:
             return self.inp.pop(0)
         return 0
 
+    def console(self, k):
+        """One of the machine's console routines, modelled as the ANSI
+        sequence it stands for. CONCUR: show if A is not 0. CONAT: row X,
+        column D, from 0. Then A, B, X and CC are spoiled."""
+        cpu = self.cpu
+        if k == 'CONCLS':
+            self.out += b'\x1b[H\x1b[J'
+        elif k == 'CONEOL':
+            self.out += b'\x1b[K'
+        elif k == 'CONCUR':
+            self.out += b'\x1b[?25h' if cpu.accu_a.value else b'\x1b[?25l'
+        else:
+            row, col = cpu.index_x.value, cpu.accu_d.value
+            self.out += b'\x1b[%d;%dH' % ((row + 1) & 0xFFFF, (col + 1) & 0xFFFF)
+        cpu.accu_d.set(0xA55A)
+        cpu.index_x.set(0x5AA5)
+        cpu.set_cc(cpu.get_cc_value() ^ 0x0F)
+
     def rts(self):
         cpu = self.cpu
         sp = cpu.system_stack_pointer.value
@@ -102,6 +127,7 @@ class Run:
         pc = cpu.program_counter
         a = cpu.accu_a
         traps = {sy['KEY']: 'key', sy['CONOUT']: 'out', sy['EXIT']: 'exit'}
+        traps.update({sy[k]: k for k in CONS if k in sy})
         n = 0
         idle = 0
         while n < self.maxops:
@@ -112,7 +138,11 @@ class Run:
             if t is None:
                 continue
             if t == 'out':
-                self.out.append(a.value); idle = 0; self.rts()
+                # CONOUT may change A and CC: spoil them
+                self.out.append(a.value); idle = 0
+                a.set(0xEE)
+                cpu.set_cc(cpu.get_cc_value() ^ 0x0F)
+                self.rts()
             elif t == 'key':
                 a.set(self.key())
                 if a.value or self.inp or self.timed or self.pressed:
@@ -122,12 +152,15 @@ class Run:
                     idle += 1
                     if idle > IDLE:
                         self.ended = 'needkey'; break
-                # the host routine's contract: Z (and N) follow A
+                # the host routine's contract: Z (and N) follow A; it may
+                # change the rest of CC, so V and C are spoiled
                 v = a.value
-                cpu.set_cc((cpu.get_cc_value() & 0xF3) | (0x04 if v == 0 else 0) | (0x08 if v & 0x80 else 0))
+                cpu.set_cc(((cpu.get_cc_value() ^ 0x03) & 0xF3) | (0x04 if v == 0 else 0) | (0x08 if v & 0x80 else 0))
                 self.rts()
-            else:
+            elif t == 'exit':
                 self.ended = 'exit'; break
+            else:
+                self.console(t); idle = 0; self.rts()
         else:
             self.ended = 'timeout'
         return bytes(self.out)

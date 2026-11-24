@@ -63,7 +63,7 @@ def check(runner, name, cpu, cpm, checked, retbyte, games=True, verbose=False, p
 
 # The break key (every build). A report for B: its place and the stacks are
 # wherever the program was when the key was noticed.
-BRPT = rb'\r\nErr B @ \d+,\d+\r\n[^\r\n\0]{0,16}\r\nStk \d+:[ \-\d.]*\r\nRtn \d+\r\n'
+BRPT = rb'\r\nErr B @ \d+,\d+\r\nD:\d+:[ \-\d.]*\r\nR:\d+\r\n'
 LOOP = b'0i! 1( i@1+:i! 3000<) '       # busy for 3000 loop-backs: a dozen looks at the keyboard
 GOTO = b'[G};{] [L}:{] L x! x@:G'      # an endless loop made of word calls only
 CC = b'\x03'
@@ -100,8 +100,6 @@ def break_tests(off):
 def check_break(runner, checked, off, verbose=False):
     fails = 0
     for n, p, i, timed, exp in break_tests(off):
-        if n == 'b_line' and getattr(runner, 'os_line', False):
-            continue                    # the OS reads the line there (BDOS 10), and Ctrl-C is its own affair
         out, ended = runner(p, i, timed=timed)
         if exp is not None:
             ok = out == exp

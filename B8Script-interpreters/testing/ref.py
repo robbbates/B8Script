@@ -1,4 +1,4 @@
-"""Reference B8Script interpreter, written from docs/b8script.md (2026-11-21).
+"""Reference B8Script interpreter, written from docs/b8script.md (2026-11-24).
 
 Used only to produce expected output for the test suite. It models memory, the
 letter cells (packed layout: A at LET, a at LET+64), the heap pointer (a cell
@@ -32,11 +32,13 @@ class Ref:
     def __init__(self, prog, inp=b'', prog_at=0x9000, let=0x8000, linebuf=0x8100,
                  heaplim=0xE000, retbyte=0xC9, cpm=False, checked=False, filepad=None):
         self.m = bytearray(65536)
-        if cpm if filepad is None else filepad:
+        self.pad = cpm if filepad is None else filepad
+        if self.pad:
             # the program is a CP/M file: its last record is padded with ^Z,
             # and the NUL goes after the last record (control characters are
-            # ignored, so only the heap's first address and a report's text
-            # line can show it)
+            # ignored, so only the heap's first address can show it; a
+            # report's text line ends at the first ^Z, as the CP/M runners'
+            # does. The CP/M editor's loader ends the text there instead.)
             prog = prog + b'\x1a' * (-len(prog) % 128)
         self.m[prog_at:prog_at + len(prog)] = prog
         self.m[prog_at + len(prog)] = 0
@@ -46,7 +48,6 @@ class Ref:
         self.lb = linebuf
         self.heaplim = heaplim
         self.retbyte = retbyte
-        self.cpm = cpm
         self.checked = checked
         self.heapcell = let + 0x7C
         self.progend = prog_at + len(prog) + 1      # the first byte after the NUL
@@ -133,27 +134,16 @@ class Ref:
 
     def readline(self, n):
         """-n?: read a line of at most n characters, and 127 at the very most.
-        Generic builds: Backspace takes one character back and is echoed as
-        it is; every other key but CR is stored and echoed while there is
-        room. CP/M builds: BDOS 10 does the editing (Backspace and DEL erase
-        with BS, space, BS; other control keys are ignored; a full line ends
-        by itself; CR is echoed)."""
+        Every build (CP/M ones too) reads it the same way: Backspace takes one
+        character back and is echoed as it is; every other key but CR is
+        stored and echoed while there is room; CR ends the line and is stored,
+        not echoed."""
         buf = bytearray()
         n = min(n, 127)
         while True:
             c = self.key()
             if c == CR:
                 break
-            if self.cpm:
-                if c in (8, 127):
-                    if buf:
-                        buf.pop()
-                        self.out += b'\x08 \x08'
-                elif c >= 32:
-                    buf.append(c)
-                    self.emit(c)
-                    if len(buf) == n:   # BDOS 10 ends a full line by itself
-                        break
             elif c == 8:
                 if buf:
                     buf.pop()
@@ -161,8 +151,6 @@ class Ref:
             elif len(buf) < n:
                 buf.append(c)
                 self.emit(c)
-        if self.cpm:
-            self.emit(CR)
         buf.append(CR)
         self.m[self.lb:self.lb + len(buf)] = buf
         return self.lb
@@ -192,16 +180,33 @@ class Ref:
         o = self.out
         line, col = self.linecol(place)
         o += b'\r\nErr %c @ %d,%d\r\n' % (ord(code), line, col)
-        for a in range(place, place + 16):
-            if self.m[a & 0xFFFF] in (0, 10, 13) or (self.cpm and self.m[a & 0xFFFF] == 26):
-                break
-            o.append(self.m[a & 0xFFFF])
-        o += b'\r\nStk %d:' % len(self.ds)
+        o += b'D:%d:' % len(self.ds)
         if len(self.ds) > 8:
             o += b' ...'
         for v in self.ds[-8:]:
             o += b' %d' % self.s(v)
-        o += b'\r\nRtn %d\r\n' % len(self.rs)
+        o += b'\r\nR:%d\r\n' % len(self.rs)
+
+    # What the console escapes send. A build with ANSI = 0 calls the
+    # machine's own routines instead; the harnesses model those as sending
+    # these same bytes.
+    CLS, EOL, SHOW, HIDE = b'\x1b[H\x1b[J', b'\x1b[K', b'\x1b[?25h', b'\x1b[?25l'
+
+    def escape(self, c):
+        """$ met / and a character from 60h to 7Eh. a-z print that variable
+        as # does, read now; the rest are the console escapes. /~ takes the
+        row and the column from under the string's address: a stack too
+        shallow for them is a data-stack underflow (s)."""
+        if 0x61 <= c <= 0x7A:
+            self.pnum(self.r(self.cell(c)))
+        elif c == 0x7E:
+            if self.checked and len(self.ds) < 3:
+                self.ds = []
+                raise Err('s', self.at)
+            col = self.ds.pop(-2); row = self.ds.pop(-2)
+            self.out += b'\x1b[%d;%dH' % ((row + 1) & 0xFFFF, (col + 1) & 0xFFFF)
+        else:
+            self.out += {0x60: self.HIDE, 0x7B: self.CLS, 0x7C: self.SHOW, 0x7D: self.EOL}[c]
 
     def run(self, maxsteps=5_000_000):
         self.error = None
@@ -373,7 +378,10 @@ class Ref:
                     break
                 if c == ord('/'):
                     c = self.m[a]; a += 1
-                    c &= 0xBF                       # the escape: clear bit 6
+                    if 0x60 <= c <= 0x7E:
+                        self.escape(c)
+                        continue
+                    c &= 0xBF                       # the others: clear bit 6
                 elif c == 0 and self.checked:
                     raise Err('Q', self.at)
                 self.emit(c)

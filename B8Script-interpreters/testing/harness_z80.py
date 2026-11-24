@@ -2,10 +2,12 @@
 
 generic: the image is ROM at 0000h, the program text is loaded at PROG (taken
 from the listing) and NUL-terminated, and KEY/CONOUT/EXIT are traps. KEY
-returns a waiting key in A, or 0, with the zero flag matching A.
-cpm: the image is a .COM at 0100h; BDOS 6, 10, 15, 16, 19, 20, 21, 22 and
-26 are emulated. `files` is the disk: a dict of 11-character names (as in an
-FCB) to contents, and it holds what the build wrote when the run is over.
+returns a waiting key in A, or 0, with the zero flag matching A. In a build
+with ANSI = 0 the console routines are traps too (see `console`).
+cpm: the image is a .COM at 0100h; BDOS 6, 15, 16, 19, 20, 21, 22 and 26
+are emulated, and any other call stops the run. `files` is the disk: a dict
+of 11-character names (as in an FCB) to contents, and it holds what the
+build wrote when the run is over.
 If it is not given, the program is the one file on it, PROG.B8S, which is
 the name on the command line.
 editor: a generic image built with EDITOR = 1. No program is loaded (the RAM
@@ -25,14 +27,13 @@ is a program sitting in a key loop ('?', a line read, the editor), not the
 break check, whose looks are far apart. Keys to be pressed while the program
 is busy are given at once: `brk_at` presses Ctrl-C, and `timed` is a list of
 (n, keys): the keys are pressed once n characters have been printed.
-BDOS 10 is modelled as CP/M does it: Ctrl-C as the first key of a line is a
-warm boot.
 """
 import re
 import z80
 
 TRAP = 0xFFF0          # BDOS lives here in the cpm runs
 WBOOT = 0xFFE0
+CONS = ('CONCLS', 'CONEOL', 'CONCUR', 'CONAT')   # the console routines (ANSI = 0)
 IDLE = 20000         # empty KEY polls in a row before a run counts as waiting for input
 GAP = 3000           # clock ticks: two looks at the keyboard closer than this are a key loop
 
@@ -93,6 +94,7 @@ class Run:
         self.inp = list(inp)
         self.out = bytearray()
         self.mode = mode
+        self.cons = {self.sy[k]: k for k in CONS if k in self.sy}
         self.prog = prog
         self.maxticks = maxticks
         self.ended = None
@@ -101,12 +103,13 @@ class Run:
         if mode == 'generic':
             p = self.sy['PROG']
             self.m.set_memory_block(p, prog + b'\0')
-            for k in ('KEY', 'CONOUT', 'EXIT'):
-                self.m.set_breakpoint(self.sy[k])
+            for k in ('KEY', 'CONOUT', 'EXIT') + CONS:
+                if k in self.sy:
+                    self.m.set_breakpoint(self.sy[k])
             self.m.pc = 0
         elif mode == 'editor':
             self.m.set_memory_block(self.sy['PROG'], b'\xAA' * 2048)
-            for k in ('KEY', 'CONOUT', 'LEAVE'):
+            for k in ('KEY', 'CONOUT', 'LEAVE') + CONS:
                 if k in self.sy:
                     self.m.set_breakpoint(self.sy[k])
             self.m.pc = 0
@@ -125,6 +128,25 @@ class Run:
             self.dma = 0x80
             self.m.sp = 0xFF00
             self.m.pc = 0x100
+
+    def console(self, pc):
+        """A build with ANSI = 0 calls the machine's console routines for the
+        escapes of '$'. Each is modelled as sending the ANSI sequence that an
+        ANSI = 1 build sends, so the two print the same. Each then spoils
+        what its contract lets it change (A and DE, and HL for CONAT), so
+        that an interpreter that relies on more is caught. (The flags too:
+        the contract says nothing of them.)"""
+        m, k = self.m, self.cons[pc]
+        if k == 'CONCLS':
+            self.out += b'\x1b[H\x1b[J'
+        elif k == 'CONEOL':
+            self.out += b'\x1b[K'
+        elif k == 'CONCUR':
+            self.out += b'\x1b[?25h' if m.a else b'\x1b[?25l'
+        else:                                   # CONAT: row HL, column DE
+            self.out += b'\x1b[%d;%dH' % ((m.hl + 1) & 0xFFFF, (m.de + 1) & 0xFFFF)
+            m.hl = 0xA5A5
+        m.a, m.f, m.de = 0xEE, m.f ^ 0xFF, 0x5A5A
 
     def mem(self, a):
         return self.m.memory[a & 0xFFFF]
@@ -150,12 +172,6 @@ class Run:
         if self.inp and waiting:
             return self.inp.pop(0)
         return 0
-
-    def key_ready(self):
-        """For the line reader of BDOS 10, which waits for its keys."""
-        if self.pressed:
-            self.inp.insert(0, self.pressed.pop(0))
-        return bool(self.inp)
 
     def run(self):
         m = self.m
@@ -190,6 +206,8 @@ class Run:
                     # the host routine's contract: Z (and S) follow A
                     m.f = (m.f & 0x3F) | (0x40 if m.a == 0 else 0) | (m.a & 0x80)
                     self.ret()
+                elif pc in self.cons:
+                    self.console(pc); idle = 0; self.ret()
                 elif pc == (sy['EXIT'] if self.mode == 'generic' else sy.get('LEAVE')):
                     self.ended = 'exit'; break
                 # anything else: the tick budget ran out; carry on
@@ -222,30 +240,6 @@ class Run:
                         self.ended = 'needkey'; return False
             else:
                 self.out.append(m.e); self.idle = 0
-        elif f == 10:
-            de = m.de
-            mx = self.mem(de)
-            buf = bytearray()
-            while True:
-                if not self.key_ready():
-                    if not self.stages:
-                        self.ended = 'needkey'; return False
-                    self.inp = list(self.stages.pop(0))
-                    continue
-                c = self.inp.pop(0)
-                if c == 3 and not buf:
-                    self.ended = 'exit'; return False
-                if c in (13, 10):
-                    break
-                if c in (8, 127):
-                    if buf:
-                        buf.pop(); self.out += b'\x08 \x08'
-                elif c >= 32:
-                    buf.append(c); self.out.append(c)
-                    if len(buf) == mx:
-                        break
-            self.out.append(13)
-            m.set_memory_block(de + 1, bytes([len(buf)]) + bytes(buf))
         elif f in (15, 19, 22):                 # open, delete, make
             name = bytes(self.mem(m.de + 1 + i) for i in range(11))
             if f == 22:
@@ -272,12 +266,6 @@ class Run:
         elif f == 21:                           # write a record
             self.files[self.cur] += bytes(self.mem(self.dma + i) for i in range(128))
             m.a = 0
-        elif f == 9:
-            a = m.de
-            while self.mem(a) != ord('$'):
-                self.out.append(self.mem(a)); a += 1
-        elif f == 2:
-            self.out.append(m.e)
         else:
             self.ended = 'bdos %d' % f
             return False

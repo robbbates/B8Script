@@ -16,7 +16,7 @@ runs. A few sessions can't be modelled (a key pressed while a program is
 busy): those are checked against patterns.
 
 check_editor() takes a `target` for builds of other machines (see
-win32_target): the build's name, how it stores files, and how it is run.
+win32_target): how it stores files, and how it is run.
 Without one it is the Z80's.
 """
 import sys, os, re, glob
@@ -27,7 +27,6 @@ from ref import Ref
 CR, BS, ESC = b'\r', b'\x08', b'\x1b'
 G, L, E, RD, WR, N, V, X, B, F, Z = (bytes([c]) for c in (7, 12, 5, 18, 23, 14, 22, 24, 2, 6, 26))
 LEFT, RIGHT, UP = ESC + b'[D', ESC + b'[C', ESC + b'[A'
-VERSION = b'2026-11-21'
 
 
 def R(text):
@@ -39,6 +38,9 @@ class Left(Exception):
     """^X: the editor was left."""
 
 
+SHOW = b'\x1b[?25h'     # the cursor shown again (in an ANSI = 0 build, CONCUR)
+
+
 class Ed:
     """The editor, as the source has it."""
 
@@ -47,12 +49,11 @@ class Ed:
         t = target or {}
         self.disk = t.get('disk', cpm)          # read and write use files
         self.pad = t.get('pad', cpm)            # a written file is padded with ^Z
-        self.refcpm = t.get('refcpm', cpm)      # -n? is BDOS 10
-        self.build = t.get('build', b'B8SZ80E')
         self.fname = t.get('fname')             # typed name -> the file's name
         self.lines = []                 # the program: each line with its CR LF
-        self.out = bytearray()
-        self.ds = []                    # the data stack lasts from line to line
+        self.out = bytearray(SHOW)      # the editor shows the cursor when it starts,
+        self.ds = []                    #   and after an error or a break (edit0)
+                                        # the data stack lasts from line to line
         self.cells = bytes(0x74)        # so do the words and the variables
         self.undef = set(range(0x41, 0x5B)) if checked else set()
         self.files = files if files is not None else {}
@@ -96,24 +97,18 @@ class Ed:
     def run(self, typed, queue, stored):
         sy = self.sy
         r = Ref(self.text(), bytes(queue), prog_at=sy['PROG'], let=sy['LET'], linebuf=sy['LINEBUF'],
-                heaplim=self.heaplim, cpm=self.refcpm, checked=self.checked, filepad=False)
+                heaplim=self.heaplim, checked=self.checked)
         r.m[sy['LINEBUF']:sy['LINEBUF'] + len(typed) + 3] = typed + b'\r\n\0'
         r.m[sy['LET']:sy['LET'] + 0x74] = self.cells
         r.undef, r.ds = self.undef, self.ds
         if not stored:
             r.ip = sy['LINEBUF']
         self.out += r.run(2_000_000)
+        if r.error:
+            self.out += SHOW
         self.ds = [] if r.error else r.ds       # an error clears the stack
         self.cells = bytes(r.m[sy['LET']:sy['LET'] + 0x74])
         queue[:] = list(r.inp)                  # what the program did not read is typed at the editor
-
-    def stack_lines(self):
-        o = b'\r\nStk %d:' % len(self.ds)
-        if len(self.ds) > 8:
-            o += b' ...'
-        for v in self.ds[-8:]:
-            o += b' %d' % Ref.s(v)
-        return o + b'\r\nRtn 0'
 
     # ---- typing ----
     def type(self, step):
@@ -147,28 +142,28 @@ class Ed:
                     c = queue.pop(0)
                     if c >= 0x40:
                         break
-                c = {ord('C'): 6, ord('D'): 2}.get(c, 0)
+                c = {ord('C'): 'R', ord('D'): 'L'}.get(c, 0)      # an arrow key; ^B and ^F do nothing
             if c in (8, 127):
                 if cur:
                     cur -= 1
                     del buf[cur]
                     rest = buf[cur:] + b' '
                     out += b'\x08' + rest + b'\x08' * len(rest)
-            elif c >= 32 or c == 9:
+            elif c == 'L':
+                if cur:
+                    cur -= 1
+                    out.append(8)
+            elif c == 'R':
+                if cur < len(buf):
+                    out.append(buf[cur])
+                    cur += 1
+            elif c == 9 or (isinstance(c, int) and c >= 32):
                 if len(buf) < 125:
                     buf.insert(cur, c)
                     cur += 1
                     rest = buf[cur:]
                     out += bytes([c]) + rest + b'\x08' * len(rest)
-            elif c == 2:
-                if cur:
-                    cur -= 1
-                    out.append(8)
-            elif c == 6:
-                if cur < len(buf):
-                    out.append(buf[cur])
-                    cur += 1
-            elif c in (13, 7, 12, 5, 18, 23, 14, 22, 24):
+            elif c in (13, 7, 12, 5, 18, 23, 14, 24):
                 out += b'\r\n'
                 typed = bytes(buf)
                 digits = 0
@@ -214,8 +209,7 @@ class Ed:
                 done += 1
             assert not events, 'a key was set for a line the list never reached'
         elif c == 14:
-            if queue and queue.pop(0) == 14:
-                del lines[:]
+            del lines[:]
         elif c == 18:
             if self.disk:
                 self.setname(typed)
@@ -243,11 +237,6 @@ class Ed:
                 self.files[self.key(self.name)] = t + (b'\x1a' * (-len(t) % 128) if self.pad else b'')
             else:
                 out += self.text()
-        elif c == 22:
-            t = self.text()
-            out += self.build + (b'C' if self.checked else b'') + b' ' + VERSION + self.stack_lines()
-            out += b'\r\nProg %d\r\nLines %d\r\nFree %d\r\n' % (
-                len(t), len(lines), self.heaplim - 1 - (self.sy['PROG'] + len(t)))
         elif c == 24:
             raise Left
 
@@ -295,15 +284,16 @@ def sessions():
         [R(b'%d %s' % (1 + i * 7 % (i + 1), b'"' + b'%d' % i + b'.' * (i * 5 % 110) + b'"$')) for i in range(40)]
         + [L, G, R(b'3'), R(b'30'), R(b'1'), L, G]),
     'a line of the full 125 characters': [R(b'1 ' + b'x' * 140), L, R(b'2 "' + b'y' * 119 + b'"$'), L,
-                                         R(b'3 ' + b'z' * 140 + B * 5 + b'QQ' + BS * 3 + b'RRRR'), L],
+                                         R(b'3 ' + b'z' * 140 + LEFT * 5 + b'QQ' + BS * 3 + b'RRRR'), L],
     'the character after the line number': [
         R(b'1 5#'), R(b'2 7 8+#'), R(b'3x9#'), R(b'2 '), L, G, R(b'2'), L, R(b'1  1#'), L],
     'Backspace and DEL': [R(BS * 2 + b'1 "abX' + BS + b'c"$'), R(b'2 9#' + b'\x7f' * 7 + b' 5 5*#'), L, G],
-    'the cursor: ^B and ^F, insert and delete in the middle': [
-        R(b'1 "ac"$' + B * 3 + b'b'), R(b'2 "xyz"$' + B * 9 + b'9' + F * 3 + b'A' + F * 9 + b' 1;'),
-        R(b'3 12345' + B * 3 + BS * 2 + b'6' + F + b'\x7f' + b'#'), L, G],
+    'the cursor: insert and delete in the middle': [
+        R(b'1 "ac"$' + LEFT * 3 + b'b'), R(b'2 "xyz"$' + LEFT * 9 + b'9' + RIGHT * 3 + b'A' + RIGHT * 9 + b' 1;'),
+        R(b'3 12345' + LEFT * 3 + BS * 2 + b'6' + RIGHT + b'\x7f' + b'#'), L, G],
+    '^B and ^F do nothing': [R(b'1 "a' + B * 3 + b'c"$' + F), R(b'2 "xy"$' + LEFT + B + b' ' + F), L, G],
     'the arrow keys': [R(b'1 "ac"$' + LEFT * 3 + b'b' + RIGHT + b'!' + LEFT + BS), R(b'2 7#' + UP + ESC + b'[1;5D' + b'7'), L, G],
-    'Esc drops the line': [b'1 "gone"$' + ESC, R(b' 5#'), b'' + ESC, R(b'1 6#') , b'2 x' + B + ESC, L],
+    'Esc drops the line': [b'1 "gone"$' + ESC, R(b' 5#'), b'' + ESC, R(b'1 6#') , b'2 x' + LEFT + ESC, L],
     'Esc and a key that is no arrow': [R(b' 1' + ESC + b'O2#'), R(b' 3' + ESC + b'[H#')],
     'keys that do nothing': [R(b' 1\x03\x01\n\x0f2#'), R(b'\n\x03\x04 5#')],
     'Tab is text': [R(b'1 \t7\t#'), L, G],
@@ -316,23 +306,23 @@ def sessions():
     'Ctrl-C ends the list': [R(b'0 %d#' % i) for i in range(9)] + [
         (L, [(4, 3, None)]), (b'2' + L, [(2, 32, 3)]), (L, [(0, 3, None)]), R(b' 5#'), b'9' + L],
     'the data stack lasts from line to line': [
-        R(b' 1 2 3'), R(b' +#'), R(b'1 10*'), G, R(b' #'), R(b' 4 5'), V, R(b' ;;'), V],
-    'edit a line': [R(b'1 "abc"$'), R(b'2 5#'), b'1' + E + R(B * 3 + b'X'), L, G,
+        R(b' 1 2 3'), R(b' +#'), R(b'1 10*'), G, R(b' #'), R(b' 4 5'), R(b' #" "$#')],
+    'edit a line': [R(b'1 "abc"$'), R(b'2 5#'), b'1' + E + R(LEFT * 3 + b'X'), L, G,
                     b'2' + E + R(BS * 2 + b'77#'), L, G],
     'edit: no such line, a dropped edit, an emptied line': [
         R(b'1 1#'), R(b'2 2#'), b'9' + E, R(b' 7#'), b'0' + E, R(b' 8#'), b'2' + E + b'zzz' + ESC, L,
         b'1' + E + R(BS * 9), L, G, E, R(b' 9#')],
     'edit a line of the full length': [R(b'1 ' + b'x' * 125), b'1' + E + R(BS * 3 + b'abcd'), L],
-    'new': [R(b'1 1#'), R(b'2 2#'), N + b'x', L, N + G, L, N + N, L, R(b'1 3#'), L, G],
-    'view': [V, R(b'1 "a"$'), R(b'2 "bc"$'), V, R(b' 1 2 3 4 5 6 7 8 9 -10'), V],
+    'new': [R(b'1 1#'), R(b'2 2#'), N, L, R(b'1 3#'), R(b'2 4#'), L, G, N, L, G],
+    'no ^V: the key does nothing': [R(V + b' 6#'), R(b'1 "a"$'), R(b' 5' + V + b'#'), L],
 }
 
 
 # Generic builds: read is a paste that ends at ^Z, write prints the text.
 GEN_SESSIONS = {
-    'read and write': [RD + b'1#\r\n2#\r\n' + Z, L, G, WR, V],
+    'read and write': [RD + b'1#\r\n2#\r\n' + Z, L, G, WR],
     'read: CR alone, LF alone, empty lines, no last line end': [
-        RD + b'1#\r2#\r' + Z, L, RD + b'3#\n4#\n\n5#' + Z, L, G, RD + b'\r\n\r\n6#\r\n\r\n' + Z, L, G, RD + Z, L, V],
+        RD + b'1#\r2#\r' + Z, L, RD + b'3#\n4#\n\n5#' + Z, L, G, RD + b'\r\n\r\n6#\r\n\r\n' + Z, L, G, RD + Z, L],
     'read replaces the program': [R(b'1 9#'), R(b'2 8#'), RD + b'"new"$' + Z, L, G, WR],
     'leave': [R(b' 5#'), X, R(b' 6#')],
 }
@@ -343,12 +333,12 @@ FILE = b'"one "$\r\n[W "w"$]\r\n2 3*#\r\n'
 CPM_SESSIONS = {
     'a file is loaded, listed, run and added to': (FILE, [L, G, R(b' W'), R(b'2 "new "$'), R(b'0 9#'), L, G]),
     'a file with no text': (b'', [L, R(b'1 5#'), L, G]),
-    'no file at all': (None, [L, V, R(b'1 5#'), L, G]),
+    'no file at all': (None, [L, R(b'1 5#'), L, G]),
     'a file of exactly one record': ((b'1#' + b' ' * 61 + b'\r\n') * 2, [L, G, R(b'0 2#'), G]),
     'a file whose last line has no CR LF': (b'1#\r\n2#', [L, G]),
     'write, change, read back': (FILE, [R(b'1 "zero "$'), WR, R(b'1'), R(b'1'), L, RD, L, G]),
     'write under a new name, read both': (FILE, [
-        R(b'1'), b'new.b8s' + WR, N + N, L, RD, L, b'PROG.B8S' + RD, L, b'new.b8s' + RD, L, WR, b'nosuch' + RD, L, V]),
+        R(b'1'), b'new.b8s' + WR, N + N, L, RD, L, b'PROG.B8S' + RD, L, b'new.b8s' + RD, L, WR, b'nosuch' + RD, L]),
     'write a program of several records': (b'', [R(b'0 "%s"$' % (bytes([65 + i]) * 60)) for i in range(7)] + [
         b'BIG' + WR, N + N, L, b'big' + RD, L, G]),
     'write an empty program': (FILE, [N + N, b'EMPTY.TXT' + WR, b'PROG.B8S' + RD, L, b'EMPTY.TXT' + RD, L]),
@@ -360,25 +350,33 @@ CPM_SESSIONS = {
 CHK_SESSIONS = {
     'errors in the program and in a typed line': [
         R(b'1 1 2'), R(b'2 3 0/ "no"$'), G, R(b' 7#'), R(b' 1 0! "no"$'), R(b' 5 Q "no"$'), R(b' [Q 9#] Q'),
-        R(b'3 [5 1]'), R(b'2'), G, R(b'1 [R R] 4'), R(b'2 0( 1'), G, V],
-    'an error clears the stack': [R(b' 1 2 3'), R(b' 4 0/'), V, R(b' 7#'), R(b' ;'), V],
+        R(b'3 [5 1]'), R(b'2'), G, R(b'1 [R R] 4'), R(b'2 0( 1'), G, R(b' ;')],
+    'an error clears the stack': [R(b' 1 2 3'), R(b' 4 0/'), R(b' 7#'), R(b' ;')],
     'variables start at 0 and words undefined': [R(b' q@# j@#'), R(b' 1 2 W "no"$'), R(b' [W 3#]W')],
 }
 
 # What can't be modelled: a key pressed while a program is busy. (steps, keys
 # by count of characters printed, the patterns that must follow each other in
 # the output; checked: None = every build, True or False = only those.)
-RPT = rb'\r\nErr B @ %s,\d+\r\n[^\r\n]{0,16}\r\nStk \d+:[ \-\d.]*\r\nRtn \d+\r\n'
+RPT = rb'\r\nErr B @ %s,\d+\r\nD:\d+:[ \-\d.]*\r\nR:\d+\r\n'
 TIMED = {
-    'Ctrl-C stops a program (checked)': (True, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L, V], [(40, b'\x03')],
-        [rb'\.{10,}' + RPT % b'1' + rb' 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb'\r\nStk 0:\r\nRtn 0\r\n']),
-    'Ctrl-C stops a program (unchecked)': (False, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L, V], [(40, b'\x03')],
-        [rb'\.{10,} 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb'\r\nStk 0:\r\nRtn 0\r\n']),
+    'Ctrl-C stops a program (checked)': (True, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L, R(b' ;')], [(40, b'\x03')],
+        [rb'\.{10,}' + RPT % b'1' + rb'\x1b\[\?25h 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n', rb' ;\r\n\r\nErr s .*\r\nD:0:\r\nR:0\r\n\x1b\[\?25h']),
+    'Ctrl-C stops a program (unchecked)': (False, [R(b'1 1("."$ 1)'), R(b' 1 2 3'), G, R(b' 7#'), L], [(40, b'\x03')],
+        [rb'\.{10,}\x1b\[\?25h 7#\r\n7\r\n1 1\("\."\$ 1\)\r\n']),
     'Ctrl-C stops a typed line': (None, [R(b' 1("."$ 1)'), R(b' 8#')], [(40, b'\x03')], [rb'\.{10,}.* 8#\r\n8$']),
     'a key pressed while the program runs is held for it': (
         None, [R(b' 0i! 1( i@1+:i! 3000<) 0?#'), R(b' 6#')], [(28, b'A')], [rb'0\?#\r\n65 6#\r\n6$']),
     'a key held when the program ends is let go': (
         None, [R(b' 0i! 1( i@1+:i! 3000<)'), R(b' 6#')], [(24, b'A')], [rb'3000<\)\r\n 6#\r\n6$']),
+    # /~ with an empty stack: the first finds the dummy cell and prints a
+    # cursor sequence of no meaning (an underflow is found after the
+    # character has run); the next is stopped before anything is written
+    # past the stack's spare bytes, so word A survives. Then /~ works.
+    'a /~ with nothing under it is s, and word A survives it': (
+        True, [R(b'1 [A "a"$]'), G, R(b' "/~/~/~/~/~x"$'), R(b' A'), R(b' 1 2 3 4 "/~/~."$ A')], [],
+        [rb'\r\nErr s @ 0,15\r\nD:0:\r\nR:0\r\n\x1b\[\?25h A\r\na 1 2 3 4 "/~/~\."\$ A\r\n'
+         rb'\x1b\[4;5H\x1b\[2;3H\.a$']),
     'the break key is on again for the next line': (
         None, [R(b' 1 %d.' % 0), R(b' 1("."$ 1)'), R(b' 8#')], [(60, b'\x03')], [rb'\.{10,}.* 8#\r\n8$']),
 }
@@ -387,13 +385,13 @@ TIMED = {
 def win32_target(exe):
     """The Windows editor builds (B8SWINE.EXE, B8SWINEC.EXE): files on a
     disk, named as typed (and found whatever their case, as Windows does),
-    not padded; -n? is the generic line read; ^X ends the process."""
+    not padded; ^X ends the process."""
     from harness_win32 import Run as WRun, symbols as wsymbols
     sy = wsymbols(exe[:-4] + '.map')
 
     def fname(files, name):
         return next((k for k in files if k.lower() == name.lower()), name)
-    return dict(sy=sy, cpm=False, disk=True, pad=False, refcpm=False, build=b'B8SWINE',
+    return dict(sy=sy, cpm=False, disk=True, pad=False,
                 checked=exe[:-4].endswith('C'), default=b'PROG.B8S', fname=fname,
                 heaplim=sy['HEAPLIM'] << 8, prog=lambda f: {b'PROG.B8S': f},
                 run=lambda steps, timed, files: WRun(exe, b'', steps, mode='editor', timed=timed, files=files))
@@ -463,6 +461,7 @@ def check_editor(base, verbose=True, target=None):
         if only is not None and only != checked:
             continue
         steps = [s.replace(b' 1 0.', b' 1 %d.' % (sy['LET'] + 0x7B)) for s in steps]
+        timed = [(n + len(SHOW), k) for n, k in timed]   # (the counts are from after the start's SHOW)
         r = mkrun(steps, timed, None)
         got = r.run()
         at, ok = 0, r.ended == 'needkey' and not r.stages

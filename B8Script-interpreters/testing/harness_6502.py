@@ -1,4 +1,3 @@
-import os
 """Run a 6502 B8Script build in py65.
 
 The image is ROM at E000h (the reset entry is `start`), the program text is
@@ -13,11 +12,18 @@ finds nothing, so it can't eat the input. `timed` is a list of (n, keys):
 once n characters have been printed those keys are pressed, and they are
 given at the very next looks, whatever the program is doing. `looks` counts
 the calls of KEY.
+
+With ANSI = 0 a build calls the machine's console routines for the escapes
+of '$' (CONCLS, CONEOL, CONCUR, CONAT, when the listing has them). They are
+traps too: each appends the ANSI sequence that an ANSI = 1 build sends, so
+the two print the same, and then spoils what its contract lets it change.
 """
-import sys
+import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from py65.devices.mpu6502 import MPU
 from harness_z80 import load_hex, symbols
+
+CONS = ('CONCLS', 'CONEOL', 'CONCUR', 'CONAT')   # the console routines (ANSI = 0)
 
 GAP = 1000      # instructions: two looks at the keyboard closer than this are
                 # a key loop. One pass of the interpreter's key loops is about
@@ -47,6 +53,7 @@ class Run:
         self.ended = None
         self.brk_at = brk_at
         self.maxsteps = maxsteps
+        self.cons = {self.sy[k]: k for k in CONS if k in self.sy}
         m.pc = self.sy['START']
         m.sp = 0xFF
 
@@ -67,6 +74,24 @@ class Run:
             return self.inp.pop(0)
         return 0
 
+    def console(self, pc):
+        """The console routines' contract: CONCLS and CONEOL take nothing,
+        CONCUR shows the cursor if the carry is set and hides it if it is
+        clear, CONAT moves it to row A, column Y (from 0). All four keep X
+        and may change A, Y and the flags, which are spoiled here, so that
+        an interpreter that relies on more is caught."""
+        m, k = self.m, self.cons[pc]
+        if k == 'CONCLS':
+            self.out += b'\x1b[H\x1b[J'
+        elif k == 'CONEOL':
+            self.out += b'\x1b[K'
+        elif k == 'CONCUR':
+            self.out += b'\x1b[?25h' if m.p & 1 else b'\x1b[?25l'
+        else:
+            self.out += b'\x1b[%d;%dH' % (m.a + 1, m.y + 1)
+        m.a, m.y = 0xEE, 0x5A
+        m.p ^= 0xC3                     # N, V, Z and C flipped (not D or I)
+
     def ret(self):
         m = self.m
         mem = self.mem
@@ -80,7 +105,7 @@ class Run:
         m = self.m
         sy = self.sy
         key, cout, ext = sy['KEY'], sy['CONOUT'], sy['EXIT']
-        traps = {key, cout, ext}
+        traps = {key, cout, ext} | set(self.cons)
         step = m.step
         out = self.out
         n = 0
@@ -106,6 +131,8 @@ class Run:
                     # the host routine's contract: Z (and N) follow A
                     m.p = (m.p & 0x7D) | (0x02 if m.a == 0 else 0) | (m.a & 0x80)
                     self.ret()
+                elif pc in self.cons:
+                    self.console(pc); idle = 0; self.ret()
                 else:
                     self.ended = 'exit'; break
                 continue

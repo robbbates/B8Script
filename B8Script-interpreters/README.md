@@ -6,30 +6,49 @@ Generic interpreters for minimal homebrew machines (serial console only), CP/M 2
 CPM     EQU     0               ; 1 = CP/M .COM build        (Z80, 8080)
 CHECKED EQU     0               ; 1 = checked build          (all)
 EDITOR  EQU     0               ; 1 = with the line editor   (Z80, Windows)
+ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences (Z80, 8080, 6502, 6809)
 ```
+
+`ANSI` decides what the console escapes of `$` (`/{` `/}` `/|` `` /` `` `/~`) do. With `ANSI = 1` they send ANSI (VT100) sequences through `CONOUT`. With `ANSI = 0` they call four routines of the machine's own (see the machine interface below). The generic builds default to `ANSI = 0`; the CP/M builds always send ANSI, whatever the switch says; the Windows builds always send ANSI, in the console mode they set.
 
 The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, and `b8s-6502-zp.asm` is a smaller interpreter that keeps it in zero page.
 
 ## Sizes (bytes, measured)
 
-| CPU | Generic | Generic, checked | CP/M | CP/M, checked |
-|---|---|---|---|---|
-| Z80 | 765 | 1,163 | 831 | 1,243 |
-| Z80 with the line editor | 1,488 | 1,796 | 1,663 | 1,987 |
-| 8080 | 854 | 1,299 | 904 | 1,364 |
-| 6502, stack in pages 2-3 | 1,175 | 1,706 | n/a | n/a |
-| 6502, stack in zero page | 1,095 | 1,628 | n/a | n/a |
-| 6809 | 825 | 1,220 | n/a | n/a |
+**Generic ROM images.** `ANSI = 0` is the default (the console escapes call the machine's routines); `ANSI = 1` sends ANSI sequences. "Before" is the last build without the escapes (commit `9c7f40c`).
 
-| Windows .EXE | Unchecked | Checked | With the editor | Editor, checked |
+| CPU | Before | `ANSI = 0` | `ANSI = 1` | Checked, before | Checked, `ANSI = 0` | Checked, `ANSI = 1` |
+|---|---|---|---|---|---|---|
+| Z80 | 765 | 835 | 886 | 1,163 | 1,219 | 1,266 |
+| Z80 with the line editor | 1,488 | 1,355 | 1,405 | 1,796 | 1,742 | 1,788 |
+| 8080 | 854 | 926 | 980 | 1,299 | 1,348 | 1,402 |
+| 6502, stack in pages 2-3 | 1,175 | 1,208 | 1,265 | 1,706 | 1,707 | 1,750 |
+| 6502, stack in zero page | 1,095 | 1,155 | 1,217 | 1,628 | 1,673 | 1,721 |
+| 6809 | 825 | 873 | 934 | 1,220 | 1,264 | 1,313 |
+
+**CP/M .COM files** (always ANSI):
+
+| CPU | Before | Now | Checked, before | Checked, now |
 |---|---|---|---|---|
-| The file | 2,560 | 3,072 | 3,584 | 4,096 |
-| Of that: code and table | 1,286 | 1,816 | 2,298 | 2,728 |
+| Z80 | 831 | 1,017 | 1,243 | 1,414 |
+| Z80 with the line editor | 1,663 | 1,646 | 1,987 | 2,048 |
+| 8080 | 904 | 1,129 | 1,364 | 1,583 |
+
+**Windows .EXE files** (always ANSI):
+
+| | Unchecked | Checked | With the editor | Editor, checked |
+|---|---|---|---|---|
+| The file, before | 2,560 | 3,072 | 3,584 | 4,096 |
+| The file, now | 2,560 | 3,072 | 3,072 | 3,584 |
+| Code and table, before | 1,286 | 1,816 | 2,298 | 2,728 |
+| Code and table, now | 1,319 | 1,829 | 2,021 | 2,543 |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
-- A Windows file is a 512-byte header and then the code, the table and about 405 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 358, 340, 350 and 432 bytes to spare before their next step up.
+- A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 357, 359, 143 and 133 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
+- Where the bytes went with the escapes: on the Z80 the escapes cost an unchecked generic build 60 bytes with `ANSI = 0` and 111 with `ANSI = 1`, and the checked one about 70 and 117 (a checked `/~` looks that its two cells are there before it prints anything). The CP/M builds also read `-n?` themselves now (15 bytes on the Z80, 19 on the 8080; see The language). The editor builds lost ^V, which saved about 170 bytes in the unchecked ones (the stack listing was there only for it) and 100 in the checked ones.
+- Then, for real machines (an RC2014 with RomWBW): the Z80's return stack moved from HL' to IY, out of the alternate registers (about +10 bytes on every Z80 build), and the CP/M builds stopped writing page zero, so their one-byte RST calls became CALLs and jumps (about +60 on the Z80, where "next" is a two-byte `JP (IX)`, and +80 to +100 on the 8080, where it is a three-byte `JMP`). The checked builds won some back with a shorter report, which lost the line of program text and says `D:` and `R:` (about 30 bytes on every CPU), and the editors with ^B and ^F gone and a single ^N (about 15). A size pass did the rest: `B8SZ80EC.COM` is exactly 2,048 bytes.
 - Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 60 to 80 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 280 to 470 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
 
 ## Files
@@ -45,12 +64,12 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 ## The language
 
-The builds follow [`docs/b8script.md`](../docs/b8script.md) (2026-11-21). What the spec leaves to the implementation:
+The builds follow [`docs/b8script.md`](../docs/b8script.md) (2026-11-24). What the spec leaves to the implementation:
 
-- `-n?` (generic builds): Backspace takes a character back and is echoed as it is; every other key but CR is stored and echoed, control keys and DEL included. A count above 127 is taken as 127. The CP/M builds use BDOS 10, which does its own editing.
+- `-n?`: Backspace takes a character back and is echoed as it is; every other key but CR is stored and echoed, control keys and DEL included; CR ends the line and is not echoed. A count above 127 is taken as 127. The CP/M builds read the line the same way, with BDOS 6 a key at a time, not with BDOS 10: so a key held by the break check is the line's first, and the editing keys are the same on every build.
 - Dividing by zero in an unchecked build returns two cells of no meaning (different on each CPU), and the stack stays balanced.
 - `[` followed by anything but a letter is taken as `[ ` in an unchecked build.
-- The CP/M builds print through BDOS 6, which can't print the byte FFh (it means "read a key" there).
+- The CP/M builds print through BDOS 6, which can't print the bytes FFh and FEh: to BDOS 6, FFh means "read a key", and in Digital Research's CP/M 2.2 BDOS (an undocumented case, also in CP/M 3) FEh means "is a key waiting?". Neither reaches the screen. Found by running the test suite under real CP/M 2.2 (z80pack); see How they were tested.
 - The memory maps, stack sizes, heap limits and system addresses are in the spec's appendices.
 
 ## Building
@@ -99,18 +118,23 @@ To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6
 | KEY | return a waiting key in A, or A = 0 if none is waiting; the zero flag must match A | same | same |
 | CONOUT | print A | same | same |
 | EXIT | jumped to when the program ends | same | same |
-| KEY and CONOUT must keep | BC, DE, HL (and HL' on the Z80) | X, Y | B, X, Y, U, DP |
+| KEY and CONOUT must keep | BC, DE, HL (and IY on the Z80) | X, Y | B, X, Y, U, DP |
 | Where to start | reset at 0000h | label `start`, E000h (point the reset vector at it) | label `start`, F000h (point the reset vector at it) |
 | RAM | RS 8000h, DS 8100h, letters 8200h, PROG 8300h | RS = page 1, DS 0200h/0300h (or zero page 10h-EFh), letters 0400h, PROG 0500h | RS 8000h (S), DS 8100h (U), letters 8200h (DP), PROG 8300h |
 | Heap limit | `HEAPLIM` (page), default F0h | default E0h | default F0h |
 | Timing | `MSLOOP` = loop passes per millisecond for `n?` (1-255); tune it to your clock and KEY | same | same |
+| With `ANSI = 0`: CONCLS (FF0Ch), CONEOL (FF0Fh) | clear the screen and home the cursor; clear to the end of the line | same | same |
+| CONCUR (FF12h) | show the cursor if A is not 0, hide it if A = 0 | show if the carry is set, hide if clear | as the Z80 |
+| CONAT (FF15h) | cursor to row HL, column DE, both from 0 | row A, column Y | row X, column D |
+| The four must keep | BC (and IY on the Z80); HL too, all but CONAT | X | Y, U, DP |
 
 - There is one input routine, KEY. It replaces the earlier CONST and CONIN: `0?` waits by calling KEY until a key comes.
 - KEY is also called while a program runs, for the break key: once in every 256 word calls and loop-backs. A key it returns then is taken, so KEY must not wait, and should be quick.
 - The Z80 builds with the editor have one more address, `LEAVE`: where ^X goes. A program that ends goes back to the editor.
 - Your loader puts the program text, ending in a NUL, at `PROG`. The heap starts after the NUL.
 - The generic Z80 and 8080 images start at 0000h and use RST 08h, 18h, 20h, 28h and 30h as one-byte calls.
-- The CP/M builds copy those routines to 0008h-0033h when they start (they used 0008h-0014h before). A system whose interrupts use RST 1 to RST 6 can't run them.
+- The CP/M builds don't touch page zero: there the same routines are reached with CALL and JP, and on the Z80 "next character" is `JP (IX)`, with IX holding its address. (They used to copy the routines to 0008h-0033h, which broke on RomWBW, whose BIOS calls itself through RST 08h, and would on any system whose interrupts use RST 1 to RST 6.)
+- The Z80 builds don't use the alternate registers: the return-stack pointer is IY. An interrupt routine may use the alternate registers freely; it must save IX and IY if it uses them, as it would any register.
 
 ## The break key
 
@@ -140,10 +164,9 @@ A command key ends the line too, and takes what was typed before it as its argum
 | `n`^E | Puts line n in the input line. Return puts the text back in its place, as changed; Esc leaves the line as it was |
 | ^R, `name`^R | Reads. CP/M: the file of that name, or the same file as last time. Generic: whatever is typed or pasted from then until ^Z replaces the program, with no echo |
 | ^W, `name`^W | Writes. CP/M: to that file, or the same file as last time. Generic: prints the text as it is, for the terminal to capture |
-| ^N ^N | New: no program (the key twice in a row; any other second key calls it off) |
-| ^V | View: the build's name and date, both stacks as an error report shows them, the program's size in bytes, its lines, and the bytes free |
+| ^N | New: no program |
 | ^X | Leaves: to `LEAVE` (generic) or to CP/M |
-| ^B ^F, or the left and right arrow keys | Move the cursor in the line. Text goes in at the cursor |
+| The left and right arrow keys | Move the cursor in the line. Text goes in at the cursor |
 | Backspace, DEL | Take out the character before the cursor |
 | Esc | Drops the line |
 
@@ -152,7 +175,7 @@ A command key ends the line too, and takes what was typed before it as its argum
 - The editor sends only printing characters, CR, LF and Backspace, so it works on any terminal. A character put in or taken out in the middle of the line prints the rest of the line again.
 - After Esc the editor waits about 5 ms for another key. If `[` follows, it reads on to the letter that ends the sequence and acts on C (right) and D (left); it ignores the rest. A lone Esc drops the line.
 - Tab is text. Other control keys do nothing.
-- **What lasts from line to line:** the program, the words, the variables and the data stack. The return stack starts empty for every line. After an error or a break both stacks are empty. A word's address points into the program text, so run the program again after editing it.
+- **What lasts from line to line:** the program, the words, the variables and the data stack. The return stack starts empty for every line. After an error or a break both stacks are empty, and the editor shows the cursor (it does when it starts, too), since a program that hid it can't show it again then. A word's address points into the program text, so run the program again after editing it.
 - A line run at once sits in the line buffer, which `-n?` also reads into. The stored program never returns to the line, so it can use `-n?` freely; a typed line that calls `-n?` itself and carries on afterwards runs what was typed.
 - `-n?` in a program is the plain line read of the other builds, not the editor's.
 - Nothing is printed between a program's output and what you type next.
@@ -174,7 +197,7 @@ A command key ends the line too, and takes what was typed before it as its argum
 - A program that is stopped, by an error or by Ctrl-C, prints its report and comes back to the editor, with both stacks empty.
 - A line typed at the editor is line 0 in the report; the column is the place in the line.
 
-The editor adds 723 bytes to the unchecked generic build and 832 to the CP/M one (633 and 744 to the checked ones, which have the report's routines already). ^V alone is about 170 of those in an unchecked build, because it brings in the stack listing. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
+The editor adds 536 bytes to the unchecked generic build and 637 to the CP/M one (540 and 639 to the checked ones). It has no ^V (view): taking it out saved about 170 bytes in an unchecked build, which needed the stack listing only for it, and kept the CP/M checked editor inside 2,048 bytes. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
 
 ## The Windows builds (`win32/`)
 
@@ -190,11 +213,11 @@ B8SWINE PROG.B8S
 - **The machine is the spec's:** 64 KB of memory, 16-bit cells and addresses. The memory map is in the spec's Appendix G. The language, the break key, the checked builds' errors and report, and the editor are the Z80's, key for key.
 - **The file.** A runner loads the file named on the command line, runs it and exits. With no file, or one that can't be opened, it exits without a word. An editor build starts with that file as its program, or empty. A file can hold up to 64,765 bytes.
 - **Output** goes to standard output, so it can be redirected. A checked build's report goes to standard error.
-- **Keys** are read from the console raw: no echo, and Ctrl-C arrives as a key, so the interpreter's own break rules apply. The console's mode is put back on every way out. The left and right arrow keys work in the editor (they are turned into ^B and ^F). The Delete key does nothing; Backspace deletes.
+- **Keys** are read from the console raw: no echo, and Ctrl-C arrives as a key, so the interpreter's own break rules apply. The console's mode is put back on every way out. The left and right arrow keys work in the editor: they are read as the codes 1Ch and 1Eh, which a program reading keys with `?` sees too. The Delete key does nothing; Backspace deletes.
 - **Input that is not the console** (a pipe or a file) is read a byte at a time, and only by `?`, `-n?` and the editor: the break check does not read it, so Ctrl-C can't break in, and `n?` waits for a byte however small n is. At the end of the input the program exits.
 - **Time.** A plain timed wait on Windows ends only on the system's tick, every 15.6 ms, so `1?` would take about 16 ms and a game timed by it would crawl. So `n?`, the break-off cell's 250 ms and the editor's Esc wait use a high-resolution waitable timer (Windows 10 1803 and later), set once for the whole wait: the wait ends on a key or when the timer is due, to about a millisecond. On older Windows the timer can't be made, and the waits are plain ones, to the tick. The builds import `CreateWaitableTimerExW`, so they start on Windows Vista and later.
 - **The editor's files.** A name typed before ^R or ^W is a Windows path, as typed, and stays the name until another is typed. Nothing is said if a file can't be read or written: a read then gives no program.
-- **The header** is laid out by hand in the source, by the documented rules and nothing clever: one section, 512-byte file alignment, imports from `kernel32.dll` only (`GetStdHandle`, `GetConsoleMode`, `SetConsoleMode`, `GetCommandLineA`, `CreateFileA`, `ReadFile`, `WriteFile`, `WaitForSingleObject`, `WaitForMultipleObjects`, `CreateWaitableTimerExW`, `SetWaitableTimer`, `ReadConsoleInputA`, `ExitProcess`, and `CloseHandle` in the editor builds). `testing/chkpe.py` checks every file.
+- **The header** is laid out by hand in the source, by the documented rules and nothing clever: one section, 512-byte file alignment, imports from `kernel32.dll` only (`GetStdHandle`, `GetConsoleMode`, `SetConsoleMode`, `GetCommandLineA`, `CreateFileA`, `ReadFile`, `WriteFile`, `WaitForMultipleObjects`, `CreateWaitableTimerExW`, `SetWaitableTimer`, `ReadConsoleInputA`, `ExitProcess`, and `CloseHandle` in the editor builds). `testing/chkpe.py` checks every file.
 - **Dispatch.** One byte per punctuation character, as on the Z80, but with a single range: every handler starts within 255 bytes of one address, and the assembler stops if one doesn't.
 
 ## Checked builds
@@ -219,22 +242,20 @@ The report is the spec's:
 
 ```
 Err Z @ 3,5
-/ "no"$
-Stk 6: 1 2 3 4 5 0
-Rtn 0
+D:6: 1 2 3 4 5 0
+R:0
 ```
 
 - It starts and ends with CR LF. Then the build goes to EXIT, or back to the editor.
 - **The place** is the character that failed. For `U` it is the call, for `N` the `(` or `[` where the skip started, for `Q` the opening quote or the `$`, and for `W` the character after the `[`. Lines and columns count from 1; text below the program (a line read by `-n?` and then run, or a line typed at the editor) is line 0.
-- **The text line** stops at CR, LF or NUL, and in the CP/M builds at ^Z too.
-- **The stack lines** show the stacks as they were before the failing character ran: `7 0/` shows `Stk 2: 7 0`. More than 8 cells are shown as ` ...` and the top 8. Values are signed, as `#` prints them. There are three exceptions:
+- **The stack lines** show the stacks as they were before the failing character ran: `7 0/` shows `D:2: 7 0`. More than 8 cells are shown as ` ...` and the top 8. Values are signed, as `#` prints them. There are three exceptions:
   - A stack overrun (`S` `s` `R` `r`) is found after the character has run, once per character. After `s` the data stack counts as empty, after `r` the return stack. The place can be one character late, and after `r` it is wherever the bad return went.
   - `N`, and `Q` for an unclosed string, show the stack after the opener took its flag or pushed its address.
   - `B` shows whatever is there when the key is noticed.
 - **A string with no closing quote inside skipped text** is an `N` at the skip's opener (or the quiet end of the program, for `\`), not a `Q`: the skip ran into the end.
 - **Store range.** "The program's space" runs from the letter page up to the heap limit, not just up to the heap top. Tiny BASIC keeps its program lines above the heap top without allocating them, so the stricter rule would stop it. On the Z80 and 8080 one test serves both bytes of a cell, so `.` can't store to the very last byte below the limit.
 - **The hex loader and machine code are never checked.**
-- **Stacks.** The stacks hold 127 data cells and 112 return entries (Z80/8080), 252 or 112 and about 110 (6502), or 126 and 112 (6809). A few spare bytes above each stack and a guard band below take what a character does before the check sees it, so an overrun can't reach the letter cells.
+- **Stacks.** The stacks hold 127 data cells and 112 return entries (Z80/8080), 252 or 112 and about 110 (6502), or 125 and 96 (6809). A few spare bytes above each stack and a guard band below take what a character does before the check sees it, so an overrun can't reach the letter cells.
 - **Undefined words.** The word cells start at 0000h. On the Z80 and 8080 the byte there is a reserved one, and the reserved-byte path sees that the text pointer is in page zero; the 6502 reads a NUL there (the text pointer's own low byte) and its end-of-text path sees that the pointer is in page zero; the 6809 tests the cell at the call.
 - **Unchecked builds and `[`.** A letter defines; anything else is taken as the space.
 - **Don't treat a checked run as proof.** What an unchecked build does with the same mistake is not defined. One example: an unclosed string in an unchecked build is skipped on through memory until some quote turns up.
@@ -243,10 +264,11 @@ Rtn 0
 
 - **Z80 / 8080:** as in the spec. Entered by CALL, with the data cells above the return address. The code must keep BC. On return, the top cell becomes TOS. The loader appends C9h.
   - Generic builds also need page zero left intact.
-  - The Z80 saves and restores HL' itself, so the code may use the alternate registers.
+  - The code may change IX, IY and the alternate registers: the Z80 interpreter restores IX and IY itself.
+  - Under CP/M, print through the BDOS: page zero is the system's, so `RST 28h` is only for the generic builds.
 - **6502, both:** entered as a subroutine (`JMP (T0)`, with a return address on the stack), ending in RTS (60h, appended by the loader). The address has been dropped. The code must keep the IP at $00/$01 and leave the hardware stack balanced.
   - **`b8s-6502.asm`:** TOS is at $02/$03. X is the data-stack index; NOS is $0200,X (low) and $0300,X (high). To push: DEX, store TOS there, then set TOS. To drop: load TOS from there, then INX. The code may change A, X (consistently), Y, $04-$06 and $08-$09; $0A-$0F is free for its own use.
-  - **`b8s-6502-zp.asm`:** X is the data-stack pointer. TOS is at 0,X (low) and 1,X (high), NOS at 2,X and 3,X. To push: DEX, DEX, then store. To drop: INX, INX. The code may change A, Y and X (consistently); $02, $03, $07 and $0A-$0D are free for its own use.
+  - **`b8s-6502-zp.asm`:** X is the data-stack pointer. TOS is at 0,X (low) and 1,X (high), NOS at 2,X and 3,X. To push: DEX, DEX, then store. To drop: INX, INX. The code may change A, Y and X (consistently); $02, $03, $07 and $0A-$0D are free for its own use. $0C-$0D keep their values only while the code runs: a `$` that prints a variable escape with the data stack full writes there.
 - **6809:** entered by a jump, with the dispatcher's return address on S, so the code ends in RTS (39h, appended by the loader).
   - U points at the top data cell, which becomes TOS on return. Cells on the data stack are big-endian (6809 order); cells in memory stay little-endian, as the spec says.
   - The code may change A, B, X, CC and U (consistently). It must keep Y (the IP) and DP, and leave S balanced.
@@ -258,7 +280,7 @@ Rtn 0
 | Data stack | pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS in zero page | zero page $10-$EF, 112 cells, each cell two bytes side by side |
 | Zero page used | $00-$09 ($07 is the held key in the unchecked build, and with $06 the place of the character being run in the checked one) | $00, $01, $04-$06, $08, $09, and the stack ($0E-$0F are scratch when it is full). A checked build's report also uses $02, $03, $0A and $0B, after the program has stopped |
 | Dispatch table | whole addresses (64 bytes) | one byte each (32 bytes), with the layout rules above |
-| Size | 1,175 / 1,706 checked | 1,095 / 1,628 checked |
+| Size (`ANSI = 0`) | 1,208 / 1,707 checked | 1,155 / 1,673 checked |
 
 The zero-page one is smaller because a cell that holds an address is used as the pointer where it lies (`(0,X)`), a drop is two `INX`, and the 16-bit operators work a byte at a time through one short routine called twice. Machine code written for one needs changing for the other: see the contracts below.
 
@@ -272,7 +294,9 @@ Every build runs, in an emulator, against a reference interpreter written from t
 - the break key, on unchecked and checked builds alike: Ctrl-C in a loop, in a chain of word calls and in `?`; the held key, the newest key winning, `?` taking the held key first; the break-off cell, with one Ctrl-C, two quick ones and two slow ones; and a count of how often KEY is called;
 - for checked builds, every error in the table, several ways each, with the whole report compared byte for byte against the reference (run with that build's own addresses); the stack overruns are compared against patterns, since stack sizes differ.
 
-The four editor builds are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the cursor keys and arrows, Esc, editing a line in place, new, view, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
+The four editor builds are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the arrow keys, ^B and ^F doing nothing, Esc, editing a line in place, new, ^V doing nothing, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
+
+The six CP/M .COM files have also run under real CP/M 2.2, Digital Research's own BDOS and CCP, in z80pack's `cpmsim` (`testing/cpmsim.py`). There the suite's programs (all but two that need a clock or Z80 machine code) gave the reference's output on every build, on a Z80 that traps undocumented opcodes, and the 8080 builds also on an 8080. The one difference, everywhere, was the byte FEh in a string, which that BDOS doesn't print (see The language). Both editor builds were also driven by hand there: listing, running, a typed line, `/~`, an error, Ctrl-C, writing a file and reading it back. The Z80 builds don't run on an 8080 or 8085 (they use Z80 instructions throughout); use the 8080 builds there.
 
 The Windows builds run in the Unicorn emulator (`testing/harness_win32.py`): the .EXE is mapped as Windows would map it, and the dozen `kernel32` calls it makes are modelled. They go through the same suite as the others, the break-key tests and the editor sessions included, plus a few tests of their own (the report on standard error, redirected input, the arrow keys, the command line). That tests the interpreter, and the header against the rules; it can't show that Windows itself accepts the file, or that the model of each call is right.
 

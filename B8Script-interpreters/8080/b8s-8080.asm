@@ -1,17 +1,21 @@
 ; =============================================================================
 ;  B8Script interpreter for the Intel 8080
-;  Spec: docs/b8script.md (2026-11-21).
+;  Spec: docs/b8script.md (2026-11-24).
 ;  Design follows the Z80 interpreter (z80/b8s-z80.asm), with 8080 opcodes
 ;  only.
 ;
-;  Two switches, set in the two EQU lines below:
+;  Three switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
 ;             1 = starts with every variable at 0 and every word undefined,
 ;                 and stops on every error in the spec's table (and Ctrl-C)
-;                 with a four-line report: the letter and the place as line
-;                 and column, the text there, and both stacks. See `error`.
+;                 with a three-line report: the letter and the place as line
+;                 and column, and both stacks. See `error`.
+;    ANSI     what the console escapes of '$' (/{ /} /| /` /~) do:
+;             1 = send ANSI (VT100) sequences through CONOUT
+;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
+;                 CONAT (see the equates). The CP/M builds always send ANSI.
 ;
 ;  In every build Ctrl-C stops a running program (an unchecked build stops
 ;  without a word): see the console layer for the rules, the held key and
@@ -22,6 +26,8 @@
 
 CPM     EQU     0               ; 1 = CP/M .COM build
 CHECKED EQU     0               ; 1 = checked build
+ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
+ANS     EQU     ANSI+CPM-ANSI*CPM ; (CP/M: always ANSI)
 
 ; -----------------------------------------------------------------------------
 ;  Register use, everywhere in the interpreter
@@ -36,21 +42,21 @@ CHECKED EQU     0               ; 1 = checked build
 ;  The return stack pointer has no register (the 8080 has no spare pair): it
 ;  is the RAM word RSP. Only rpop, rpushd and ')' (and the checks) touch it.
 ;
-;  One-byte calls. The routines used most are reached with RST, one byte
-;  instead of three. (asm80 wants the vector number: RST 1 = RST 08h.)
+;  One-byte calls. In a generic build the routines used most are reached
+;  with RST, one byte instead of three. The source writes them as macros:
 ;
-;    RST 1  08h  rpop    pop the return stack into HL
-;    RST 3  18h  drop    drop TOS, then next character     (ends a handler)
-;    RST 4  20h  neg16   HL = -HL
-;    RST 5  28h  putc    print A
-;    RST 6  30h  next    next character                    (ends a handler)
+;    POPR   RST 1  08h  rpop    pop the return stack into HL
+;    DROP   RST 3  18h  drp     drop TOS, then next character  (ends a handler)
+;    NEGH   RST 4  20h  neg16   HL = -HL
+;    PUTA   RST 5  28h  putc    print A
+;    NEXT   RST 6  30h  next0   next character                 (ends a handler)
 ;
 ;  RST 3 and RST 6 never return: an RST is a CALL, so the first thing each
 ;  of them does is POP D to throw the return address away.
 ;
-;  The CP/M build can't own page zero, so the block from `vecs` to `vecend`
-;  (image addresses 0108h-0133h) is copied to 0008h-0033h when it starts. The
-;  code in that block has no jumps inside itself, so it works at either place.
+;  A CP/M build leaves page zero alone (CP/M keeps it for interrupts, and
+;  RomWBW's BIOS calls itself through RST 1): there the macros are CALLs, and
+;  DROP and NEXT are JMPs.
 ;
 ;  Dispatch. PTAB holds one byte per punctuation character: the low byte of
 ;  its handler's address. The high byte is worked out from the character:
@@ -96,6 +102,18 @@ KEY     EQU     0FF06h          ; a waiting key in A, or A = 0 if none is
 CONOUT  EQU     0FF03h          ; print the character in A
 EXIT    EQU     0FF09h          ; where to go when the program ends
 ;   KEY and CONOUT must preserve BC, DE and HL.
+        ENDIF
+        IF      1-ANS
+; With ANSI = 0 the console escapes call these. All four must keep BC, and
+; all but CONAT also HL. They may change A, DE and the flags.
+CONCLS  EQU     0FF0Ch          ; /{  clear the screen, the cursor to the top left
+CONEOL  EQU     0FF0Fh          ; /}  clear from the cursor to the end of the line
+CONCUR  EQU     0FF12h          ; /| and /`  show the cursor if A is not 0, hide
+                                ;     it if A = 0
+CONAT   EQU     0FF15h          ; /~  the cursor to row HL, column DE, both
+                                ;     counted from 0. May change A, DE and HL
+        ENDIF
+        IFN     CPM
 RSPAGE  EQU     80h             ; 8000h return stack
 DSPAGE  EQU     81h             ; 8100h data stack
 LETPAGE EQU     82h             ; 8200h letter cells and line buffer
@@ -115,12 +133,13 @@ HEAP    EQU     LET+7Ch         ; the heap pointer
 RSP     EQU     LET+34h         ; gap after Z: the return stack pointer;
 BRKCNT  EQU     LET+36h         ;   the break check's countdown;
 NPEND   EQU     LET+38h         ;   minus the address of the program's end
-                                ;   (the heap's first byte), for the checked '_'
+                                ;   (the heap's first byte), for the checked '_';
+PSAVE   EQU     LET+3Ah         ;   the checked build: the address '$' prints
+                                ;   from, for a report
 KEYBUF  EQU     LET+7Ah         ; gap after z: a key read by the break check and
                                 ;   held for the next '?' (0: none);
 BRKOFF  EQU     LET+7Bh         ;   the break-off cell: a program that stores a
                                 ;   non-zero byte here gets Ctrl-C as a key
-LBHDR   EQU     LET+7Eh         ; CP/M BDOS 10 header: max, count
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
 RSTOP   EQU     RSPAGE*256+0E0h ; empty return stack: the 32 bytes above it
                                 ; take calls made while the data stack is full
@@ -130,11 +149,49 @@ DSTOP   EQU     DSPAGE*256+0FCh ; empty data stack. The four bytes above it
                                 ; and the next call must not land on the
                                 ; letter cells.
 
+; The five one-byte calls (see the header). asm80 can't nest IF, so these
+; are written with DS: a count of 0 writes nothing. DS can't take a label
+; that comes later, but EQU can, and DS can take that.
+AROP    EQU     rpop
+ADRP    EQU     drp
+ANEG    EQU     neg16
+APUT    EQU     putc
+ANXT    EQU     next0
+        .macro  POPR            ; pop the return stack into HL
+        DS      1-CPM,0CFh      ;   RST 1
+        DS      CPM,0CDh        ;   CALL rpop
+        DS      CPM,AROP&0FFh
+        DS      CPM,AROP/256
+        .endm
+        .macro  DROP            ; drop TOS, then next character
+        DS      1-CPM,0DFh      ;   RST 3
+        DS      CPM,0C3h        ;   JMP drp
+        DS      CPM,ADRP&0FFh
+        DS      CPM,ADRP/256
+        .endm
+        .macro  NEGH            ; HL = -HL
+        DS      1-CPM,0E7h      ;   RST 4
+        DS      CPM,0CDh        ;   CALL neg16
+        DS      CPM,ANEG&0FFh
+        DS      CPM,ANEG/256
+        .endm
+        .macro  PUTA            ; print A
+        DS      1-CPM,0EFh      ;   RST 5
+        DS      CPM,0CDh        ;   CALL putc
+        DS      CPM,APUT&0FFh
+        DS      CPM,APUT/256
+        .endm
+        .macro  NEXT            ; next character
+        DS      1-CPM,0F7h      ;   RST 6
+        DS      CPM,0C3h        ;   JMP next0
+        DS      CPM,ANXT&0FFh
+        DS      CPM,ANXT/256
+        .endm
+
 ; =============================================================================
 ;  The first 49 bytes: the entry, then the RST routines, with small handlers
 ;  and routines filling the gaps between them. Generic: this IS page zero.
-;  CP/M: it is the start of the .COM file, and 0108h-0133h is also copied to
-;  page zero (see the header).
+;  CP/M: it is just the start of the .COM file.
 ; =============================================================================
         ORG     BASE
         IF      1-(1-CPM)*CHECKED
@@ -147,9 +204,8 @@ DSTOP   EQU     DSPAGE*256+0FCh ; empty data stack. The four bytes above it
         IF      (1-CPM)*CHECKED
         DB      0,0,0           ; 03  spare
         ENDIF
-rdrop:  RST     1               ; 06  drop the top of the return stack, then
-        RST     3               ;     drop TOS (a spent flag) and go on
-vecs:
+rdrop:  POPR                    ; 06  drop the top of the return stack, then
+        DROP                    ;     drop TOS (a spent flag) and go on
 ; ---- RST 1: rpop: pop the return stack into HL (DE is lost) -----------------
 rpop:   LHLD    RSP             ; 08
         MOV     E,M
@@ -162,12 +218,14 @@ rpop:   LHLD    RSP             ; 08
 h_tor:  XCHG                    ; 14  '{' TOS to the return stack; rpushd
         JMP     rpushd          ;     brings up the new TOS
 ; ---- RST 3: drop TOS, then next ---------------------------------------------
+        IF      1-CPM
 rst18:  POP     D               ; 18  discard the RST's return address
-        POP     H               ;     new TOS = NOS
+        ENDIF
+drp:    POP     H               ;     new TOS = NOS
         JMP     next0
 h_fromr:PUSH    H               ; 1D  '}' return stack to TOS
-        RST     1
-        RST     6
+        POPR     
+        NEXT     
 ; ---- RST 4: neg16: HL = -HL (keeps BC, DE) ----------------------------------
 neg16:  XRA     A               ; 20
         SUB     L
@@ -178,24 +236,19 @@ neg16:  XRA     A               ; 20
         RET
 jphl:   PCHL                    ; 27  (for the machine-code call)
 ; ---- RST 5: putc: print A (keeps BC, DE, HL) --------------------------------
-rst28:
         IFN     CPM
+rst28:
 putc:   JMP     CONOUT          ; 28
-        ENDIF
-        IF      CPM
-        JMP     putc            ; 28
         ENDIF
 ; exec: '`' with no hex digit after it: call the machine code at TOS. It
 ; returns here, with its top cell on the stack: that becomes the new TOS.
 exec:   CALL    jphl            ; 2B
         POP     H
-        RST     6
+        NEXT     
 ; ---- RST 6: next character --------------------------------------------------
+        IF      1-CPM
 rst30:  POP     D               ; 30  discard the RST's return address
-        IF      CPM
-        JMP     next0           ; (this copy runs in page zero)
         ENDIF
-vecend:
 
 ; =============================================================================
 ;  The inner loop: read one character and sort it by range.
@@ -277,7 +330,7 @@ h_xor:  POP     D
         MOV     A,L
         XRA     E
         MOV     L,A
-        RST     6
+        NEXT     
 
 h_or:   POP     D
         MOV     A,H
@@ -286,11 +339,11 @@ h_or:   POP     D
         MOV     A,L
         ORA     E
         MOV     L,A
-        RST     6
+        NEXT     
 
-h_not:  RST     4               ; ~x = -x - 1
+h_not:  NEGH                    ; ~x = -x - 1
         DCX     H
-        RST     6
+        NEXT     
 
 ; '_' ( n -- addr ): the heap pointer moves by n, a signed count (the add is
 ; the same either way); TOS is the old pointer.
@@ -303,8 +356,9 @@ h_alloc:XCHG
         ENDIF
         SHLD    HEAP
         POP     H
-        RST     6
+        NEXT     
 
+        IF      1-CPM
 ; ---- the letters and digits --------------------------------------------------
 
 ; a-z: push the cell's address (the cell is the variable)
@@ -312,7 +366,7 @@ lower:  PUSH    H
         ADD     A
         MOV     L,A
         MVI     H,LETPAGE
-        RST     6
+        NEXT     
 
 ; A-Z: call the word. The return address (the IP after the letter) goes on
 ; the return stack, and the IP becomes the address in the letter's cell.
@@ -344,7 +398,9 @@ rpushd: LHLD    RSP
         DCR     M
         POP     H               ; (keeps the flags)
         CZ      pollk
-        RST     6
+        NEXT     
+
+        ENDIF
 
 ; ---- machine code: the grave -----------------------------------------------
 ; '`' plus a hex digit loads bytes: ( addr -- addr' ). Pairs of hex digits
@@ -368,7 +424,7 @@ hx1:    ADD     A
         CALL    hexc
         JC      hx1
 hx2:    MVI     M,0C9h          ; (never range-checked: the spec says so)
-        RST     6
+        NEXT     
 
 ; ---- where the two pages meet ----------------------------------------------
 ; The first page ends somewhere among the next four handlers, ] \ [ @ (they
@@ -379,10 +435,10 @@ hx2:    MVI     M,0C9h          ; (never range-checked: the spec says so)
 ; ']' returns: pop an address and jump to it. TOS is parked on the stack
 ; while rpop uses HL, and the drop at the end brings it back.
 h_ret:  PUSH    H
-ret2:   RST     1
+ret2:   POPR     
         MOV     B,H
         MOV     C,L
-        RST     3
+        DROP     
 
 ; '\' ( flag -- ): true skips to the next ')' or ']' at this level; ')'
 ; drops the block start, ']' returns. No closer at all ends the program.
@@ -431,13 +487,13 @@ skipnx:
         DCX     B               ; back onto the letter, so that skip finds its
         ENDIF                   ;   opener, the '[', just before where it starts
 skipo:  CALL    skip
-        RST     6
+        NEXT     
 
 h_fetch:MOV     E,M             ; '@'
         INX     H
         MOV     D,M
         XCHG
-        RST     6
+        NEXT     
 
 ; =============================================================================
 ;  Handlers that must start in the image's second page.
@@ -463,7 +519,7 @@ h_open: MOV     A,H
 h_close:MOV     A,H
         ORA     L
         JZ      rdrop
-        RST     1               ; pop the block start ...
+        POPR                    ; pop the block start ...
         MOV     B,H
         MOV     C,L             ; ... jump to it ...
         XCHG
@@ -476,10 +532,10 @@ h_sub:  LDAX    B
         SUI     '0'
         CPI     10
         JC      negnum
-        RST     4               ; a - b = a + (-b): fall into '+'
+        NEGH                    ; a - b = a + (-b): fall into '+'
 h_add:  POP     D
         DAD     D
-        RST     6
+        NEXT     
 
 h_and:  POP     D
         MOV     A,H
@@ -488,7 +544,7 @@ h_and:  POP     D
         MOV     A,L
         ANA     E
         MOV     L,A
-        RST     6
+        NEXT     
 
 ; Signed compares. Both are "DE < HL" for the right pair: > swaps the two
 ; cells first (XTHL), < doesn't. There is no overflow flag, so the signed
@@ -509,7 +565,7 @@ h_lt:   POP     D               ; a < b: DE = a, HL = b
         XRA     L               ; flip when they do
         MOV     H,A
         MOV     L,A
-        RST     6
+        NEXT     
 
 h_eq:   POP     D
         MOV     A,L
@@ -522,7 +578,7 @@ h_eq:   POP     D
         SBB     A
         MOV     H,A
         MOV     L,A
-        RST     6
+        NEXT     
 
 ; '*': shift-and-add on the multiplier's low bit, so it stops as soon as the
 ; multiplier is used up; only the low 16 bits are kept.
@@ -547,7 +603,7 @@ mul2:   XCHG
         ORA     C
         JNZ     mul1
         POP     B
-        RST     6
+        NEXT     
 
 ; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
@@ -583,15 +639,15 @@ h_div:
         CM      neg16           ; r's sign
         POP     B
         PUSH    D               ; q under r
-        RST     6
+        NEXT     
 
 ; ---- stack and storage -----------------------------------------------------
 
 h_dup:  PUSH    H               ; ':'
-        RST     6
+        NEXT     
 
 h_swap: XTHL                    ; '%'
-        RST     6
+        NEXT     
 
 ; (The checked build tests the address before it takes the value off the
 ; stack, so that an error report shows both.)
@@ -603,7 +659,7 @@ h_store:                        ; '!' ( n addr -- )
         MOV     M,E
         INX     H
         MOV     M,D
-        RST     3
+        DROP     
 
 h_cstore:                       ; '.' ( c addr -- )
         IF      CHECKED
@@ -611,7 +667,7 @@ h_cstore:                       ; '.' ( c addr -- )
         ENDIF
         POP     D
         MOV     M,E
-        RST     3
+        DROP     
 
 ; ---- console ---------------------------------------------------------------
 
@@ -624,48 +680,40 @@ h_str:  PUSH    H
         ORA     A               ; 0: the text ran out before the closing quote
         JZ      e_quote
         ENDIF
-        RST     6
+        NEXT     
 
-; '$' prints the string at TOS, decoding escapes: '/' plus a character
-; clears that character's bit 6 (/M is CR, /` is space; '/' and '"' have no
-; bit 6, so // and /" give themselves).
+; '$' prints the string at TOS, decoding escapes: '/' plus a character from
+; 60h to 7Eh is one of the escapes at pesc; '/' plus any other character
+; clears that character's bit 6 (/M is CR, and / then DEL gives '?'; '/',
+; '"' and '?' have no bit 6, so //, /" and /? give themselves).
         IF      1-CHECKED
-h_print:MOV     A,M
-        INX     H
-        CPI     22h
-        JZ      h_drop
-        CPI     '/'
-        JNZ     pr1
-        MOV     A,M
-        INX     H
-        ANI     0BFh
-pr1:    RST     5
-        JMP     h_print
+h_print:JMP     prlp            ; (the loop is with the escapes, out of the
+PRLOOP  EQU     prlp            ;   way of the handlers, which must fit in
+PRAGAIN EQU     prlp            ;   the image's first two pages)
         ENDIF
         IF      CHECKED
 ; (The checked build has the loop as a routine, prstr, which the error
-; report uses too. The address is kept on the stack meanwhile: a report
-; shows the stack as it was before the '$'.)
-h_print:PUSH    H
-        CALL    prstr
-        POP     D
-        RST     3
+; report uses too. The address is kept meanwhile, for a report: it shows
+; the stack as it was before the '$'. /~ comes back to hp1.)
+h_print:SHLD    PSAVE
+hp1:    CALL    prstr
+        DROP     
         ENDIF
 
 h_emit: MOV     A,L             ; "'"
-        RST     5
-h_drop: RST     3               ; ';' is this one byte
+        PUTA     
+h_drop: DROP                    ; ';' is this one byte
 
 ; '#' prints TOS as a signed decimal number, with no space after it.
 h_num:  PUSH    B
         CALL    psgn
         POP     B
-        RST     3
+        DROP     
 
         IF      CHECKED         ; (the checked build has no room to start ','
 h_cfetch:MOV    L,M             ;   as late as the unchecked one does: see
         MVI     H,0             ;   the end of '?')
-        RST     6
+        NEXT     
         ENDIF
 
 ; '?' ( n -- c ) or ( -n -- addr )
@@ -694,33 +742,9 @@ h_cfetch:MOV    A,M             ; ',' shares '?'s ending: A becomes TOS
         ENDIF
 kt3:    MOV     L,A
         MVI     H,0
-        RST     6
+        NEXT     
 
-        IF      CPM
-        ; CP/M: BDOS 10 does the editing (the spec allows the platform's
-        ; own line editor). It doesn't store the CR, so it is added here.
-line:   LXI     D,127           ; TOS is minus the count: adding 127 carries
-        DAD     D               ;   only for 1 to 127, and leaves 127 - count
-        SBB     A
-        ANA     L               ; (0 for a count that is too big)
-        XRI     127             ; A = the count, 127 at most
-        STA     LBHDR
-        PUSH    B
-        LXI     D,LBHDR
-        MVI     C,10
-        CALL    BDOS
-        POP     B
-        LXI     H,LBHDR+1
-        MOV     A,M             ; the count typed (0-127)
-        INR     L               ; HL = LINEBUF, whose low byte is 80h:
-        ADD     L               ;   adding the count to L can't carry
-        MOV     L,A
-        MVI     M,13
-        MVI     L,LINEBUF & 0FFh
-        RST     6
-        ENDIF
-        IFN     CPM
-        ; Generic: Backspace takes the last character back (and is echoed as
+        ; Backspace takes the last character back (and is echoed as
         ; it is), CR ends (stored, not echoed), every other key is stored and
         ; echoed until the line is full. The line buffer starts at offset 80h
         ; of its page, so L alone is the place in the line: D holds the L of
@@ -746,7 +770,7 @@ ln2:    CALL    getk
         MOV     M,E
         INR     L
         MOV     A,E
-ln3:    RST     5
+ln3:    PUTA     
         JMP     ln2
 ln4:    DCR     L               ; Backspace: one back, and echo it,
         JM      ln3             ;   unless the line was empty (L left the
@@ -754,8 +778,7 @@ ln4:    DCR     L               ; Backspace: one back, and echo it,
         JMP     ln2
 ln5:    MOV     M,A             ; the CR
         MVI     L,LINEBUF & 0FFh
-        RST     6
-        ENDIF
+        NEXT     
 
 ; =============================================================================
 ;  Dispatch table: the low byte of each handler's address, in code order.
@@ -812,13 +835,13 @@ PTABEND:
 digit:  PUSH    H
         DCX     B
         CALL    rdnum
-        RST     6
+        NEXT     
 
 ; negnum: '-' directly before a digit: read the number, negate it.
 negnum: PUSH    H
         CALL    rdnum
-        RST     4
-        RST     6
+        NEGH     
+        NEXT     
 
 ; rdnum: read decimal digits at IP into HL; IP is left on the first
 ; non-digit. Values wrap at 16 bits, as the spec says.
@@ -890,8 +913,8 @@ psgn:   MOV     A,H
         ORA     A
         JP      pdec
         MVI     A,'-'
-        RST     5
-        RST     4
+        PUTA     
+        NEGH     
 ; pdec: print HL unsigned, by recursion on HL / 10 (the stack holds digits).
 ; Uses BC.
 pdec:   LXI     D,10
@@ -903,8 +926,138 @@ pdec:   LXI     D,10
         CNZ     pdec
         POP     PSW
         ADI     '0'
-        RST     5
+        PUTA     
         RET
+
+        IF      1-CHECKED
+; '$' prints the string at TOS (see h_print).
+prlp:   MOV     A,M
+        INX     H
+        CPI     22h
+        JZ      h_drop
+        CPI     '/'
+        JNZ     pr1
+        MOV     A,M
+        INX     H
+        CPI     60h
+        JC      pr0
+        CPI     7Fh
+        JC      pesc
+pr0:    ANI     0BFh
+pr1:    PUTA     
+        JMP     prlp
+        ENDIF
+
+;-----------------------------------------------------------------------------
+; pesc: the escapes of '$'. A = the character after the '/', 60h to 7Eh, and
+; HL points past it. Each goes back into the loop that prints the string
+; (PRLOOP), but /~ has the stack to see to, and goes back by PRAGAIN.
+;    /a-/z   print the variable, as '#' does
+;    /{      clear the screen, the cursor to the top left
+;    /}      clear from the cursor to the end of the line
+;    /|  /`  show the cursor, hide it
+;    /~      ( row col -- ) the cursor to that row and column, from 0
+pesc:   CPI     7Eh
+        JZ      pat
+        LXI     D,PRLOOP        ; the others return into the loop
+        PUSH    D
+        SUI     7Bh             ; { 0, | 1, } 2, and no borrow
+        JNC     pcon
+        ADI     1Ah             ; a-z: 0-25, and a carry; `: FFh, and none
+        JNC     phide
+        ADD     A               ; the variable's cell
+        ADI     40h
+        PUSH    H
+        PUSH    B
+        MOV     L,A
+        MVI     H,LETPAGE
+        MOV     A,M
+        INR     L
+        MOV     H,M
+        MOV     L,A
+        CALL    psgn
+        POP     B
+        POP     H
+        RET
+
+; /~ ( row col addr -- ): the two cells under the string's address go. In
+; the checked build '$' is the routine prstr: its own return address goes
+; first, and hp1 calls it again afterwards. There each /~ first looks that
+; its two cells are there, and is s if not, before it prints anything.
+pat:
+        IF      CHECKED
+        XTHL                    ; the text pointer over prstr's return address
+        LXI     H,(6-DSTOP)&0FFFFh ; a carry: the two cells aren't there
+        DAD     SP
+        JC      e_under
+        POP     H
+        ENDIF
+        POP     D               ; DE = the column
+        XTHL                    ; HL = the row; the text pointer is kept
+        IF      1-ANS
+        CALL    CONAT
+        POP     H
+        JMP     PRAGAIN
+
+; With ANSI = 0 the machine's routines do the rest.
+pcon:   JZ      CONCLS          ; /{
+        CPI     2
+        JZ      CONEOL          ; /}
+        DB      0FEh            ; /|  (CPI steps over the XRA: A = 1, show)
+phide:  XRA     A               ; /`  (A = 0: hide)
+        JMP     CONCUR
+        ENDIF
+        IF      ANS
+        PUSH    B               ; (pdec uses BC)
+        PUSH    D
+        CALL    csi             ; ESC [ row+1 ; col+1 H (ANSI counts from 1)
+        INX     H
+        CALL    pdec
+        MVI     A,';'
+        PUTA     
+        POP     H
+        INX     H
+        CALL    pdec
+        MVI     A,'H'
+        PUTA     
+        POP     B
+        POP     H
+        JMP     PRAGAIN
+
+; With ANSI = 1 they are sequences. The carry is clear on the way in.
+pshow:  MVI     E,'h'           ; /|  ESC [ ? 2 5 h
+        DB      0DAh            ; (JC nn: with no carry it steps over two bytes)
+phide:  MVI     E,'l'           ; /`  ESC [ ? 2 5 l
+        MVI     A,'?'
+        CALL    csia
+        MVI     A,'2'
+        PUTA     
+        MVI     A,'5'
+        PUTA     
+        MOV     A,E
+        PUTA     
+        RET
+
+; pcon: /{ /| /}, with A = 0, 1, 2. /{ runs on into csia.
+pcon:   DCR     A
+        JZ      pshow           ; /|
+        MVI     A,'K'
+        JP      csia            ; /}  ESC [ K
+        MVI     A,'H'           ; /{  ESC [ H ESC [ J
+        CALL    csia
+        MVI     A,'J'           ; (on into csia)
+; csia: ESC [ and then A. csi: ESC [. Both keep all but A.
+csia:   PUSH    PSW
+        CALL    csi
+        POP     PSW
+        PUTA     
+        RET
+csi:    MVI     A,27
+        PUTA     
+        MVI     A,'['
+        PUTA     
+        RET
+        ENDIF
 
 ; skip: read past text to the closer at this level, and return A = 0 if it
 ; was ')' and 2 if it was ']'. Brackets of both kinds count together;
@@ -1088,6 +1241,50 @@ brk     EQU     endprog         ; the unchecked build stops without a word;
 brk     EQU     e_break         ;   the checked build reports B
         ENDIF
         IF      CPM
+; (In a CP/M build the letters and digits are here, out of the way of the
+; handlers, which must fit in the image's first two pages. The same code as
+; in the generic build.)
+; ---- the letters and digits --------------------------------------------------
+
+; a-z: push the cell's address (the cell is the variable)
+lower:  PUSH    H
+        ADD     A
+        MOV     L,A
+        MVI     H,LETPAGE
+        NEXT     
+
+; A-Z: call the word. The return address (the IP after the letter) goes on
+; the return stack, and the IP becomes the address in the letter's cell.
+upper:  PUSH    H               ; keep TOS: rpushd pops it back
+        ADD     A
+        MOV     L,A
+        MVI     H,LETPAGE       ; HL -> cell
+        MOV     D,B
+        MOV     E,C             ; DE = the return address
+        MOV     C,M
+        INX     H
+        MOV     B,M             ; IP = the word's body, and fall into rpushd
+
+; rpushd: push DE on the return stack, then pop TOS off the data stack and
+; go on. Every push of the return stack ends here: for a word call the cell
+; popped is the TOS that upper parked; for '(' and '{' it is the cell under
+; the one that was used up.
+;
+; The break key is looked at here, so at every word call and loop-back (and
+; block entry and '{'), but only one time in 256: BRKCNT counts them. Reading
+; the keyboard can be slow (it is a BDOS call under CP/M).
+rpushd: LHLD    RSP
+        DCX     H
+        MOV     M,D
+        DCX     H
+        MOV     M,E
+        SHLD    RSP
+        LXI     H,BRKCNT
+        DCR     M
+        POP     H               ; (keeps the flags)
+        CZ      pollk
+        NEXT     
+
 rawk:   MVI     A,0FFh          ; BDOS 6 with E = FFh: a key, or 0
 ; putc: BDOS 6 for every character. BDOS 2 would check for ^S while
 ; printing and could swallow a key that BDOS 6 then never sees.
@@ -1192,20 +1389,22 @@ prstr:  MOV     A,M
         JNZ     prs1
         MOV     A,M
         INX     H
-        ANI     0BFh
-prs1:   RST     5
+        CPI     60h
+        JC      prs0
+        CPI     7Fh
+        JC      pesc
+prs0:   ANI     0BFh
+prs1:   PUTA     
         JMP     prstr
-e_dollar:POP    D               ; '$' ran into a NUL: drop the return address,
-        POP     H               ;   and put the string's address back in TOS
-        MVI     A,'Q'
-        JMP     error
+PRLOOP  EQU     prstr           ; (where the escapes go back to)
+PRAGAIN EQU     hp1             ; (and where /~ goes back to)
 
 ; pmsg: print the text that follows the CALL, to its closing quote. Keeps HL.
 ; pnl: the same, on a new line.
 pnl:    MVI     A,13
-        RST     5
+        PUTA     
         MVI     A,10
-        RST     5
+        PUTA     
 pmsg:   XTHL
         CALL    prstr
         XTHL
@@ -1253,12 +1452,22 @@ e_hi:   INR     B
         DCR     B
         JNZ     e_resv
         PUSH    H
-        RST     1
+        POPR     
         MOV     B,H
         MOV     C,L
         POP     H
         MVI     A,'U'
         JMP     error
+; e_dollar: '$' ran into a NUL (in prstr): Q, with the string's address
+; back in TOS. prstr's return address goes first. But if '$' had no
+; address at all (the stack was empty), it is s, found now: chkstk, called
+; one cell up, sees the stack past its empty place then.
+e_dollar:POP    D
+        POP     H
+        CALL    chkstk
+        PUSH    H
+        LHLD    PSAVE
+        DB      11h             ; (LXI D hides e_quote's first two bytes)
 ; Error entries. Each loads its letter and then hides the next entry inside
 ; a 3-byte LXI D (the 11h), so they all fall through to `error`.
 e_quote:MOV     B,H             ; an unclosed string: HL is its address, one
@@ -1278,15 +1487,14 @@ errp:   POP     D
 ; HL = TOS, and both stacks as the report is to show them:
 ;
 ;   Err X @ line,col
-;   up to 16 characters of the text from the place
-;   Stk n: the top 8 cells at most, bottom to top
-;   Rtn n
+;   D:n: the top 8 cells at most, bottom to top
+;   R:n
 error:  PUSH    H               ; now the whole data stack is in memory
         MOV     E,A
         CALL    pnl
         DB      "Err ",22h
         MOV     A,E
-        RST     5
+        PUTA     
         CALL    pmsg
         DB      " @ ",22h
         DCX     B               ; BC = the place
@@ -1319,43 +1527,21 @@ er3:    PUSH    B
         XCHG
         CALL    pdec            ; the line
         MVI     A,','
-        RST     5
+        PUTA     
         POP     D
         POP     H
-        PUSH    H
         CALL    sub16
         INX     H
         CALL    pdec            ; the column
         CALL    pnl
-        DB      22h
-        POP     H               ; the text, as it is: 16 characters, or fewer
-        MVI     B,16            ;   if the line or the program ends first
-er4:    MOV     A,M
-        INX     H
-        ORA     A
-        JZ      er5
-        CPI     13
-        JZ      er5
-        CPI     10
-        JZ      er5
-        ENDIF
-        IF      CHECKED*CPM
-        CPI     1Ah             ; (the ^Z that pads a file's last record ends
-        JZ      er5             ;   the text too: some terminals clear the
-        ENDIF                   ;   screen on it)
-        IF      CHECKED
-        RST     5
-        DCR     B
-        JNZ     er4
-er5:    CALL    pnl
-        DB      "Stk ",22h
+        DB      "D:",22h
         LXI     H,(2-DSTOP)&0FFFFh ; SP - (DSTOP-2) is minus twice the depth
         DAD     SP              ;   (the cell at DSTOP-2 was pushed with the
-        RST     4               ;   first value and holds nothing)
+        NEGH                    ;   first value and holds nothing)
         MOV     A,H
         CALL    phal2           ; the depth
         MVI     A,':'
-        RST     5
+        PUTA     
         MOV     A,C
         CPI     9
         JC      er6
@@ -1376,14 +1562,14 @@ er7:    DCR     C
         PUSH    H
         PUSH    B
         MVI     A,' '
-        RST     5
+        PUTA     
         XCHG
         CALL    psgn
         POP     B
         POP     H
         JMP     er7
 er8:    CALL    pnl
-        DB      "Rtn ",22h
+        DB      "R:",22h
         LHLD    RSP
         XCHG
         LXI     H,RSTOP
@@ -1432,15 +1618,6 @@ ini1:   MOV     M,A
         ENDIF
         IF      CPM
         ; CP/M: the RAM pages follow the image; the heap may grow to the BDOS
-        LXI     H,vecs          ; the RST routines go down into page zero
-        LXI     D,0008h
-        MVI     B,vecend-vecs
-cpy:    MOV     A,M
-        STAX    D
-        INX     H
-        INX     D
-        DCR     B
-        JNZ     cpy
         LXI     D,005Ch         ; open the file named on the command line
         MVI     C,15            ; (no such file: the first read fails too,
         CALL    BDOS            ;   and the program is empty)
@@ -1470,7 +1647,7 @@ fnul:   MOV     A,M
         ENDIF
         SHLD    HEAP
         IF      CHECKED
-        RST     4               ; minus the heap's first address: '_' may not
+        NEGH                    ; minus the heap's first address: '_' may not
         SHLD    NPEND           ;   release below it
         ENDIF
         LXI     H,RSTOP         ; the return stack is empty
@@ -1486,7 +1663,7 @@ fnul:   MOV     A,M
         SHLD    KEYBUF
         ENDIF
         LXI     B,PROG          ; the IP
-        RST     6               ; (its return address is thrown away)
+        NEXT                    ; (its return address is thrown away)
 
         IF      CPM
 ; RAM pages, after the image

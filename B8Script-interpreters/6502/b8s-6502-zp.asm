@@ -75,7 +75,9 @@ ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
 ;  and 1,X (high), NOS is 2,X and 3,X. To push: DEX, DEX, then store at 0,X
 ;  and 1,X. To drop: INX, INX. The code may change A and Y, and X as the
 ;  stack pointer; it must keep IP ($00/$01) and leave the hardware stack
-;  balanced. Zero page $02, $03, $07 and $0A-$0D are free for its own use.
+;  balanced. Zero page $02, $03, $07 and $0A-$0D are free for its own use;
+;  but $0C-$0D only while the code runs: a '$' that prints a variable escape
+;  with the data stack full writes there.
 ; -----------------------------------------------------------------------------
 IP      EQU     00h             ; 00-01 reading position
 T0      EQU     04h             ; scratch

@@ -20,7 +20,7 @@ The files are in `games/` (at the root of the repository): [`b8sms/`](../games/b
 | [Rock Paper Scissors](#rock-paper-scissors) | 153 | 137 | Against an AI that learns | 1–3 |
 | [Simon](#simon) | 157 | 138 | Memory | Digits |
 | [Pig](#pig) | 150 | 132 | Push your luck | h, any key |
-| [Tron](#tron) | 139 | 128 | Real-time, 2D | `,` and `.` |
+| [Tron](#tron) | 132 | 128 | Real-time, 2D | `,` and `.` |
 | [Lights Out](#lights-out) | 159 | 139 | Puzzle | a–y |
 
 | Game | 280 | Kind | You press |
@@ -160,7 +160,7 @@ The dice game Pig, solo: reach 100 in as few turns as you can. Each line shows t
 ### Tron
 
 ```text
-"/{"$1024_g!0 1(:g@+0%.1+:1024<);520i!0d!0t!1(99?:46=%44=-d@%- 3&:d!:1&63*1+%2&1%-*i@+1023&:i!:64/"/~O"$g@+:,%1%.t@1+t!0=)17 0"/~score /t"$
+"/{"$0_g!1024 1(0 1_.1-:);520i!0d!0t!1(99?:46=%44=-d@%- 3&:d!:1&63*1+%2&1%-*i@+1023&:i!:64/"/~O"$g@+:,%1%.t@1+t!0=)17 0"/~score /t"$
 ```
 
 A light cycle that never stops, leaving a wall behind it. `,` turns left and `.` turns right. Run into the wall, anywhere along it, and you're done. The arena is 64 × 16 and wraps at the edges, so the danger is only ever the trail. Survive as long as you can.

@@ -647,8 +647,8 @@ h_str:  PUSH    H
 
 ; '$' prints the string at TOS, decoding escapes: '/' plus a character from
 ; 60h to 7Eh is one of the escapes at pesc; '/' plus any other character
-; clears that character's bit 6 (/M is CR, /? is DEL's '?'; '/' and '"' have
-; no bit 6, so // and /" give themselves).
+; clears that character's bit 6 (/M is CR, and / then DEL gives '?'; '/',
+; '"' and '?' have no bit 6, so //, /" and /? give themselves).
         IF      1-CHECKED
 h_print:MOV     A,M
         INX     H
@@ -940,10 +940,11 @@ pesc:   CPI     7Eh
 
 ; /~ ( row col addr -- ): the two cells under the string's address go. In
 ; the checked build '$' is the routine prstr: its own return address goes
-; first, and hp1 calls it again afterwards; and chkstk looks first that
-; there is a column at least (with less, it is s). With a column but no row
-; it is s after the '$', as for any other character: the spare bytes above
-; the stack take what is written meanwhile.
+; first, and hp1 calls it again afterwards. There a /~ that takes cells
+; that aren't there is s after the '$' (or at its NUL: see e_dollar), as for
+; any other character. chkstk stops a /~ only when the stack is already
+; past its empty place, so that, however many there are, what they write
+; stays in the spare bytes above the stack.
 pat:
         IF      CHECKED
         POP     D
@@ -957,12 +958,12 @@ pat:
         JMP     PRAGAIN
 
 ; With ANSI = 0 the machine's routines do the rest.
-phide:  XRA     A               ; /`  (A = 0: hide)
-        JMP     CONCUR
 pcon:   JZ      CONCLS          ; /{
         CPI     2
         JZ      CONEOL          ; /}
-        JMP     CONCUR          ; /|  (A = 1: show)
+        DB      0FEh            ; /|  (CPI steps over the XRA: A = 1, show)
+phide:  XRA     A               ; /`  (A = 0: hide)
+        JMP     CONCUR
         ENDIF
         IF      ANS
         PUSH    B               ; (pdec uses BC)
@@ -982,14 +983,6 @@ pcon:   JZ      CONCLS          ; /{
         JMP     PRAGAIN
 
 ; With ANSI = 1 they are sequences. The carry is clear on the way in.
-pcon:   DCR     A
-        JZ      pshow           ; /|
-        MVI     A,'K'
-        JP      csia            ; /}  ESC [ K
-        MVI     A,'H'           ; /{  ESC [ H ESC [ J
-        CALL    csia
-        MVI     A,'J'
-        JMP     csia
 pshow:  MVI     E,'h'           ; /|  ESC [ ? 2 5 h
         DB      0DAh            ; (JC nn: with no carry it steps over two bytes)
 phide:  MVI     E,'l'           ; /`  ESC [ ? 2 5 l
@@ -1003,6 +996,14 @@ phide:  MVI     E,'l'           ; /`  ESC [ ? 2 5 l
         RST     5
         RET
 
+; pcon: /{ /| /}, with A = 0, 1, 2. /{ runs on into csia.
+pcon:   DCR     A
+        JZ      pshow           ; /|
+        MVI     A,'K'
+        JP      csia            ; /}  ESC [ K
+        MVI     A,'H'           ; /{  ESC [ H ESC [ J
+        CALL    csia
+        MVI     A,'J'           ; (on into csia)
 ; csia: ESC [ and then A. csi: ESC [. Both keep all but A.
 csia:   PUSH    PSW
         CALL    csi
@@ -1311,10 +1312,6 @@ prs1:   RST     5
         JMP     prstr
 PRLOOP  EQU     prstr           ; (where the escapes go back to)
 PRAGAIN EQU     hp1             ; (and where /~ goes back to)
-e_dollar:POP    D               ; '$' ran into a NUL: drop the return address,
-        LHLD    PSAVE           ;   and put the string's address back in TOS
-        MVI     A,'Q'
-        JMP     error
 
 ; pmsg: print the text that follows the CALL, to its closing quote. Keeps HL.
 ; pnl: the same, on a new line.
@@ -1375,6 +1372,16 @@ e_hi:   INR     B
         POP     H
         MVI     A,'U'
         JMP     error
+; e_dollar: '$' ran into a NUL (in prstr): Q, with the string's address
+; back in TOS. prstr's return address goes first. But if a /~ took cells
+; that weren't there, it is s, found now: chkstk, called one cell up, sees
+; the stack past its empty place then.
+e_dollar:POP    D
+        POP     H
+        CALL    chkstk
+        PUSH    H
+        LHLD    PSAVE
+        DB      11h             ; (LXI D hides e_quote's first two bytes)
 ; Error entries. Each loads its letter and then hides the next entry inside
 ; a 3-byte LXI D (the 11h), so they all fall through to `error`.
 e_quote:MOV     B,H             ; an unclosed string: HL is its address, one

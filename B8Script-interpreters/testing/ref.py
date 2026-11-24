@@ -32,11 +32,13 @@ class Ref:
     def __init__(self, prog, inp=b'', prog_at=0x9000, let=0x8000, linebuf=0x8100,
                  heaplim=0xE000, retbyte=0xC9, cpm=False, checked=False, filepad=None):
         self.m = bytearray(65536)
-        if cpm if filepad is None else filepad:
+        self.pad = cpm if filepad is None else filepad
+        if self.pad:
             # the program is a CP/M file: its last record is padded with ^Z,
             # and the NUL goes after the last record (control characters are
-            # ignored, so only the heap's first address and a report's text
-            # line can show it)
+            # ignored, so only the heap's first address can show it; a
+            # report's text line ends at the first ^Z, as the CP/M runners'
+            # does. The CP/M editor's loader ends the text there instead.)
             prog = prog + b'\x1a' * (-len(prog) % 128)
         self.m[prog_at:prog_at + len(prog)] = prog
         self.m[prog_at + len(prog)] = 0
@@ -46,7 +48,6 @@ class Ref:
         self.lb = linebuf
         self.heaplim = heaplim
         self.retbyte = retbyte
-        self.cpm = cpm
         self.checked = checked
         self.heapcell = let + 0x7C
         self.progend = prog_at + len(prog) + 1      # the first byte after the NUL
@@ -180,7 +181,7 @@ class Ref:
         line, col = self.linecol(place)
         o += b'\r\nErr %c @ %d,%d\r\n' % (ord(code), line, col)
         for a in range(place, place + 16):
-            if self.m[a & 0xFFFF] in (0, 10, 13) or (self.cpm and self.m[a & 0xFFFF] == 26):
+            if self.m[a & 0xFFFF] in (0, 10, 13) or (self.pad and self.m[a & 0xFFFF] == 26):
                 break
             o.append(self.m[a & 0xFFFF])
         o += b'\r\nStk %d:' % len(self.ds)

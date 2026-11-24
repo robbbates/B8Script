@@ -2,10 +2,12 @@
 
 generic: the image is ROM at 0000h, the program text is loaded at PROG (taken
 from the listing) and NUL-terminated, and KEY/CONOUT/EXIT are traps. KEY
-returns a waiting key in A, or 0, with the zero flag matching A.
-cpm: the image is a .COM at 0100h; BDOS 6, 10, 15, 16, 19, 20, 21, 22 and
-26 are emulated. `files` is the disk: a dict of 11-character names (as in an
-FCB) to contents, and it holds what the build wrote when the run is over.
+returns a waiting key in A, or 0, with the zero flag matching A. In a build
+with ANSI = 0 the console routines are traps too (see `console`).
+cpm: the image is a .COM at 0100h; BDOS 6, 15, 16, 19, 20, 21, 22 and 26
+are emulated, and any other call stops the run. `files` is the disk: a dict
+of 11-character names (as in an FCB) to contents, and it holds what the
+build wrote when the run is over.
 If it is not given, the program is the one file on it, PROG.B8S, which is
 the name on the command line.
 editor: a generic image built with EDITOR = 1. No program is loaded (the RAM
@@ -25,8 +27,6 @@ is a program sitting in a key loop ('?', a line read, the editor), not the
 break check, whose looks are far apart. Keys to be pressed while the program
 is busy are given at once: `brk_at` presses Ctrl-C, and `timed` is a list of
 (n, keys): the keys are pressed once n characters have been printed.
-BDOS 10 is modelled as CP/M does it (Ctrl-C as the first key of a line is a
-warm boot), though no build calls it now: every build reads -n? itself.
 """
 import re
 import z80
@@ -134,7 +134,8 @@ class Run:
         escapes of '$'. Each is modelled as sending the ANSI sequence that an
         ANSI = 1 build sends, so the two print the same. Each then spoils
         what its contract lets it change (A, and DE and HL for CONAT), so
-        that an interpreter that relies on more is caught."""
+        that an interpreter that relies on more is caught. (The flags too:
+        the contract says nothing of them.)"""
         m, k = self.m, self.cons[pc]
         if k == 'CONCLS':
             self.out += b'\x1b[H\x1b[J'
@@ -145,7 +146,7 @@ class Run:
         else:                                   # CONAT: row HL, column DE
             self.out += b'\x1b[%d;%dH' % ((m.hl + 1) & 0xFFFF, (m.de + 1) & 0xFFFF)
             m.hl, m.de = 0xA5A5, 0x5A5A
-        m.a = 0xEE
+        m.a, m.f = 0xEE, m.f ^ 0xFF
 
     def mem(self, a):
         return self.m.memory[a & 0xFFFF]
@@ -171,12 +172,6 @@ class Run:
         if self.inp and waiting:
             return self.inp.pop(0)
         return 0
-
-    def key_ready(self):
-        """For the line reader of BDOS 10, which waits for its keys."""
-        if self.pressed:
-            self.inp.insert(0, self.pressed.pop(0))
-        return bool(self.inp)
 
     def run(self):
         m = self.m
@@ -245,30 +240,6 @@ class Run:
                         self.ended = 'needkey'; return False
             else:
                 self.out.append(m.e); self.idle = 0
-        elif f == 10:
-            de = m.de
-            mx = self.mem(de)
-            buf = bytearray()
-            while True:
-                if not self.key_ready():
-                    if not self.stages:
-                        self.ended = 'needkey'; return False
-                    self.inp = list(self.stages.pop(0))
-                    continue
-                c = self.inp.pop(0)
-                if c == 3 and not buf:
-                    self.ended = 'exit'; return False
-                if c in (13, 10):
-                    break
-                if c in (8, 127):
-                    if buf:
-                        buf.pop(); self.out += b'\x08 \x08'
-                elif c >= 32:
-                    buf.append(c); self.out.append(c)
-                    if len(buf) == mx:
-                        break
-            self.out.append(13)
-            m.set_memory_block(de + 1, bytes([len(buf)]) + bytes(buf))
         elif f in (15, 19, 22):                 # open, delete, make
             name = bytes(self.mem(m.de + 1 + i) for i in range(11))
             if f == 22:
@@ -295,12 +266,6 @@ class Run:
         elif f == 21:                           # write a record
             self.files[self.cur] += bytes(self.mem(self.dma + i) for i in range(128))
             m.a = 0
-        elif f == 9:
-            a = m.de
-            while self.mem(a) != ord('$'):
-                self.out.append(self.mem(a)); a += 1
-        elif f == 2:
-            self.out.append(m.e)
         else:
             self.ended = 'bdos %d' % f
             return False

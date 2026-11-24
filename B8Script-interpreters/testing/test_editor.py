@@ -16,7 +16,7 @@ runs. A few sessions can't be modelled (a key pressed while a program is
 busy): those are checked against patterns.
 
 check_editor() takes a `target` for builds of other machines (see
-win32_target): the build's name, how it stores files, and how it is run.
+win32_target): how it stores files, and how it is run.
 Without one it is the Z80's.
 """
 import sys, os, re, glob
@@ -46,8 +46,6 @@ class Ed:
         t = target or {}
         self.disk = t.get('disk', cpm)          # read and write use files
         self.pad = t.get('pad', cpm)            # a written file is padded with ^Z
-        self.refcpm = t.get('refcpm', cpm)
-        self.build = t.get('build', b'B8SZ80E')
         self.fname = t.get('fname')             # typed name -> the file's name
         self.lines = []                 # the program: each line with its CR LF
         self.out = bytearray()
@@ -95,7 +93,7 @@ class Ed:
     def run(self, typed, queue, stored):
         sy = self.sy
         r = Ref(self.text(), bytes(queue), prog_at=sy['PROG'], let=sy['LET'], linebuf=sy['LINEBUF'],
-                heaplim=self.heaplim, cpm=self.refcpm, checked=self.checked, filepad=False)
+                heaplim=self.heaplim, checked=self.checked)
         r.m[sy['LINEBUF']:sy['LINEBUF'] + len(typed) + 3] = typed + b'\r\n\0'
         r.m[sy['LET']:sy['LET'] + 0x74] = self.cells
         r.undef, r.ds = self.undef, self.ds
@@ -105,14 +103,6 @@ class Ed:
         self.ds = [] if r.error else r.ds       # an error clears the stack
         self.cells = bytes(r.m[sy['LET']:sy['LET'] + 0x74])
         queue[:] = list(r.inp)                  # what the program did not read is typed at the editor
-
-    def stack_lines(self):
-        o = b'\r\nStk %d:' % len(self.ds)
-        if len(self.ds) > 8:
-            o += b' ...'
-        for v in self.ds[-8:]:
-            o += b' %d' % Ref.s(v)
-        return o + b'\r\nRtn 0'
 
     # ---- typing ----
     def type(self, step):
@@ -356,7 +346,6 @@ CHK_SESSIONS = {
         R(b'1 1 2'), R(b'2 3 0/ "no"$'), G, R(b' 7#'), R(b' 1 0! "no"$'), R(b' 5 Q "no"$'), R(b' [Q 9#] Q'),
         R(b'3 [5 1]'), R(b'2'), G, R(b'1 [R R] 4'), R(b'2 0( 1'), G, R(b' ;')],
     'an error clears the stack': [R(b' 1 2 3'), R(b' 4 0/'), R(b' 7#'), R(b' ;')],
-
     'variables start at 0 and words undefined': [R(b' q@# j@#'), R(b' 1 2 W "no"$'), R(b' [W 3#]W')],
 }
 
@@ -390,13 +379,13 @@ TIMED = {
 def win32_target(exe):
     """The Windows editor builds (B8SWINE.EXE, B8SWINEC.EXE): files on a
     disk, named as typed (and found whatever their case, as Windows does),
-    not padded; -n? is the generic line read; ^X ends the process."""
+    not padded; ^X ends the process."""
     from harness_win32 import Run as WRun, symbols as wsymbols
     sy = wsymbols(exe[:-4] + '.map')
 
     def fname(files, name):
         return next((k for k in files if k.lower() == name.lower()), name)
-    return dict(sy=sy, cpm=False, disk=True, pad=False, refcpm=False, build=b'B8SWINE',
+    return dict(sy=sy, cpm=False, disk=True, pad=False,
                 checked=exe[:-4].endswith('C'), default=b'PROG.B8S', fname=fname,
                 heaplim=sy['HEAPLIM'] << 8, prog=lambda f: {b'PROG.B8S': f},
                 run=lambda steps, timed, files: WRun(exe, b'', steps, mode='editor', timed=timed, files=files))

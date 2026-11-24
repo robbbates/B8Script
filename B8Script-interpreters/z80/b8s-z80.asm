@@ -30,7 +30,6 @@ CHECKED EQU     0               ; 1 = checked build
 EDITOR  EQU     0               ; 1 = with the line editor
 ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
 ANS     EQU     ANSI+CPM-ANSI*CPM ; (CP/M: always ANSI)
-PRSUB   EQU     CHECKED         ; (1: '$' is the routine prstr)
 EDGEN   EQU     EDITOR*(1-CPM)  ; (the generic build with the editor)
                                 ; (IF takes any value but 0 as true, so
                                 ;  IF CHECKED+EDITOR means "either")
@@ -330,7 +329,6 @@ p3a:    ADD     A,5             ; 3Ah-40h: index 15-21
         DB      h_fromr & 0FFh  ; }
         DB      h_not & 0FFh    ; ~
 .endm
-
 
 ; Punctuation: A = the PTAB index. The handler starts with HL = TOS,
 ; untouched, and A, DE free.
@@ -762,9 +760,9 @@ h_str:  PUSH    HL
 
 ; '$' prints the string at TOS, decoding escapes: '/' plus a character from
 ; 60h to 7Eh is one of the escapes at pesc; '/' plus any other character
-; clears that character's bit 6 (/M is CR, /? is DEL's '?'; '/' and '"' have
-; no bit 6, so // and /" give themselves).
-        IF      1-PRSUB
+; clears that character's bit 6 (/M is CR, and / then DEL gives '?'; '/',
+; '"' and '?' have no bit 6, so //, /" and /? give themselves).
+        IF      1-CHECKED
 h_print:LD      A,(HL)
         INC     HL
         CP      22h
@@ -825,11 +823,11 @@ kt3:    LD      L,A
         LD      H,0
         RST     30h
 
-        ; Backspace takes the last character back (and is echoed as
-        ; it is), CR ends (stored, not echoed), every other key is stored and
-        ; echoed until the line is full. The line buffer starts at offset 80h
-        ; of its page, so L alone is the place in the line: D holds the L of
-        ; a full line.
+        ; Backspace takes the last character back (and is echoed as it
+        ; is), CR ends (stored, not echoed), every other key is stored and
+        ; echoed until the line is full. (CP/M too: getk reads through BDOS
+        ; 6.) The line buffer starts at offset 80h of its page, so L alone
+        ; is the place in the line: D holds the L of a full line.
 line:   LD      DE,127          ; TOS is minus the count: adding 127 carries
         ADD     HL,DE           ;   only for 1 to 127, and leaves 127 - count
         SBC     A,A
@@ -873,7 +871,7 @@ prstr:  LD      A,(HL)
         CP      22h
         RET     Z
         OR      A
-        JR      Z,e_dollar
+        JP      Z,e_dollar
         CP      '/'
         JR      NZ,prs1
         LD      A,(HL)
@@ -898,10 +896,6 @@ pmsg:   EX      (SP),HL
         CALL    prstr
         EX      (SP),HL
         RET
-e_dollar:POP    DE              ; '$' ran into a NUL: drop the return address,
-        LD      HL,(RSAVE)      ;   and put the string's address back in TOS
-        LD      A,'Q'
-        JP      error
         ENDIF
 
 ; pesc: the escapes of '$'. A = the character after the '/', 60h to 7Eh, and
@@ -933,17 +927,16 @@ pesc:   CP      7Eh
         POP     HL
         RET
 
-; /~ ( row col addr -- ): the two cells under the string's address go. Where
-; '$' is the routine prstr, its own return address goes first, and hp1
-; calls it again afterwards. (The checked build looks first, through
-; chkstk, that there is a column at least: with less, it is s. With a
-; column but no row it is s after the '$', as for any other character; the
-; spare bytes above the stack take what is written meanwhile.)
+; /~ ( row col addr -- ): the two cells under the string's address go. In
+; the checked build '$' is the routine prstr: its own return address goes
+; first, and hp1 calls it again afterwards. There a /~ that takes cells
+; that aren't there is s after the '$' (or at its NUL: see e_dollar), as for
+; any other character. chkstk stops a /~ only when the stack is already
+; past its empty place, so that, however many there are, what they write
+; stays in the spare bytes above the stack.
 pat:
-        IF      PRSUB
-        POP     DE
-        ENDIF
         IF      CHECKED
+        POP     DE
         CALL    chkstk
         ENDIF
         POP     DE              ; DE = the column
@@ -954,12 +947,12 @@ pat:
         JP      PRAGAIN
 
 ; With ANSI = 0 the machine's routines do the rest.
-phide:  XOR     A               ; /`  (A = 0: hide)
-        JP      CONCUR
 pcon:   JP      Z,CONCLS        ; /{
         CP      2
         JP      Z,CONEOL        ; /}
-        JP      CONCUR          ; /|  (A = 1: show)
+        DB      0FEh            ; /|  (CP n steps over the XOR: A = 1, show)
+phide:  XOR     A               ; /`  (A = 0: hide)
+        JP      CONCUR
         ENDIF
         IF      ANS
         PUSH    DE
@@ -1441,6 +1434,16 @@ e_break:LD      A,'B'           ; Ctrl-C (found inside pollk or getk)
 ; errp: an error found inside a routine: drop its return address first.
 errp:   POP     DE
         JR      error
+; e_dollar: '$' ran into a NUL (in prstr): Q, with the string's address
+; back in TOS. prstr's return address goes first. But if a /~ took cells
+; that weren't there, it is s, found now: chkstk, called one cell up, sees
+; the stack past its empty place then.
+e_dollar:POP    DE
+        POP     HL
+        CALL    chkstk
+        PUSH    HL
+        LD      HL,(RSAVE)
+        DB      11h             ; (LD DE,nn hides e_quote's first two bytes)
 e_quote:LD      B,H             ; an unclosed string: HL is its address, one
         LD      C,L             ;   past the opening quote, which is the place
         LD      A,'Q'
@@ -1563,13 +1566,12 @@ er7:    DEC     C
         JR      er7
 er8:    CALL    pnl
         DB      "Rtn ",22h
+        EXX                     ; RSTOP - HL' is under 256 (the pointer is
+        LD      A,RSTOP&0FFh    ;   at most one entry below its page), so
+        SUB     L               ;   the low bytes are enough
         EXX
-        PUSH    HL
-        EXX
-        POP     DE
-        LD      HL,RSTOP
-        OR      A
-        SBC     HL,DE
+        LD      L,A
+        LD      H,0
         CALL    phalf
         CALL    pnl
         DB      22h
@@ -1989,8 +1991,6 @@ li3:    PUSH    HL
         CALL    prl             ;   and the line
         JR      li1
 
-ged1:   JP      edit
-
 ; delln: take line n (in HL) out: copy everything after it down over it.
 delln:  CALL    find
         LD      D,H
@@ -2038,6 +2038,8 @@ prl:    LD      A,(HL)
         ENDIF
 
         IF      EDGEN
+ged1:   JP      edit
+
 ; ^R, generic: what comes in from now until ^Z is the program. A CR is
 ; stored as CR LF; a LF right after a line end is dropped (it is the CR's
 ; own, or an empty line's), and a LF anywhere else ends a line too. A last

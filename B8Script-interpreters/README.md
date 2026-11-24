@@ -267,7 +267,7 @@ Rtn 0
   - The Z80 saves and restores HL' itself, so the code may use the alternate registers.
 - **6502, both:** entered as a subroutine (`JMP (T0)`, with a return address on the stack), ending in RTS (60h, appended by the loader). The address has been dropped. The code must keep the IP at $00/$01 and leave the hardware stack balanced.
   - **`b8s-6502.asm`:** TOS is at $02/$03. X is the data-stack index; NOS is $0200,X (low) and $0300,X (high). To push: DEX, store TOS there, then set TOS. To drop: load TOS from there, then INX. The code may change A, X (consistently), Y, $04-$06 and $08-$09; $0A-$0F is free for its own use.
-  - **`b8s-6502-zp.asm`:** X is the data-stack pointer. TOS is at 0,X (low) and 1,X (high), NOS at 2,X and 3,X. To push: DEX, DEX, then store. To drop: INX, INX. The code may change A, Y and X (consistently); $02, $03, $07 and $0A-$0D are free for its own use.
+  - **`b8s-6502-zp.asm`:** X is the data-stack pointer. TOS is at 0,X (low) and 1,X (high), NOS at 2,X and 3,X. To push: DEX, DEX, then store. To drop: INX, INX. The code may change A, Y and X (consistently); $02, $03, $07 and $0A-$0D are free for its own use. $0C-$0D keep their values only while the code runs: a `$` that prints a variable escape with the data stack full writes there.
 - **6809:** entered by a jump, with the dispatcher's return address on S, so the code ends in RTS (39h, appended by the loader).
   - U points at the top data cell, which becomes TOS on return. Cells on the data stack are big-endian (6809 order); cells in memory stay little-endian, as the spec says.
   - The code may change A, B, X, CC and U (consistently). It must keep Y (the IP) and DP, and leave S balanced.

@@ -35,8 +35,9 @@ EDGEN   EQU     EDITOR*(1-CPM)  ; (the generic build with the editor)
                                 ; (IF takes any value but 0 as true, so
                                 ;  IF CHECKED+EDITOR means "either")
 TABP0   EQU     EDGEN*(1-CHECKED) ; (the build with its table in page zero)
-PTLATE  EQU     CHECKED*EDITOR*(1-CPM) ; (the builds with the table after psgn,
-                                ;   where it would cross a page before it)
+PTLATE  EQU     1-CPM           ; (1: the table goes after psgn and pdec, not
+                                ;   before them: wherever it doesn't cross a
+                                ;   page. chktab.py says if it does)
 
 ; -----------------------------------------------------------------------------
 ;  Register use, everywhere in the interpreter

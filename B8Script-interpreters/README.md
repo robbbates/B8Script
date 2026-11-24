@@ -6,7 +6,10 @@ Generic interpreters for minimal homebrew machines (serial console only), CP/M 2
 CPM     EQU     0               ; 1 = CP/M .COM build        (Z80, 8080)
 CHECKED EQU     0               ; 1 = checked build          (all)
 EDITOR  EQU     0               ; 1 = with the line editor   (Z80, Windows)
+ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences (Z80, 8080, 6502, 6809)
 ```
+
+`ANSI` decides what the console escapes of `$` (`/{` `/}` `/|` `` /` `` `/~`) do. With `ANSI = 1` they send ANSI (VT100) sequences through `CONOUT`. With `ANSI = 0` they call four routines of the machine's own (see the machine interface below). The generic builds default to `ANSI = 0`; the CP/M builds always send ANSI, whatever the switch says; the Windows builds always send ANSI, in the console mode they set.
 
 The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, and `b8s-6502-zp.asm` is a smaller interpreter that keeps it in zero page.
 
@@ -45,7 +48,7 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 ## The language
 
-The builds follow [`docs/b8script.md`](../docs/b8script.md) (2026-11-21). What the spec leaves to the implementation:
+The builds follow [`docs/b8script.md`](../docs/b8script.md) (2026-11-24). What the spec leaves to the implementation:
 
 - `-n?` (generic builds): Backspace takes a character back and is echoed as it is; every other key but CR is stored and echoed, control keys and DEL included. A count above 127 is taken as 127. The CP/M builds use BDOS 10, which does its own editing.
 - Dividing by zero in an unchecked build returns two cells of no meaning (different on each CPU), and the stack stays balanced.
@@ -141,7 +144,6 @@ A command key ends the line too, and takes what was typed before it as its argum
 | ^R, `name`^R | Reads. CP/M: the file of that name, or the same file as last time. Generic: whatever is typed or pasted from then until ^Z replaces the program, with no echo |
 | ^W, `name`^W | Writes. CP/M: to that file, or the same file as last time. Generic: prints the text as it is, for the terminal to capture |
 | ^N ^N | New: no program (the key twice in a row; any other second key calls it off) |
-| ^V | View: the build's name and date, both stacks as an error report shows them, the program's size in bytes, its lines, and the bytes free |
 | ^X | Leaves: to `LEAVE` (generic) or to CP/M |
 | ^B ^F, or the left and right arrow keys | Move the cursor in the line. Text goes in at the cursor |
 | Backspace, DEL | Take out the character before the cursor |

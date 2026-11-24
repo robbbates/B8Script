@@ -77,7 +77,7 @@ Every programmer's first program:
 
 The `"` marks the start and end of some text. When B8Script meets it, it puts the text's **address** (where it lives in memory) on the stack. Then `$` takes that address and prints the text.
 
-The `/M/J` at the end is a new line. A slash followed by a letter makes a special control character: `/M` returns the cursor to the start of the line and `/J` moves it down one. Together they start a new line, like pressing Enter.
+The `/M/J` at the end is a new line. A slash followed by a capital letter makes a special control character: `/M` returns the cursor to the start of the line and `/J` moves it down one. Together they start a new line, like pressing Enter. (A slash and a *small* letter does something else, which Lesson 4 shows.)
 
 Because slash is special in strings, a real slash has to be written twice. `"either//or"$` prints `either/or`. A quote mark inside a string is `/"`.
 
@@ -183,11 +183,23 @@ To change a variable, fetch it, do the sum, and store it back:
 
 This starts with 100 coins, spends 25, and prints `Coins: 75`. The `m@25-m!` part reads as "fetch m, push 25, subtract, store in m".
 
+### Variables inside strings
+
+Printing a variable between two pieces of text is so common that strings have a shortcut for it: a slash and the variable's letter, inside the string, prints that variable's number right there.
+
+```text
+100m! m@25-m! "You have /m coins left./M/J"$
+```
+
+This prints `You have 75 coins left.` It is the same as `"You have "$ m@# " coins left./M/J"$`, just shorter. The value is read when `$` prints the string, so if m changes and you print the same string again, you see the new number.
+
+Two catches. It only works for a plain variable: to print a sum, or anything worked out on the stack, use `#` between two strings. And a slash before a small letter now always means a variable, so a slash meant as a slash is written twice: `"y//n"` prints `y/n`.
+
 Adding one to a counter is so common that you'll see `i@1+i!` everywhere. Remember it; the loops in Lesson 6 use it.
 
 **Store before you read.** A variable starts out holding whatever junk was in memory, so always give it a value before you use it. The checked builds set them all to 0, but the small fast builds don't.
 
-**Challenge 4.** A rectangle is 12 wide and 7 high. Store those in `w` and `h`, then print `Area: 84` by working it out from the variables.
+**Challenge 4.** A rectangle is 12 wide and 7 high. Store those in `w` and `h`, then print `Area: 84` by working it out from the variables. Then print `12 by 7` using the shortcut.
 
 ## Lesson 5: Making decisions
 
@@ -395,7 +407,7 @@ r@99M1+s! 0t!
    g@s@<( "  higher"$ 0)
    g@s@>( "  lower"$ 0)
    g@s@=0=)
-"/M/JGot it in "$ t@# " tries!/M/J"$
+"/M/JGot it in /t tries!/M/J"$
 ```
 
 Ten lines, and every piece is something you've met. Here's how it works.
@@ -412,13 +424,13 @@ Ten lines, and every piece is something you've met. Here's how it works.
 
 **Lines 6 to 9: the main loop.** Read a guess into g and add 1 to the count. If the guess is too low, say higher; if too high, say lower. The last line, `g@s@=0=)`, is the loop's test: go round again while the guess is *not* equal to the secret.
 
-**Line 10** celebrates, with the number of tries.
+**Line 10** celebrates, with the number of tries: `/t` prints t inside the string.
 
 ### Make it yours
 
 - Make it 1 to 999. You'll need to change three numbers. (Which three?)
 - Give it a limit: after 7 wrong guesses, print `Out of guesses! It was` and the number. Hint: the guess-checking loop can end on a test made with `|`, which is true if either side is true.
-- Add `"/[[2J/[[H"$` at the start to clear the screen first. That's a terminal escape sequence; the spec's *Console* chapter lists the rest.
+- Add `"/{"$` at the start to clear the screen first. A slash and `{` inside a string clears the screen and puts the cursor at the top left; the spec's *Console* chapter has the others, such as `/~` to put the cursor anywhere.
 
 ## Cheat sheet
 
@@ -437,7 +449,7 @@ Every character this tutorial used. In the *Stack* column, the left side is what
 | `a`–`z` | A variable's address | → addr |
 | `!` `@` | Store into, fetch from a variable | n addr → / addr → n |
 | `"text"` | A string's address | → addr |
-| `$` | Print a string (`/M/J` is a new line, `//` a slash) | addr → |
+| `$` | Print a string (`/M/J` is a new line, `//` a slash, `/x` the variable x, `/{` clears the screen) | addr → |
 | `#` | Print a number | n → |
 | `'` | Print a character from its code | code → |
 | `?` | Read the keyboard: `0?` waits for a key, `20?` waits briefly, `-72?` reads a line | n → key |
@@ -471,7 +483,7 @@ No peeking until you've tried! There's usually more than one right answer; if yo
 
 **3.** `6::**#` prints 216: two copies make three 6s, then two multiplies. For the bonus, `100 7/%;#` prints 2, so no, 100 isn't divisible by 7.
 
-**4.** `12w! 7h! "Area: "$ w@h@*#`
+**4.** `12w! 7h! "Area: "$ w@h@*#`, and then `"/M/J/w by /h"$`. The area needs `#`, because it is worked out on the stack; w and h are plain variables, so the shortcut prints them.
 
 **5.**
 
@@ -514,8 +526,8 @@ t@100>( "/M/JWow, that's a lot!"$ 0)
 
 ```text
    g@s@= t@7= | 0=)
-g@s@=:{( "/M/JGot it in "$ t@# " tries!/M/J"$ 0)}
-0=( "/M/JOut of guesses! It was "$ s@# "/M/J"$ 0)
+g@s@=:{( "/M/JGot it in /t tries!/M/J"$ 0)}
+0=( "/M/JOut of guesses! It was /s/M/J"$ 0)
 ```
 
 The loop now ends when the guess is right *or* the seventh guess is used up. Afterwards an if-else decides which message you've earned.

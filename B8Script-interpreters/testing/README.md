@@ -14,6 +14,8 @@ Everything here runs from this folder.
 ./build.sh Z80   ../z80/b8s-z80.asm   out/z80       # all four variants
 VARIANTS=$'0 0 1\n0 1 1\n1 0 1\n1 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80   # and the four editor builds
 python3 run_z80.py z80 out/z80                     # PASS/FAIL per variant
+ANSI=1 VARIANTS=$'0 0\n0 1\n0 0 1\n0 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80a   # the generic ones with ANSI = 1
+python3 run_z80.py z80 out/z80a                    # (do the same for each CPU)
 ./build.sh I8080 ../8080/b8s-8080.asm out/8080
 python3 run_8080.py out/8080
 VARIANTS=$'0 0\n0 1' ./build.sh C6502 ../6502/b8s-6502.asm out/6502
@@ -37,6 +39,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 ```
 
 - A variant line for `build.sh` is `CPM CHECKED`, then `EDITOR` for the Z80. A build is named after its source, plus `-gen` or `-cpm` (with the editor: `-ed` or `-cpm-ed`), plus `-chk` if checked.
+- `ANSI=1 ./build.sh ...` builds with `ANSI = 1` (the console escapes send ANSI sequences); the default is `ANSI = 0`, where they call the machine's routines. The CP/M builds send ANSI either way. Build the generic variants both ways, into two folders, and test both: in an `ANSI = 0` build the harness traps the four routines (`CONCLS`, `CONEOL`, `CONCUR`, `CONAT`) and records the ANSI bytes each stands for, so the output compares with `ref.py`'s just the same.
 - `run_z80.py` tests the editor builds by typing at them (`test_editor.py`, which can also be run by itself: `python3 test_editor.py out/z80`).
 - Run the layout and branch checks after every change. They catch mistakes the assembler lets through and the tests may not reach.
 - Each CPU's full run takes a few minutes at most.

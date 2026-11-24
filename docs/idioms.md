@@ -76,7 +76,7 @@ Min and max work by copying both values, comparing, swapping when needed, and dr
 | Count matches | `0 0i! 1( ... a@= - i@1+:i! 64<)` | The same subtract-the-flag trick tallies a loop (REVERSI) |
 | Weighted score, no branches | `c@H 100&+ c@Q 3000&+ c@X 2000&-` | `flag n&` gives n or 0 to add or subtract (REVERSI, QUBIC) |
 | Random tie-break | `8* 8R+` | Equal scores are ordered by chance; unequal ones never swap (REVERSI, QUBIC) |
-| Keys to −1, 0, +1 | `:106=%108=-` | j gives −1, l gives +1, anything else 0 (SKI, TRON) |
+| Keys to −1, 0, +1 | `:106=%108=-` | j gives −1, l gives +1, anything else 0 (SKI, BREAKOUT in tweet280); `:46=%44=-` does the same for `,` and `.`, to turn left or right (TRON, SNAKE, DUEL) |
 | Bump 0 to 1 | `:0=-` | Adds 1 only when the value is 0 (NIM) |
 | Positive modulo | `c@- 3+3/%;` | Add the modulus before the remainder so the dividend is positive (RPS) |
 | Mod 3 compare to a score | `:1=%2=-` | 0, 1, 2 become 0, +1, −1 (RPS) |
@@ -240,8 +240,8 @@ Executing `]` pops whatever address is on the return stack and jumps there, so c
 | Dispatch through a table | `[S B 4*z@+2+@{]` | Fetches a handler address and `{` it, so S's `]` jumps there (TINYBAS) |
 | Handlers as strings | `"t@1+t! P]"128 4*z@+2+!` | A code string ending in `]` is stored in a table slot; `:` lets two slots share one (TINYBAS) |
 | A state block instead of variables | `[G:+g@+]`, then `3G@` and `3G!` | Cell n of one block; saves letters and can be saved or cleared in a loop (IDOL) |
-| Message as an address | `[Z 17 42Y $ E]`, `""Z` to clear | A word takes a string's address and prints it in a fixed place (KLONDIKE) |
-| Pending message | `s@( s@$ 0) "/[[K"$ 0s!` | s holds a message address or 0; the draw prints it once (DUNGEON) |
+| Message as an address | `[Z 16 41Y $ E]`, `""Z` to clear | A word takes a string's address and prints it in a fixed place (KLONDIKE) |
+| Pending message | `s@( s@$ 0) "/}"$ 0s!` | s holds a message address or 0; the draw prints it once (DUNGEON) |
 | Output to screen or buffer | `[E o@0=:(%'0)\ o@. o@1+o!]` | o is 0 for the screen, or the address of the next byte (IDOL) |
 | Save a variable around recursion | `v@{TN;0v@-T}v!` | The caller's value waits on the return stack (TICTAC) |
 | Save the random state | `[Q r@{ ... }r!]` | A deterministic draw inside leaves the game's sequence untouched (IDOL) |
@@ -271,7 +271,7 @@ The 26 variables hold one cell each; anything bigger lives on the heap, reached 
 | Border ring | `100_b!` for an 8×8 board in 10×10 | Neighbours are fixed offsets and walks stop at the border, with no edge tests (REVERSI, MINES, BATTLE, LIFE, GREED, DUNGEON, MINE390) |
 | A spare column | 9 columns for 7 cells | A step off the right edge lands on a dead cell, never the next row (CONNECT4) |
 | Torus by mask | `1023&` after each step | A 64×16 grid that wraps with one AND (TRON) |
-| Index to row and column | `[P 72/ 1+ % 1+ % Y]` | One `/` gives both (GREED, ROBOTS, BATTLE) |
+| Index to row and column | `[P 72/Y]` with `[Y"/~"$]` | One `/` gives row and column in the order `/~` takes them, so a board as wide as the screen needs no arithmetic at all (GREED; ROBOTS and BATTLE add offsets first) |
 | Neighbour offsets as text | `"345EGWXY"+,70-`, `[O"012:<DEF"+,59-a@+]` | The offsets stored as characters plus a bias (MINES, MINE390) |
 | Allocate and clear in one loop | `0_g!1024 1(0 1_.1-:);` | Takes the heap a byte at a time, storing 0 (TRON, SNAKE, DUEL) |
 | Fixed-width records in a string | `"Sol     Vega    Rigel   "u!` and `%8*+` | The data stays in the program text (TRADER, IDOL, HANGMAN) |
@@ -290,20 +290,22 @@ The 26 variables hold one cell each; anything bigger lives on the heap, reached 
 
 ## Strings and output
 
-A string stays where it is in the program text: `"` pushes its address and `$` prints it, decoding `/` escapes.
+A string stays where it is in the program text: `"` pushes its address and `$` prints it, decoding `/` escapes: control codes, variables and the console escapes.
 
 | Name | Code | Effect |
 | --- | --- | --- |
 | Print a string | `"Hi"$` |  |
 | Comment | `"any text";` | A string whose address is dropped |
 | New line | `13'10'`, or `/M/J` inside a string | CR LF |
-| A slash | `//` | `"n/s/e/w"` would print `n3%7` |
-| A quote inside a string | `/"` or `/b` |  |
-| ESC | `/[` | Starts an ANSI sequence |
+| A slash | `//` | `"n/s/e/w"` would print n, then the variables s, e and w |
+| A quote inside a string | `/"` |  |
+| A variable inside the text | `"Day /d of /t./M/J"$` | Prints d and t as `#` would, read when the string is printed |
+| ESC | `/[` | For a terminal's own sequences, beyond the console escapes |
 | Print a number | `#` | Signed, with no space after |
 | Trace a value | `:#" "$` | Prints the top, leaves it |
 
-- **Escapes clear bit 6.** `/` plus a character prints that character with bit 6 cleared: `/@` to `/_` give the control codes 00h–1Fh, and the grave to DEL give space to `?` (20h–3Fh).
+- **What a slash does.** Before a small letter it prints that variable; before `{` `}` `|` `` ` `` `~` it is a console escape (see Screen); before anything else it prints the character with bit 6 cleared: `/@` to `/_` give the control codes 00h–1Fh, and `//`, `/"` and the rest below 40h give themselves.
+- **The variable escape is for plain variables.** `/x` prints the cell of x when the string is printed. An expression, an array cell or a value on the stack still needs `#` between two strings, and a string that is copied somewhere and printed later shows the value at that later time (IDOL keeps its message buffers free of escapes for this reason).
 - **A string ending in a slash** must write `//`, or the slash escapes the closing quote. This applies to comments too.
 - **Addresses print signed.** Anything above 7FFFh prints negative: F000h prints as −4096.
 
@@ -321,9 +323,9 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Exactly three digits | `[U :100/;48+' :10/;10M48+' 10M48+']` | No loop (SUPERTRK) |
 | Right-aligned | `[A 1-%:{:9>%:99>%:999>%9999>++++ 6%-"      "+$ }#]` | `( n w -- )` counts digits with flags and prints the tail of a string of six spaces (IDOL) |
 | Digits without a buffer | `[N -1% 1(10/ 48+% :0=0=); 1(E :0<0=);]` | Stacks the digits above a −1 marker, then prints them back (IDOL) |
-| Wipe old digits | `s@# " "$`, or `"/[[K"$` after the number | A shorter number leaves nothing behind (KLONDIKE, BREAKOUT) |
+| Wipe old digits | `s@# " "$`, or `/}` after the number | A shorter number leaves nothing behind (KLONDIKE, BREAKOUT) |
+| Status line in one string | `"/~DUNGEON  Level /l  HP /h//20  Gold /g  Potions /p  Sword "$` | Placed, with four variables, in one `$`; `/h//20` prints h, then a slash (DUNGEON, SUPERTRK) |
 | A buffer as a string | `34b@6+.`, then `b@$` | Store a quote after the text and `$` prints it (HANGMAN, MAZE, IDOL) |
-| ESC without an escape | `27'"[2J"$` | Print 27 with `'`, then a plain string (IDOL) |
 | Rub out the last character | `8'32'8'` | BS, space, BS (TINYBAS) |
 | Grid lines by parity | `j@2M( cell line 0) j@2M0=( border line 0)` | One modulo picks the line (FIFTEEN, G2048) |
 
@@ -341,6 +343,7 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Quit on q | `1?113=\` | Inside a loop |
 
 - **Use `0?` for keys and `-n?` for typed text**, which echoes and handles Backspace for you.
+- **i j k l are the arrow keys.** On a keyboard they sit like the arrows (or like w a s d), and their codes, 105 to 108, run in a row, so arithmetic on the key can stand in for four tests. Their low two bits are 1, 2, 3 and 0, all different, so `3&` turns i, j, k, l into 1, 2, 3, 0, and a four-character string indexed with `+,` gives each one's step, stored as a printable character with a bias: in Maze `"Q'Oy"` less 80 is +1 for l, −41 (a row up, on a grid 41 wide) for i, −1 for j and +41 for k. Every other key also lands on one of the four, which Maze can allow because a wall stops a wrong step; mask or test the key first where a stray step would matter.
 - **`1?` is a quick look, not a clock.** Each look can cost up to a millisecond, so in long computations look every few hundred steps.
 
 **From the programs**
@@ -353,6 +356,8 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Two digits as an index | `0?48- 10*0?48-+g@+` | Row and column typed straight into a 10×10 grid (MINE390) |
 | Key to a number by position | `"wasd"i@+, c@=` in a loop | The index where the key matches is the command (G2048, ROBOTS, FIFTEEN) |
 | Keypad to a step | `v@1- 3/ 1-d! 1-o!` | Position 0–8 to dy and dx of −1…+1 (ROBOTS) |
+| i j k l as arrow keys | `0?3&"Q'Oy"+,80-` | The step for a 41-wide grid: +1, −41, −1 or +41 (MAZE in tweet280). See below |
+| j k l as −1, 0, +1 | `0?107-` | k is the middle letter, so subtracting its code leaves −1, 0 or +1; check the range (`:1+32767&3<`) unless every key may move. No game uses it yet: SKI uses the two-test form above |
 | Ask until valid | `1( K 48- c! c@0> c@8<&:( ; c@F 0) 0= )` | A bad key leaves the false flag, so the loop asks again (CONNECT4, KLONDIKE) |
 | Echo printable keys only | `:32>(:' 0)` | (KLONDIKE, WUMPUS, QUBIC) |
 | Letter, then digit | Remember a letter key in l; a digit after it fires | Two-key commands like B7 (BATTLE) |
@@ -361,37 +366,43 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 
 ## Screen
 
-B8Script has no screen commands: programs print a small subset of ANSI (VT100) sequences, kept in a few words so a program moves to another console by rewriting only those words.
+B8Script's screen commands are five escapes inside the strings that `$` prints. Each build turns them into ANSI sequences or the machine's own screen routines, so a program's screen code runs unchanged on every console.
 
 | Name | Code | Effect |
 | --- | --- | --- |
-| Clear the screen | `[C"/[[2J/[[H"$]` | Clears and homes the cursor |
-| Clear to the end of the line | `[K"/[[K"$]` |  |
-| Clear the whole line | `"/[[2K"$` | The cursor stays put; send CR to start the line again |
-| Clear to the end of the screen | `"/[[J"$` |  |
-| Home the cursor | `"/[[H"$` |  |
-| Cursor to row, column | `[Y27'91'%#59'#72']` | `( row col -- )`, counted from 1: `5 10Y` |
-| Hide the cursor | `"/[[?25l"$` | On its own line at the start |
-| Show the cursor | `"/[[?25h"$` | On its own line at the end |
+| Clear the screen | `"/{"$` | Clears it and homes the cursor (row 0, column 0) |
+| Clear to the end of the line | `"/}"$` | The cursor stays put |
+| Cursor to row, column | `r c"/~"$` | `( row col -- )`, both counted from 0 |
+| Home the cursor | `0 0"/~"$` | Draw over the old picture without clearing it |
+| Print at a place | `5 10"/~Hello"$` | The escape and the text in one string |
+| Several places in one string | `3 0 1 0"/~Top/~Next"$` | Each `/~` takes the next pair, the first nearest the string |
+| Hide the cursor | ``"/`"$`` | At the start of a game that redraws |
+| Show the cursor | `"/\|"$` | Before the program ends |
+| Cursor word | `[Y"/~"$]` | `( row col -- )`; `Y` is one character shorter than writing the cursor escape into the string being placed |
 
-- **Why Y is so short.** `#` prints a number with no space after it, so `%#59'#` turns the two numbers into the `row;col` text directly.
-- **Hide and show on their own lines,** so they are easy to delete for a terminal that doesn't know them. A program that hides the cursor must show it again before it ends.
+- **Counted from 0.** Row 0 is the top line and column 0 the left edge; on an 80 × 24 screen the last cell is row 23, column 79.
+- **Order of the pairs.** `/~` takes the column from just under the string's address and the row from under that; a second `/~` takes the pair below those. So push the pairs for a string's places last first.
+- **A program that hides the cursor must show it again** before it ends.
 - **Draw to the edge with care.** What happens after the last column is implementation-defined; place the cursor yourself.
+- **More than the escapes.** Colours and the like need a terminal's own sequences, sent with `/[` or `27'`; they work only on that kind of terminal.
 
 **From the programs**
 
 | Name | Code | What it does |
 | --- | --- | --- |
-| Home, don't clear | `"/[[H"$` at the top of the draw | Overwrites the old picture in place, with no flicker (LIFE, TETRIS, MINE390) |
-| Index straight to the cursor | `[P64/"/[["$%1+#59'1+#"H"$]` | One `/` gives row and column; no Y needed (SNAKE, DUNGEON) |
-| Cell to screen place | `[Q 2*6+ % 4*30+ Y]` | Scale and offset each half for Y (LIGHTS, BATTLE, G2048) |
+| Home, don't clear | `0 0"/~"$` at the top of the draw | Overwrites the old picture in place, with no flicker (LIFE, TETRIS, MINE390) |
+| Index straight to the cursor | `[P64/"/~"$]` | `/` leaves the quotient (the row) under the remainder (the column): the order `/~` takes them in (SNAKE, TRON, DUEL, DUNGEON) |
+| Cell to screen place | `[Q2*5+%4*29+Y]` | Scale and offset each half for Y (LIGHTS, BATTLE, G2048) |
+| Clear, then draw | `"/{IDOL/M/J/M/J..."$` | The clear and the first text in one string (IDOL) |
+| Clear and place in one string | `1 0"/{/~+"$` | Clears, then puts the frame's first corner at row 1 (IDOL) |
 | Cursor back after drawing | `[Z p@P 64' p@P]` | Printing moves the cursor, so place it again (ROBOTS) |
 | Redraw only what changed | Compare with a shadow copy, or XOR rows | After a move most of the screen is not sent again (IDOL, G2048, LIGHTS) |
 | Erase, move, redraw | Rub everything out, move it all, draw it all | Movers never overwrite each other's new places (ROBOTS) |
 | Sprites over a map | Draw the map, then place each live entity with the cursor | (DUNGEON) |
 | Paddle that erases its trail | `"  ====  "$` | Blanks at both ends cover the last position (BREAKOUT) |
-| Overwrite a line | `"/M/[[K"$` | CR then clear to the end of the line hides what was shown (SIMON) |
+| Overwrite a line | `"/M/}"$` | CR then clear to the end of the line hides what was shown (SIMON) |
 | Clear a panel | Print a row of spaces on each line | Clears part of the screen, not all of it (IDOL) |
+| Status at the bottom | `17 0"/~score /l"$` | Place, label and value in one string (SNAKE, TRON) |
 
 ## Random numbers
 
@@ -476,6 +487,8 @@ Every character costs a byte of memory and a dispatch each time it runs, so the 
 | --- | --- |
 | Keep a counter on the stack | `1-` is 2 bytes; `t@1-t!` is 6 (b8sms) |
 | Print one character with `'` | `32'` is 3 bytes; `" "$` is 4 |
+| Put variables in the text | `"Day /d"$` is 9 bytes; `"Day "$d@#` is 10, and each further number saves 4 more (most games) |
+| Place text with the escape | `5 10"/~Hi"$` in one string, rather than a cursor word and then the string |
 | Let the value be the flag | `4:(` pushes a count and enters the loop (TICTAC) |
 | Use `~` for an else on a real flag | One byte less than `0=` |
 | Double with `:+`, halve with `2/;` | Both are fast; other multiplies and divides run the full routine |
@@ -502,7 +515,8 @@ The minus before a digit is the one that bites most: it got into 9 of the 31 sma
 | `x#` prints an address | You meant `x@#` (tutorial) |
 | `{` and `}` unpaired inside a block | `)` jumps to whatever is on top of the return stack |
 | Deep recursion | Real builds hold about 110 return-stack entries; loop or tail-call with G instead |
-| A slash in a string or comment | Write `//`: `"y//n"` prints y/n (IDOL, QUBIC) |
+| A slash in a string or comment | Write `//`: `"y//n"` prints y/n, where `"y/n"` would print y and then variable n (IDOL, QUBIC) |
+| A variable escape in a stored message | `/x` reads x when the string is printed, so text copied into a buffer and shown later prints the later value; keep `#` for numbers there (IDOL) |
 | `&` and `\|` don't short-circuit | Both sides always run, so the second must be safe when the first is false (BATTLE) |
 | Do-while runs at least once | Test first, or use the copied-count form, when zero passes is possible (SUPERTRK) |
 | Words sharing scratch variables | Note which word uses which letter; prefer the stack inside reusable words (BATTLE, REVERSI, TINYBAS) |

@@ -1,0 +1,78 @@
+"""Check the dispatch layout of a 6502 build that has the one-byte table.
+
+usage: chktab6502.py LISTING...
+
+PTAB holds one byte per handler: the low byte of (handler - 1). The
+dispatcher works the high byte out from the character's index: the image's
+first page for an index below N1, the second for N1 to N2-1, the third for
+the rest. So each handler must start where its index says, which the
+assembler can't check. For each page this prints how many bytes are to spare
+before its last handler would start too late.
+A listing with no N1 has the whole-address table, which has no such rules.
+
+Both 6502 interpreters also keep one byte per handler for the grave's codes
+(GLO): the low byte of (handler - 1). The dispatcher takes the page from the
+place in the table: GQ0 for the first GK entries, GQ0 + 1 for the rest. So
+the handlers must lie in table order and start in those pages.
+"""
+import re, sys
+
+ENTRY = r'^[0-9A-F]{4}\s+[0-9A-F]{2}\s.*\bDB\s+\((\w+)-1\)\s*&\s*0FFh'
+
+
+def grave(text, sym):
+    """The grave's table: a list of what is wrong with it."""
+    m = re.search(r'^[0-9A-F]{4}\s.*\bGLO:', text, re.M | re.I)
+    if not m or 'GK' not in sym:
+        return ['no GLO table or no GK']
+    names = re.findall(ENTRY, text[m.start():], re.M | re.I)[:13]
+    bad = []
+    if len(names) != 13:
+        bad.append(f'{len(names)} entries in GLO, not 13')
+    last = 0
+    for i, n in enumerate(names):
+        a = sym[n.upper()] - 1
+        want = sym['GQ0'] + (i >= sym['GK'])
+        if a >> 8 != want:
+            bad.append(f'GLO entry {i:2} {n} starts at {a + 1:04X}h: the dispatcher takes page {want:02X}h')
+        if a < last:
+            bad.append(f'GLO entry {i:2} {n} is out of order')
+        last = a
+    return bad
+
+
+def check(lst):
+    text = open(lst, errors='replace').read()
+    sym = {m.group(1): int(m.group(2), 16)
+           for m in re.finditer(r'^([A-Z_0-9.]+):\s+([0-9A-F]{4}) DEFINED', text, re.M)}
+    name = lst.split('/')[-1]
+    gbad = grave(text, sym)
+    if 'N1' not in sym:
+        print(f'{name:28} {"ok " if not gbad else "BAD"}  (whole-address table; the grave: GK={sym.get("GK")})')
+        for b in gbad:
+            print('   ', b)
+        return len(gbad)
+    base, n1, n2 = sym['BASE'], sym['N1'], sym['N2']
+    names = re.findall(ENTRY, text, re.M | re.I)
+    m = re.search(r'^[0-9A-F]{4}\s.*\bGLO:', text, re.M | re.I)
+    if m:                                   # (the grave's table is not PTAB's)
+        names = re.findall(ENTRY, text[:m.start()], re.M | re.I) + re.findall(ENTRY, text[m.start():], re.M | re.I)[13:]
+    bad = list(gbad)
+    if len(names) != 32:
+        bad.append(f'{len(names)} table entries found, not 32')
+    if base % 512:
+        bad.append(f'BASE is {base:04X}h: it must be a multiple of 512')
+    spare = [256, 256, 256]
+    for i, n in enumerate(names):
+        page = (i >= n1) + (i >= n2)
+        off = sym[n.upper()] - 1 - base - 256 * page
+        if not 0 <= off <= 255:
+            bad.append(f'entry {i:2} {n} starts at {sym[n.upper()]:04X}h: not in page {page + 1} of the image')
+        spare[page] = min(spare[page], 255 - off)
+    print(f'{name:28} {"ok " if not bad else "BAD"}  N1={n1} N2={n2}  to spare in each page: {spare[0]}, {spare[1]}, {spare[2]}; the grave: GK={sym.get("GK")}')
+    for b in bad:
+        print('   ', b)
+    return len(bad)
+
+if __name__ == '__main__':
+    sys.exit(1 if sum(check(f) for f in sys.argv[1:]) else 0)

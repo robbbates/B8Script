@@ -5,12 +5,9 @@ games/tweet140/ and games/tweet280/ (a tweet, old and new), and games/longer/
 usage: test_tweets.py [--all] [NAME...]
 
 Every game must fit its folder's limit. Each test types a fixed key sequence at
-a checked reference build, as test_games.py does (a NUL is a timed wait that
-runs out with no key: it stirs the random seed by the wait's count), and checks
-that the run prints the expected texts and stops without an error report. The
-random seed starts at 0, as in ref.py, unless the test has a sixth item, which
-is the seed to start from: no key can set it, since a key that is there at
-once stirs nothing. A test marked 'end' must also reach the end of the program,
+a checked reference build, as test_games.py does (a NUL is a key that hasn't
+come yet), and checks that the run prints the expected texts and stops without
+an error report. A test marked 'end' must also reach the end of the program,
 not just run out of keys, and leave the data stack empty. --all adds the slow
 check that Tic-tac-toe never loses: it plays every legal line against it.
 See docs/b8sms.md for the games themselves.
@@ -39,22 +36,21 @@ def path(folder, game):
     return os.path.join(GAMES, folder, game + '.B8S')
 
 
-def play(folder, game, keys, steps=200_000_000, seed=0):
+def play(folder, game, keys, steps=200_000_000):
     r = Play(open(path(folder, game), 'rb').read(), keys, checked=True)
-    r.w(r.seedcell, seed)       # the random seed `. starts here (ref.py: 0)
     return r, r.run(steps)
 
 
-def simon(rounds):
-    """Keys for Simon: a key to start (the seed is still 0 then, as ref.py
-    starts it), then each round's digits (worked out with `, from that seed,
-    as the game replays them), then a wrong round."""
-    keys = b'k'
+def simon(seed, rounds):
+    """Keys for Simon: the seed key after seed-1 empty looks, then each round's
+    digits (worked out with the game's own generator), then a wrong round."""
+    keys, r = b'\0' * (seed - 1) + b'k', seed
     for n in range(1, rounds + 1):
-        r, digits = 0, b''
+        r, digits = seed, b''
         for _ in range(n):
-            r = (r * 261 + 1) & 0xFFFF
-            digits += bytes([(r ^ r >> 8) % 8 + 49])
+            r = (r * 75 + 74) & 0xFFFF
+            sr = r - 65536 if r > 32767 else r
+            digits += bytes([(int(sr / 256) & 7) + 49])
         keys += b'\0' + digits
     return keys + b'\0' + b'9' * (rounds + 1)
 
@@ -74,12 +70,12 @@ def kingdom(extra):
     return keys
 
 
-def maze(seed=0):
-    """Keys for Maze: a key to start, then the shortest way out, found by a
-    breadth-first search of the maze the game printed from this seed."""
+def maze(seed):
+    """Keys for Maze: the seed key, then the shortest way out, found by a
+    breadth-first search of the maze as the game printed it."""
     from collections import deque
-    r, out = play('tweet280', 'MAZE', b'k', seed=seed)
-    top = out.index(b'\x1b[J') + 3
+    r, out = play('tweet280', 'MAZE', seed)
+    top = out.index(b'\x1b[H') + 3
     m = out[top:top + 19 * 41]
     prev, todo = {79: None}, deque([79])
     while todo:
@@ -93,17 +89,16 @@ def maze(seed=0):
     while prev[a]:
         a, key = prev[a]
         keys = key + keys
-    return b'k' + keys
+    return seed + keys
 
 
-def mines_safe(seed=0):
-    """Keys for MINE390: a key to start, then every cell without a mine, read
+def mines_safe(seed):
+    """Keys for MINE390: the seed key, then every cell without a mine, read
     from the board the game laid out in memory (g, bit 16 is a mine)."""
-    r = Play(open(path('longer', 'MINE390'), 'rb').read(), b'k', checked=True)
-    r.w(r.seedcell, seed)
+    r = Play(open(path('longer', 'MINE390'), 'rb').read(), seed, checked=True)
     r.run(10**8)
     g = r.r(r.let + 64 + 2 * (ord('g') - 97))
-    return b'k' + ''.join(f'{y}{x}' for y in range(1, 9) for x in range(1, 9)
+    return seed + ''.join(f'{y}{x}' for y in range(1, 9) for x in range(1, 9)
                           if not r.m[g + 10 * y + x] & 16).encode()
 
 
@@ -114,63 +109,62 @@ def mash(seed, keys, n):
 
 N = b'\0'
 TESTS = {'b8sms': [
-    # The seed starts at 0 (as in ref.py) and a key that is there at once doesn't
-    # stir it; a test's optional sixth item sets another seed.
-    # Hi-Lo: seed 0 picks 1, so the binary search needs all seven tries
-    ('HILO', 'binary search wins', b'k64\r32\r16\r8\r4\r2\r1\r', [b'64 down', b'2 down', b'1 WIN'], 'end'),
+    # Hi-Lo: the key after three empty looks picks 4; binary search finds it
+    ('HILO', 'binary search wins', b'\0\0\0k64\r32\r16\r8\r4\r', [b'4 WIN'], 'end'),
     ('HILO', 'seven misses lose', b'k100\r50\r25\r12\r6\r3\r2\r', [b'2 down LOSE 1'], 'end'),
     # Lander: free fall, then a suicide burn (found by search over every burn)
     ('LANDER', 'suicide burn lands', b'0' * 21 + b'99998999996', [b'h1000 v0 f99 ?', b'1 LANDED'], 'end'),
     ('LANDER', 'no burn crashes', b'0' * 30, [b'CRASH'], 'end'),
-    # Nim: seed 51 starts 24. Taking 3 leaves 21 (1 mod 4), and the player keeps it there
-    ('NIM', 'perfect play wins', b'k3333333', [b'24 take 3 I take 1', b'I lose'], 'end', 51),
-    # Seed 0 starts 21, a lost position
+    # Nim: start 24. Taking 3 leaves 21 (1 mod 4), and the player keeps it there
+    ('NIM', 'perfect play wins', b'\0\0\0k3333333', [b'24 take 3 I take 1', b'I lose'], 'end'),
     ('NIM', 'start 21 loses', b'k3333333333', [b'21 take 3', b'you lose'], 'end'),
     ('REFLEX', 'early and on time', b'k' + N * 7 + b'x' + N * 5 + b'yzk' + N * 50 + b'a',
      [b'GO! 7', b'early', b'GO! 50', b'total 2060'], 'end'),
     # Ski: nobody steers, so the course drifts into the skier
-    ('SKI', 'drift into a wall', N * 300, [b'SKI j l', b'|V       |\r\n12'], 'end'),
-    ('SKI', 'j steers left', b'\0\0j', [b'          |   V    |\r\n           | V      |'], None),
+    ('SKI', 'drift into a wall', N * 300, [b'SKI j l', b'|    V   |'], 'end'),
+    ('SKI', 'j steers left', b'\0\0j', [b'        |     V  |\r\n        |    V   |'], None),
     # Rock paper scissors: the AI learns a cycle; beating its prediction wins
     ('RPS', 'it learns 1 2 3', b'1231231231231231231231', [b'? SR -5'], 'end'),
     ('RPS', 'beat its prediction', b'33323', [b'? SP 1', b'? PR 4', b'? SP 5'], 'end'),
-    ('SIMON', 'eight rounds', simon(8), [b'28531532', b'score 8'], 'end'),
-    # Pig: seed 40367 rolls 2, then 1 (a pig), then 22 rolls without a 1 that reach 102
-    ('PIG', 'pig, then hold at 102', b'r' * 24 + b'h', [b'1 0+2 1', b'2 0+99 3', b'2 turns'], 'end', 40367),
+    ('SIMON', 'eight rounds', simon(7, 8), [b'31824664', b'score 8'], 'end'),
+    # Pig: the roll is the key's timing mod 6; five empty looks roll a 1
+    ('PIG', 'pig, then hold at 102', b'r' + N * 5 + b'r' + (N * 4 + b'r') * 17 + b'h',
+     [b'1 0+2 1', b'2 0+96 6', b'2 turns'], 'end'),
     ('TRON', 'turn into its own trail', N * 5 + b'.' + N * 20 + b',' + N * 3 + b',' + N * 3 + b',' + N * 5,
-     [b'\x1b[9;10HO', b'\x1b[1;14HO', b'\x1b[18;1Hscore 21'], 'end'),
+     [b'\x1b[9;10HO', b'\x1b[1;14HO', b'\x1b[18Hscore 21'], 'end'),
     # Lights Out: the 15-press solution of the all-on board, in both cases
     ('LIGHTS', 'solve it', b'abfgijmnoqrsvwy', [b'ABCDE', b'abCDE', b'uvwxy in 15'], 'end'),
     ('LIGHTS', 'upper case, stray keys', b' 0ABFGIJMNOQRSVWY0', [b'uvwxy in 18'], 'end'),
 ], 'tweet140': [
     # The same games cut to 140; the same keys, with the shorter messages
-    ('HILO', 'binary search wins', b'k64\r32\r16\r8\r4\r2\r1\r', [b'64>', b'1= WIN'], 'end'),
+    ('HILO', 'binary search wins', b'\0\0\0k64\r32\r16\r8\r4\r', [b'64>', b'4= WIN'], 'end'),
     ('HILO', 'seven misses lose', b'k100\r50\r25\r12\r6\r3\r2\r', [b'2> was 1'], 'end'),
     ('LANDER', 'suicide burn lands', b'0' * 21 + b'99998999996', [b'1 LANDED'], 'end'),
     ('LANDER', 'no burn crashes', b'0' * 30, [b'CRASH'], 'end'),
-    ('NIM', 'perfect play wins', b'k3333333', [b'24 take 3, I 1', b'I lose'], 'end', 51),
+    ('NIM', 'perfect play wins', b'\0\0\0k3333333', [b'24 take 3, I 1', b'I lose'], 'end'),
     ('NIM', 'start 21 loses', b'k3333333333', [b'21 take 3', b'you lose'], 'end'),
     ('REFLEX', 'early and on time', b'k' + N * 7 + b'x' + N * 5 + b'yzk' + N * 50 + b'a',
      [b'GO! 7', b'early', b'GO! 50', b'total 2060'], 'end'),
-    ('SKI', 'drift into a wall', N * 300, [b'|V       |\r\n12'], 'end'),
-    ('SKI', 'j steers left', b'\0\0j', [b'          |   V    |\r\n           | V      |'], None),
+    ('SKI', 'drift into a wall', N * 300, [b'|V       |\r\n37'], 'end'),
+    ('SKI', 'j steers left', b'\0\0j', [b'        |     V  |\r\n        |    V   |'], None),
     ('RPS', 'it learns 1 2 3', b'1231231231231231231231', [b'? SR -5'], 'end'),
     ('RPS', 'beat its prediction', b'33323', [b'? SP 5'], 'end'),
-    ('SIMON', 'eight rounds', simon(8), [b'28531532', b'score 8'], 'end'),
-    ('PIG', 'pig, then hold at 102', b'r' * 24 + b'h', [b'0+2 1', b'0+99 3', b'2 turns'], 'end', 40367),
+    ('SIMON', 'eight rounds', simon(7, 8), [b'31824664', b'score 8'], 'end'),
+    ('PIG', 'pig, then hold at 102', b'r' + N * 5 + b'r' + (N * 4 + b'r') * 17 + b'h',
+     [b'0+2 1', b'0+96 6', b'2 turns'], 'end'),
     ('TRON', 'turn into its own trail', N * 5 + b'.' + N * 20 + b',' + N * 3 + b',' + N * 3 + b',' + N * 5,
-     [b'\x1b[1;2HO', b'\x1b[18;1H21'], 'end'),
+     [b'\x1b[1;2HO', b'\x1b[18H21'], 'end'),
     ('LIGHTS', 'solve it', b'abfgijmnoqrsvwy', [b'uvwxy 15'], 'end'),
     ('LIGHTS', 'upper case, stray keys', b' 0ABFGIJMNOQRSVWY0', [b'uvwxy 18'], 'end'),
 ], 'tweet280': [
     # Snake: the first food is next to the start, so it grows at once
     ('SNAKE', 'eat, grow, new food', N * 8 + b'.' + N * 4 + b',' + N * 30,
-     [b'\x1b[1;2H*', b'\x1b[7;17H*', b'\x1b[1;2HO\x1b[1;1H \x1b[1;3HO\x1b[1;2H '], None),
-    ('SNAKE', 'random steering, then a crash', mash(3, b'\0' * 6 + b',.', 20000), [b'\x1b[18;1Hscore 3'], 'end'),
-    # Mastermind: seed 0 picks 1562
-    ('MASTER', 'crack 1562', b'k1122\r3344\r1256\r2651\r1562\r',
-     [b'1122 2B0W', b'3344 0B0W', b'1256 1B3W', b'2651 0B4W', b'1562 4B0W 1562'], 'end'),
-    ('MASTER', 'ten misses', b'k' + b'1111\r' * 10, [b'1111 1B0W 1562'], 'end'),
+     [b'\x1b[1;2H*', b'\x1b[7;64H*', b'\x1b[1;2HO\x1b[1;1H \x1b[1;3HO\x1b[1;2H '], None),
+    ('SNAKE', 'random steering, then a crash', mash(3, b'\0' * 6 + b',.', 20000), [b'\x1b[18Hscore 4'], 'end'),
+    # Mastermind: seed 1 picks 4321
+    ('MASTER', 'crack 4321', b'k1122\r3344\r5566\r1234\r4321\r',
+     [b'1122 1B1W', b'5566 0B0W', b'1234 0B4W', b'4321 4B0W 4321'], 'end'),
+    ('MASTER', 'ten misses', b'k' + b'1111\r' * 10, [b'1111 1B0W 4321'], 'end'),
     # Nim 3-5-7: the nim-sum line (found by a model of the game) beats it
     ('NIM357', 'perfect play wins', b'1121111121212121', [b'2 5 6 ?', b'you win'], 'end'),
     ('NIM357', 'it punishes a mistake', b'11' + b'31' * 10, [b'I win'], 'end'),
@@ -184,25 +178,21 @@ TESTS = {'b8sms': [
     # Tic-tac-toe: it opens in the centre; --all checks every line
     ('TICTAC', 'it wins a sloppy game', b'1739', [b'\r\n.O.', b'OOO', b' I win'], 'end'),
     ('TICTAC', 'it blocks a fork', b'2938', [b' I win'], 'end'),
-    # Blackjack, seed 0: an ace as 11, a push, a bust, and a soft hand that turns hard
-    ('BLACKJCK', 'thirteen hands', b'k' + b'hs' * 8,
-     [b'$80 You AJ 21 Me 9K 19\r\n$90', b'$110 You J3 13 h?6 19 h? Me 3J6 19\r\n$110',
-      b'$110 You 6K 16 h?J 26 Me 8A 19\r\n$100', b'$120 You A3 14 h?9 13 h?'], None),
-    ('COPTER', 'flap and crash', b'\0\0\0k' * 30, [b'COPTER', b'score 9'], 'end'),
+    ('BLACKJCK', 'eleven hands', b'k' + b'hs' * 8,
+     [b'You AT 21 Me 2AT8 21', b'$90 You AA 12 h?8 20 h? Me 6J3 19', b'$100 You J7 17 h?Q 27'], None),
+    ('COPTER', 'flap and crash', b'\0\0\0k' * 30, [b'COPTER', b'score 8'], 'end'),
     ('BREAKOUT', 'one brick, then the ball is lost', N * 200, [b'\x1b[4;31H#', b'\x1b[21;'], 'end'),
-    # Hangman: seed 0 picks BINARY
     ('HANGMAN', 'guess it', b'kbinary', [b'B_____ 0 ?', b'BINARY won'], 'end'),
     ('HANGMAN', 'six misses', b'kzqxjvw', [b'______ 5 ?', b'BINARY lost'], 'end'),
-    # Maze: walls hold, and the shortest way out (54 steps in every binary-tree maze) gets out,
-    # from seed 0 and from seed 5 (a sixth element in a test is the seed it starts from)
+    # Maze: walls hold, and the shortest way out (54 steps in every binary-tree maze) gets out
     ('MAZE', 'walls hold', b'kiiii', [b'#######################################\r\n#', b'\x1b[2;39H@'], None),
-    ('MAZE', 'walk out', maze(), [b'\x1b[21;1HOut!'], 'end'),
-    ('MAZE', 'another maze', maze(5), [b'\x1b[21;1HOut!'], 'end', 5),
+    ('MAZE', 'walk out', maze(b'k'), [b'\x1b[21HOut!'], 'end'),
+    ('MAZE', 'another maze', maze(b'\0\0\0\0\0k'), [b'\x1b[21HOut!'], 'end'),
 ], 'longer': [
-    # Minesweeper with flood fill. Seed 0 has 8 mines, one at row 1, column 1
-    ('MINE390', 'a blank cell floods open', b'k61', [b'0013####\r\n00011###\r\n00001###'], None),
-    ('MINE390', 'a mine', b'k11', [b'######## BOOM'], 'end'),
-    ('MINE390', 'every safe cell wins', mines_safe(), [b'00001#10\r\n00001110 WIN'], 'end'),
+    # Minesweeper with flood fill. Seed 1 has 7 mines, one at row 2, column 3
+    ('MINE390', 'a blank cell floods open', b'k11', [b'01######\r\n01######\r\n012#####'], None),
+    ('MINE390', 'a mine', b'k23', [b'######## BOOM'], 'end'),
+    ('MINE390', 'every safe cell wins', mines_safe(b'k'), [b'12##1000 WIN'], 'end'),
 ]}
 
 
@@ -246,10 +236,10 @@ if __name__ == '__main__':
             ok = n <= limit
             bad += not ok
             print(f'{"PASS" if ok else "FAIL"}  {name:8} {n} characters')
-        for game, what, keys, texts, end, *seed in TESTS[folder]:
+        for game, what, keys, texts, end in TESTS[folder]:
             if want and game not in want:
                 continue
-            r, out = play(folder, game, keys, seed=seed[0] if seed else 0)
+            r, out = play(folder, game, keys)
             miss = [t for t in texts if t not in out]
             ended = not r.waiting and not r.ds
             ok = not miss and r.error is None and (ended or end != 'end')

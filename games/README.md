@@ -14,9 +14,9 @@ Every `.B8S` file is a complete program. Run it with any B8Script runner:
 
 The interpreters are in [`B8Script-interpreters/`](../B8Script-interpreters/), and its README covers every build, including the 6502 and 6809 ROMs.
 
-- **The screen.** Most games want an 80 × 24 screen. They move the cursor and clear the screen with B8Script's own console codes, so what the console must understand depends on the interpreter: the ones built here send ANSI (VT100) sequences for those codes (the Windows builds switch the console into ANSI mode themselves; on CP/M, use an ANSI terminal or emulator), and an interpreter built with `ANSI` = 0 calls the machine's own screen routines instead.
+- **The screen.** Most games need an ANSI (VT100) terminal or console, 80 × 24. The Windows builds switch the console into ANSI mode themselves. On CP/M, use an ANSI terminal or emulator.
 - **Ctrl-C** stops any game.
-- **Random numbers** are stirred by how long you take to press a key. That's why many games say "Key" or "Press a key to start": your timing picks the game.
+- **Random numbers** come from how long you take to press a key. That's why many games say "Key" or "Press a key to start": your timing picks the game.
 - **`.TXT` files.** Each full-size game also has a `NAME.TXT` with comments that explain how it works. It runs the same as the `.B8S`; the `.B8S` is just that file with the comments and spaces stripped out.
 
 ## Full-size games

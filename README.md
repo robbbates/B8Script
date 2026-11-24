@@ -3,7 +3,7 @@
 A postfix stack language for 64 KB 8-bit computers, by Robb Bates. Every instruction is one ASCII character, and the source text runs in place, with no compile step.
 
 ```
-"Hello, world!"$`'
+"Hello, world!/M/J"$
 [F :1>( :1-F* 0)] 7F#
 ```
 
@@ -22,9 +22,7 @@ A postfix stack language for 64 KB 8-bit computers, by Robb Bates. Every instruc
 
 B8Script began as B8SCRIPT.COM, a 2 KB CP/M program for the Z80 with a built-in editor and loadable plugins ("If Forth and VTL had a love child!"). That dialect used different characters: `{` `}` for loops, `,` to print, `#` for the heap, `$` for hex literals, `~` for string compare and `` ` `` to load plugins. It is kept unchanged in `archive/1.0beta/`, with its lunar lander game and the CHAR, PRINTHEX and UNSIGNED plugins. Its user manual was a Google Doc that is now out of date.
 
-The language was then redesigned into the one in the spec, and the interpreters were rewritten for size. The plugin system was dropped: machine code is loaded and called with the grave (`` ` ``) instead.
-
-In November 2026 the grave became a prefix: a grave and one more character are one command. That gave the language its own codes for the cursor and the screen (so a console no longer has to understand ANSI), random numbers, a new line, minimum and maximum, and adding or subtracting 1 in place. The fifty-four games came out 4,104 bytes shorter between them (7 per cent), and the smallest interpreters, which had been under 800 bytes, are now under 1,000.
+The language was then redesigned into the one in the spec, and the interpreters were rewritten for size, now under 800 bytes for the smallest builds. The plugin system was dropped: machine code is loaded with the grave (`` ` ``) instead.
 
 > There once was a game small and sweet
 > That Mr. Bates crammed in a tweet

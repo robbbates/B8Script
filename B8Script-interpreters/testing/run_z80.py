@@ -13,7 +13,7 @@ for hexf in sorted(glob.glob(d + '/*.hex')):
         total += check_editor(base, verbose=verbose)
         continue
     cpm = '-cpm' in base
-    checked = '-chk' in base
+    checked = base.endswith('-chk')
     def runner(p, i, timed=None, base=base, cpm=cpm):
         r = Run(base + '.hex', base + '.lst', p, i, cpu=cpu, mode='cpm' if cpm else 'generic', timed=timed or ())
         o = r.run()

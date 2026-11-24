@@ -36,7 +36,7 @@ python3 sizes.py out/z80                           # bytes per variant
 python3 mkrel.py                                   # copy out/ to the .bin, .COM and .lst files
 ```
 
-- A variant line for `build.sh` is `CPM CHECKED`, then `EDITOR` for the Z80. A build is named after its source, plus `-gen` or `-cpm` (with the editor: `-ed` or `-cpm-ed`), plus `-chk` if checked. A fourth field of 0 builds with `ANSI` = 0, and adds `-noansi` to the name: `VARIANTS=$'0 0 0 0\n0 1 0 0' ./build.sh Z80 ../z80/b8s-z80.asm out/z80`. (Give the generic builds only: a CP/M build has no machine routines to call.)
+- A variant line for `build.sh` is `CPM CHECKED`, then `EDITOR` for the Z80. A build is named after its source, plus `-gen` or `-cpm` (with the editor: `-ed` or `-cpm-ed`), plus `-chk` if checked.
 - `run_z80.py` tests the editor builds by typing at them (`test_editor.py`, which can also be run by itself: `python3 test_editor.py out/z80`).
 - Run the layout and branch checks after every change. They catch mistakes the assembler lets through and the tests may not reach.
 - Each CPU's full run takes a few minutes at most.
@@ -45,8 +45,8 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 
 | File | What it does |
 |---|---|
-| `ref.py` | Reference interpreter written from the spec. It produces the expected output for every test. The console codes print the ANSI sequences, and the random seed is stirred as the builds stir it under test. With `checked=True` it is a checked build: it stops on every error in the spec's table and prints the report |
-| `tests.py` | The suite: `SUITE` (program, input), `MC` (machine-code tests per CPU), `ANSI_ONLY` (not for builds with `ANSI` = 0), `LOOSE` (unchecked builds only), `CHK` (checked builds only), `ERRS` (checked-build errors: the whole output is compared with `ref.py`'s, or with a pattern for the stack overruns) |
+| `ref.py` | Reference interpreter written from the spec. It produces the expected output for every test. With `checked=True` it is a checked build: it stops on every error in the spec's table and prints the report |
+| `tests.py` | The suite: `SUITE` (program, input), `MC` (machine-code tests per CPU), `LOOSE` (unchecked builds only), `CHK` (checked builds only), `ERRS` (checked-build errors: the whole output is compared with `ref.py`'s, or with a pattern for the stack overruns) |
 | `run_tests.py` | `check()` runs one build against everything, including Tiny BASIC and the break-key tests (`break_tests()`, for unchecked and checked builds alike) |
 | `harness_z80.py` | Z80/8080 emulator wrapper. In generic builds it traps KEY/CONOUT/EXIT; in CP/M builds it emulates BDOS 6, 10, 15, 16, 19 to 22 and 26, with a small disk of files (the program is the file PROG.B8S). Its editor modes type the input a chunk at a time |
 | `harness_6502.py`, `harness_6809.py` | The same wrapper for py65 and MC6809 |
@@ -56,15 +56,14 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `harness_win32.py` | Runs a Windows .EXE in the Unicorn emulator: maps the file as Windows would, models the `kernel32` calls it makes, gives it a command line, a console (or redirected input) and a few files. Same interface as the others |
 | `run_win32.py` | Runs every Windows build through `check()`, the editor builds through `test_editor.py`, and all of them through a few Windows-only tests |
 | `chkpe.py` | Checks a Windows .EXE's header against the rules: alignments, sizes, the section, the entry point, the import table |
-| `gamecheck.py` | Runs every game, both `.B8S` and `.TXT`, on every build with `ANSI` = 1 for a short while and compares the output with `ref.py` |
+| `gamecheck.py` | Runs every game, both `.B8S` and `.TXT`, on every build for a short while and compares the output with `ref.py` |
 | `test_games.py` | Types a fixed key sequence at a game on a checked `ref.py` and checks for the messages it should reach: a win, a loss or another known message. It runs both versions, which must print the same. `test_games.py NAME` runs one game's tests |
-| `chktab.py`, `chktab09.py`, `chktab6502.py` | Check the dispatch-table layout rules on Z80/8080, 6809 and zero-page 6502 listings, and the grave's table on the 8080, 6809 and both 6502s |
+| `chktab.py`, `chktab09.py`, `chktab6502.py` | Check the dispatch-table layout rules on Z80/8080, 6809 and zero-page 6502 listings |
 | `chkbr6502.py` | Checks every 6502 branch against its target |
 | `test_tweets.py` | Plays the tiny games in `games/b8sms/`, `games/tweet140/`, `games/tweet280/` and `games/longer/` the same way, and checks each against its folder's limit: 160, 140, 280 or 390 characters (see `docs/b8sms.md`). `test_tweets.py NAME` runs one game's tests; `--all` adds the slow check that Tic-tac-toe never loses |
 | `../../games/` | The games, at the root of the repository (its README says how to play each one). The programs are each in two files: `NAME.TXT`, with comments that explain how it works, and `NAME.B8S`, the same code stripped of comments and white space. `TINYBAS.B8S` is part of the suite. `games/b8sms/`, `games/tweet140/`, `games/tweet280/` and `games/longer/` hold the tiny games, which are already stripped and have no `.TXT` |
 | `b8strip.py` | Strips a program of comments and white space, keeping a space only where B8Script needs one (`b8strip.py ../../games/NAME.TXT ../../games/NAME.B8S` after editing a game). `--same A B` checks that two files hold the same code |
 | `esc2slash.py` | Converts older programs to the `/` escape |
-| `graveprefix.py` | Converts older programs to the grave as a prefix (`graveprefix.py -n FILE` only reports) |
 | `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files next to each source |
 
 Notes on the harnesses:
@@ -75,7 +74,5 @@ Notes on the harnesses:
 - A run that only polls for a key, with no input left, is stopped as "waiting for input". Tiny BASIC's test ends that way, which is why the suites are quick.
 - The MC6809 emulator's SEX instruction is wrong (it never sets A to FFh). `harness_6809.py` replaces it.
 - KEY is modelled as the contract says: A = the key or 0, with the zero flag to match.
-- **The random seed.** A build stirs the seed by 1 for every millisecond a `?` waits with no key. A key typed by a harness arrives at the second look, inside the first millisecond, so it stirs nothing; a timed wait that runs out adds its count. `ref.py` does the same (a key is there at once; `n?` with no key adds n), and both start with the seed at 0, so a game draws the same numbers on a build as on `ref.py`. The Windows harness answers `GetTickCount` with 0 for the same reason.
-- **Builds with `ANSI` = 0** call `CONAT`, `CONCLS`, `CONEOL` and `CONCUR`. The harnesses trap those four and print what a build with `ANSI` = 1 sends, so one set of expected outputs serves both. `gamecheck.py` leaves these builds out (they would only repeat the others).
 
 A harness finds `PROG`, `KEY`, `CONOUT`, `EXIT` and (6502, 6809) `START` in the assembler listing (`.lst`), so a source must keep those symbol names. The runners also read `LET`, `LINEBUF` and `HEAPLIM`, and the editor tests `LEAVE`.

@@ -28,10 +28,7 @@ for cpu in ('z80', '8080', '6502', '6809', 'win32'):
     for hexf in sorted(glob.glob(f'{out}/{cpu}/*.hex') + glob.glob(f'{out}/{cpu}/*.EXE')):
         base = hexf[:-4]
         name = os.path.basename(base)
-        # The editor builds have their own test. A build with ANSI = 0 prints
-        # nothing different here (the harness answers its four routines with
-        # the same bytes), and run_tests.py covers its codes.
-        if '-ed' in name or name.startswith('B8SWINE') or '-noansi' in name:
+        if '-ed' in name or name.startswith('B8SWINE'):               # the editor builds have their own test
             continue
         cpm = '-cpm' in name
         short = []

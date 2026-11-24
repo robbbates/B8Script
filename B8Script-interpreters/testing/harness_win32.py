@@ -9,8 +9,8 @@ before the RET runs. The functions modelled are the ones the builds import
 (chkpe.py lists them): GetStdHandle, GetConsoleMode, SetConsoleMode,
 GetCommandLineA, CreateFileA, ReadFile, WriteFile, CloseHandle,
 WaitForSingleObject, ReadConsoleInputA, GetTickCount, ExitProcess. Anything
-else the program calls, or a fault, ends the run. GetTickCount, which the
-builds stir the random seed with, always returns 0 here.
+else the program calls, or a fault, ends the run. (The builds no longer
+import GetTickCount; it is kept here for a build that may.)
 
 Run(exe, prog, inp, timed=(), mode='runner', files=None, cmdline=None)
   mode 'runner': the program is the file PROG.B8S, named on the command
@@ -84,7 +84,7 @@ def symbols(mapf):
 def plat(mapf):
     """A build's own addresses, for ref.py (all B8Script addresses)."""
     sy = symbols(mapf)
-    return dict(prog_at=sy['PROG'], let=sy['LET'], linebuf=sy['LINEBUF'], heaplim=sy['HEAPLIM'] << 8, seed=sy['SEED'])
+    return dict(prog_at=sy['PROG'], let=sy['LET'], linebuf=sy['LINEBUF'], heaplim=sy['HEAPLIM'] << 8)
 
 
 def keyrec(c, down):
@@ -364,11 +364,7 @@ class Run:
         return 1
 
     def k_GetTickCount(self):
-        # The builds stir the random seed with this, at the start and when a
-        # key that '?' waited for comes. It is always 0 here, so that a run
-        # draws the same numbers as ref.py, whose seed starts at 0 and is
-        # stirred only by the waits that run out.
-        return 0
+        return self.now()
 
     def k_ExitProcess(self, code=0):
         self.stop('exit')

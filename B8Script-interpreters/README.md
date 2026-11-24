@@ -22,9 +22,9 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | Z80 | 765 | 825 | 876 | 1,163 | 1,228 | 1,279 |
 | Z80 with the line editor | 1,488 | 1,361 | 1,411 | 1,796 | 1,768 | 1,818 |
 | 8080 | 854 | 923 | 977 | 1,299 | 1,376 | 1,430 |
-| 6502, stack in pages 2-3 | 1,175 | 1,208 | 1,265 | 1,706 | 1,748 | 1,791 |
-| 6502, stack in zero page | 1,095 | 1,155 | 1,217 | 1,628 | 1,698 | 1,746 |
-| 6809 | 825 | 873 | 934 | 1,220 | 1,284 | 1,333 |
+| 6502, stack in pages 2-3 | 1,175 | 1,208 | 1,265 | 1,706 | 1,738 | 1,781 |
+| 6502, stack in zero page | 1,095 | 1,155 | 1,217 | 1,628 | 1,704 | 1,752 |
+| 6809 | 825 | 873 | 934 | 1,220 | 1,293 | 1,342 |
 
 **CP/M .COM files** (always ANSI):
 
@@ -279,7 +279,7 @@ Rtn 0
 | Data stack | pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS in zero page | zero page $10-$EF, 112 cells, each cell two bytes side by side |
 | Zero page used | $00-$09 ($07 is the held key in the unchecked build, and with $06 the place of the character being run in the checked one) | $00, $01, $04-$06, $08, $09, and the stack ($0E-$0F are scratch when it is full). A checked build's report also uses $02, $03, $0A and $0B, after the program has stopped |
 | Dispatch table | whole addresses (64 bytes) | one byte each (32 bytes), with the layout rules above |
-| Size | 1,175 / 1,706 checked | 1,095 / 1,628 checked |
+| Size (`ANSI = 0`) | 1,208 / 1,738 checked | 1,155 / 1,704 checked |
 
 The zero-page one is smaller because a cell that holds an address is used as the pointer where it lies (`(0,X)`), a drop is two `INX`, and the 16-bit operators work a byte at a time through one short routine called twice. Machine code written for one needs changing for the other: see the contracts below.
 

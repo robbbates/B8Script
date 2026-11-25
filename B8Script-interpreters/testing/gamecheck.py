@@ -15,12 +15,13 @@ is the .TXT stripped.
 import sys, os, glob
 here = os.path.dirname(os.path.abspath(__file__))
 GAMES = os.path.normpath(os.path.join(here, '..', '..', 'games'))   # games/ at the root of the repository
+PROGS = os.path.normpath(os.path.join(here, '..', '..', 'programs'))   # and programs/
 sys.path.insert(0, here)
 from ref import Ref
 import harness_z80, harness_6502, harness_6809, harness_win32
 
 INP = b'y12345 nswe\rabc\r3\r7\r' * 20
-DOCS_ONLY = {'IDOL.TXT'}
+DOCS_ONLY = {'IDOL.TXT', 'MON.B8S', 'MON.TXT'}   # (MON shows memory, which differs: test_programs.py)
 LONG = {'IDOL.B8S': 10}     # a big game: more work before the cut-off, so it gets past its start
 out = sys.argv[1]
 bad = 0
@@ -32,7 +33,7 @@ for cpu in ('z80', '8080', '6502', '6809', 'win32'):
             continue
         cpm = '-cpm' in name
         short = []
-        for g in sorted(glob.glob(f'{GAMES}/*.B8S') + glob.glob(f'{GAMES}/*.TXT')):
+        for g in sorted(glob.glob(f'{GAMES}/*.B8S') + glob.glob(f'{GAMES}/*.TXT') + glob.glob(f'{PROGS}/*.B8S') + glob.glob(f'{PROGS}/*.TXT')):
             if os.path.basename(g) in DOCS_ONLY:
                 continue
             prog = open(g, 'rb').read()

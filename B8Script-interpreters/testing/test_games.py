@@ -442,12 +442,14 @@ def play(path, keys, steps=20_000_000):
 if __name__ == '__main__':
     want = [a.upper() for a in sys.argv[1:]]
     bad = 0
-    # the stripped NAME.B8S of every game must hold the same code as its NAME.TXT
-    for txt in sorted(os.listdir(GAMES)):
+    # the stripped NAME.B8S of every game, and of every program in programs/, must
+    # hold the same code as its NAME.TXT
+    PROGS = os.path.normpath(os.path.join(here, '..', '..', 'programs'))
+    for d, txt in sorted((d, t) for d in (GAMES, PROGS) for t in os.listdir(d)):
         name, ext = os.path.splitext(txt)
         if ext != '.TXT' or (want and name not in want):
             continue
-        a, b = (strip(open(os.path.join(GAMES, name + e), 'rb').read()) for e in ('.TXT', '.B8S'))
+        a, b = (strip(open(os.path.join(d, name + e), 'rb').read()) for e in ('.TXT', '.B8S'))
         ok = a == b
         bad += not ok
         print(f'{"PASS" if ok else "FAIL"}  {name:9} {name}.B8S is {name}.TXT stripped')

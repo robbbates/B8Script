@@ -32,7 +32,7 @@ def check(runner, name, cpu, cpm, checked, retbyte, games=True, verbose=False, p
         elif verbose:
             print('  ok', n)
     if games:
-        g = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'games', 'TINYBAS.B8S'), 'rb').read()
+        g = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'programs', 'TINYBAS.B8S'), 'rb').read()
         inp = (b'10 FOR I=1 TO 5\r20 PRINT I*I;" ";\r30 NEXT I\r40 PRINT\r50 IF 3>2 THEN PRINT "YES"\r'
                b'60 GOSUB 100\r70 END\r100 PRINT "SUB",RND(1),ABS(-7)\r110 RETURN\rLIST\rRUN\r'
                b'200 LET A=7*(3+4)/2\r210 PRINT A,A-50,-A\rRUN 200\rBYE\r')

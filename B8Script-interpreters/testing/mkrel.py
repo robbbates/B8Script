@@ -5,8 +5,8 @@ usage: mkrel.py [OUTDIR]   (after build.sh has filled OUTDIR/z80, OUTDIR/8080,
 
 For each CPU it writes the ROM images (.bin), the CP/M programs (.COM, Z80
 and 8080 only) and the listings (.lst), under the names the README uses;
-for Windows (OUTDIR/win32, from build_win32.sh) the four .EXE files and
-their listings.
+for Windows (OUTDIR/win32, from build_win32.sh) the .EXE files and their
+listings. The QUICK builds go in ../quick and the FAST builds in ../fast.
 """
 import os, shutil, sys
 here = os.path.dirname(os.path.abspath(__file__))
@@ -41,32 +41,32 @@ for cpu, (org, com) in CPUS.items():
         open(f'{dst}/{name}', 'wb').write(bytes(img))
         shutil.copy(base + '.lst', f'{dst}/b8s-{cpu}-{variant}.lst')
         print(f'{cpu:5} {variant:10} {len(img):5} bytes -> {name}')
-# The Z80 builds with QUICK = 1 go in their own folder, quick/
-src, dst = f'{out}/z80', f'{here}/../quick'
-for variant, name in (('quick-gen', 'b8s-z80-quick-rom-0000.bin'), ('quick-gen-chk', 'b8s-z80-quick-rom-checked-0000.bin'),
-                      ('quick-ed', 'b8s-z80-quick-rom-editor-0000.bin'), ('quick-ed-chk', 'b8s-z80-quick-rom-editor-checked-0000.bin'),
-                      ('quick-cpm', 'B8SZ80Q.COM'), ('quick-cpm-chk', 'B8SZ80QC.COM'),
-                      ('quick-cpm-ed', 'B8SZ80QE.COM'), ('quick-cpm-ed-chk', 'B8SZ80QEC.COM')):
-    base = f'{src}/b8s-z80-{variant}'
-    if not os.path.exists(base + '.hex'):
-        continue
-    os.makedirs(dst, exist_ok=True)
-    lo, img = load_hex(base + '.hex')
-    open(f'{dst}/{name}', 'wb').write(bytes(img))
-    shutil.copy(base + '.lst', f'{dst}/b8s-z80-{variant}.lst')
-    print(f'quick {variant:16} {len(img):5} bytes -> quick/{name}')
-# The Z80's speed builds go in their own folder, fast/
-src, dst = f'{out}/z80', f'{here}/../fast'
-for variant, name in (('fast-gen', 'b8s-z80-fast-rom-0000.bin'), ('fast-gen-chk', 'b8s-z80-fast-rom-checked-0000.bin'),
-                      ('fast-cpm', 'B8SZ80F.COM'), ('fast-cpm-chk', 'B8SZ80FC.COM')):
-    base = f'{src}/b8s-z80-{variant}'
-    if not os.path.exists(base + '.hex'):
-        continue
-    os.makedirs(dst, exist_ok=True)
-    lo, img = load_hex(base + '.hex')
-    open(f'{dst}/{name}', 'wb').write(bytes(img))
-    shutil.copy(base + '.lst', f'{dst}/b8s-z80-{variant}.lst')
-    print(f'fast  {variant:12} {len(img):5} bytes -> fast/{name}')
+# The builds with QUICK = 1 go in quick/, and the speed builds (FAST = 1) in fast/,
+# named as above with -quick or -fast after the CPU (B8SZ80Q.COM, B8SZ80F.COM, ...).
+SPEED = {           # folder: (source stems, ROM origin with QUICK, with FAST, CP/M stem or None)
+    'z80': (('b8s-z80',), '0000', '0000', 'B8SZ80'),
+    '8080': (('b8s-8080',), '0000', '0000', 'B8S8080'),
+    '6502': (('b8s-6502', 'b8s-6502-zp'), 'E000', 'E000', None),
+    '6809': (('b8s-6809',), 'F000', 'E000', None),
+}
+for cpu, (stems, qorg, forg, com) in SPEED.items():
+    for kind, org, letter in (('quick', qorg, 'Q'), ('fast', forg, 'F')):
+        src, dst = f'{out}/{cpu}', f'{here}/../{kind}'
+        for stem in stems:
+            zp = stem[len(f'b8s-{cpu}'):].lstrip('-')
+            rom = f'b8s-{cpu}-{kind}-rom-' + (zp + '-' if zp else '')
+            for variant, name in (('gen', f'{rom}{org}.bin'), ('gen-chk', f'{rom}checked-{org}.bin'),
+                                  ('ed', f'{rom}editor-{org}.bin'), ('ed-chk', f'{rom}editor-checked-{org}.bin'),
+                                  ('cpm', com and f'{com}{letter}.COM'), ('cpm-chk', com and f'{com}{letter}C.COM'),
+                                  ('cpm-ed', com and f'{com}{letter}E.COM'), ('cpm-ed-chk', com and f'{com}{letter}EC.COM')):
+                base = f'{src}/{stem}-{kind}-{variant}'
+                if not name or not os.path.exists(base + '.hex'):
+                    continue
+                os.makedirs(dst, exist_ok=True)
+                lo, img = load_hex(base + '.hex')
+                open(f'{dst}/{name}', 'wb').write(bytes(img))
+                shutil.copy(base + '.lst', f'{dst}/{stem}-{kind}-{variant}.lst')
+                print(f'{kind:5} {cpu:5} {variant:10} {len(img):5} bytes -> {kind}/{name}')
 # Windows: the .EXE files and their listings, as they are
 src, dst = f'{out}/win32', f'{here}/../win32'
 for name in ('B8SWIN', 'B8SWINC', 'B8SWINE', 'B8SWINEC'):
@@ -74,3 +74,10 @@ for name in ('B8SWIN', 'B8SWINC', 'B8SWINE', 'B8SWINEC'):
         shutil.copy(f'{src}/{name}.EXE', f'{dst}/{name}.EXE')
         shutil.copy(f'{src}/{name}.lst', f'{dst}/{name}.lst')
         print(f'win32 {name:10} {os.path.getsize(src + "/" + name + ".EXE"):5} bytes -> {name}.EXE')
+for kind, letter in (('quick', 'Q'), ('fast', 'F')):
+    for suffix in ('', 'C', 'E', 'EC'):
+        name = f'B8SWIN{letter}{suffix}'
+        if os.path.exists(f'{src}/{name}.EXE'):
+            shutil.copy(f'{src}/{name}.EXE', f'{here}/../{kind}/{name}.EXE')
+            shutil.copy(f'{src}/{name}.lst', f'{here}/../{kind}/{name}.lst')
+            print(f'{kind:5} win32 {name:10} {os.path.getsize(src + "/" + name + ".EXE"):5} bytes -> {kind}/{name}.EXE')

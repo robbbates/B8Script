@@ -85,6 +85,36 @@ async function runSrc(page, src) {
   ok('PI: typed digits and Return; 50 digits shown', JSON.stringify(got.slice(0, pi.length - 1)) === JSON.stringify(pi.slice(0, -1)),
      JSON.stringify(got.slice(0, 4)) + ' / ' + JSON.stringify(pi.slice(0, 4)));
 
+  // the serial line: a byte is 10 bits, and the program waits for the line
+  const DOTS = '0i! 1( 46\' i@1+:i! 960<)';                // 960 dots
+  for (const [b, ms] of [['9600', 1000], ['115200', 960 * 10000 / 115200]]) {
+    await page.selectOption('#speed', b);
+    const t = Date.now();
+    await runSrc(page, DOTS);
+    if (b === '9600') {
+      await page.waitForTimeout(500);
+      const half = (await screen(page)).join('').split('.').length - 1;
+      ok(`${b} baud: half a second shows about half the dots (${half})`, half > 330 && half < 630);
+    }
+    await until(page, /^Ended/, 5000);
+    const took = Date.now() - t;
+    ok(`${b} baud: 960 bytes take about ${Math.round(ms)} ms (${took} ms)`, took >= ms * 0.9 && took < ms * 1.4 + 150);
+  }
+  // a wait starts when the program gets to it: after the line has sent what came before
+  await page.selectOption('#speed', '9600');
+  let t = Date.now();
+  await runSrc(page, '0i! 1( 46\' i@1+:i! 96<) 200?; "x"$');
+  await until(page, /^Ended/, 5000);
+  t = Date.now() - t;
+  ok(`9600 baud: 96 bytes and then 200? take about 300 ms (${t} ms)`, t >= 270 && t < 500);
+  await page.selectOption('#speed', '0');
+  t = Date.now();
+  await runSrc(page, '0i! 1( 46\' i@1+:i! 1920<)');
+  await until(page, /^Ended/, 5000);
+  t = Date.now() - t;
+  ok(`full speed: 1920 bytes at once (${t} ms)`, t < 300);
+  await page.selectOption('#speed', '115200');
+
   // a line read with -n?: Backspace takes a typo back, and the echo shows it
   await runSrc(page, LINE);
   await until(page, /Waiting for a line/);

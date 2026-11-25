@@ -28,7 +28,11 @@ Every game in [`games/`](../games/) and every program in [`programs/`](../progra
   | The heap | after the program, up to FF00h |
 
   So a program of 60 KB fits.
-- **Timing:** `n?` waits n milliseconds by the clock. Between waits a program runs as fast as the browser can run it.
+- **The serial line:** most B8Script machines talk to their terminal over a serial line, and the speed menu sets one: 9600 baud, 115200 baud (where it starts), or full speed, with no line at all.
+  - A byte takes 10 bits (a start bit, 8 data bits and a stop bit), so 960 bytes a second at 9600 baud and 11,520 at 115200.
+  - While the line is busy, the program waits, as it would for a real UART that holds one byte while sending another. So a game's frame wait starts only once its drawing has gone out.
+  - The choice takes effect at once, even in a running program, and the page remembers it.
+- **Timing:** `n?` waits n milliseconds by the clock. Apart from its output, a program runs as fast as the browser can run it.
 - **The screen** is 80 × 24, and understands the ANSI sequences the console escapes send.
 
 ## Files
@@ -42,4 +46,4 @@ Every game in [`games/`](../games/) and every program in [`programs/`](../progra
 
 The tests are in [`B8Script-interpreters/testing/`](../B8Script-interpreters/testing/):
 - **`test_web.py`** runs the test suite, Tiny BASIC, the programs and the scripted games on `b8s.js` under Node, and checks every run against `ref.py`, byte for byte.
-- **`test_page.js`** drives the page in Chromium (Playwright), as a computer and as phones: the screen, typing, the phone's keyboard, the pad, `n?`'s clock, the break key and checked reports.
+- **`test_page.js`** drives the page in Chromium (Playwright), as a computer and as phones: the screen, typing, the phone's keyboard, the pad, the serial line's speeds, `n?`'s clock, the break key and checked reports.

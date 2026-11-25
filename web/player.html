@@ -40,6 +40,7 @@ select, button {
   border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; min-height: 32px;
 }
 select { flex: 1 1 180px; min-width: 0; max-width: 340px; }
+#speed { flex: 0 0 auto; }
 button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
 button:active, button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
@@ -119,6 +120,9 @@ body.touch #keys, body.showkeys #keys { display: block; }
   <button id="stop">Stop</button>
   <button id="edit">Edit</button>
   <button id="open">Open</button>
+  <select id="speed" aria-label="Speed" title="The serial line to the terminal: how fast output goes">
+    <option value="9600">9600 baud</option><option value="115200">115200 baud</option><option value="0">Full speed</option>
+  </select>
   <button id="chk" title="Run as a checked build: an error stops the program with a report">Checked</button>
   <button id="keysb" title="Show the on-screen keys">Keys</button>
   <button id="helpb" aria-label="Help">?</button>
@@ -194,7 +198,8 @@ body.touch #keys, body.showkeys #keys { display: block; }
       <li>It runs B8Script in JavaScript, following the reference interpreter step for step.</li>
       <li>There is no CPU here, so machine code can't run: a grave that would execute code stops the program. The hex loader still stores bytes, and writes the RET byte C9h.</li>
       <li>Memory: the letter cells at 0100h, the line buffer at 0200h, the program at 0400h, then the heap, up to FF00h.</li>
-      <li><code>n?</code> waits n milliseconds by the clock. A program runs as fast as the browser can run it.</li>
+      <li>The speed menu sets the serial line to the terminal, as on most B8Script machines: 9600 or 115200 baud, or full speed, with no line at all. A byte takes 10 bits (start, 8 data, stop), and while the line is busy the program waits, as it would for a real UART. It takes effect at once, even in a running program.</li>
+      <li><code>n?</code> waits n milliseconds by the clock. Apart from its output, a program runs as fast as the browser can run it.</li>
       <li>The screen is 80 × 24 and understands the ANSI sequences the console escapes send.</li>
     </ul>
   </div>
@@ -337,21 +342,47 @@ function bytes(s) { const b = new Uint8Array(s.length); for (let i = 0; i < s.le
 function str(b) { let s = ''; for (let i = 0; i < b.length; i += 8192) s += String.fromCharCode.apply(null, b.subarray(i, i + 8192)); return s; }
 
 // ---------------------------------------------------------------- running
-let core = null, scheduled = false, timer = 0, startedAt = 0, steps = 0;
+// The serial line. Most B8Script machines talk to their terminal over one, and
+// its speed sets the pace: a byte is 10 bits (start, 8 data, stop), and while
+// the line is busy the interpreter waits for the UART, so the program doesn't
+// run. The model UART holds one byte while another is being sent. At full
+// speed there is no line: output goes straight to the screen.
+const SPEEDS = { 9600: '9600 baud', 115200: '115200 baud', 0: 'Full speed' };
+let baud = +(store.get('baud') ?? 115200);
+if (!(baud in SPEEDS)) baud = 115200;
+const line = { q: [], next: 0 };       // bytes not yet shown; when the first is done
+function lineSend(bytes, now) {
+  if (!line.q.length) line.next = now + 10000 / baud;
+  for (const b of bytes) line.q.push(b);
+}
+function linePump(now) {               // show the bytes whose time has come
+  let n = 0;
+  while (n < line.q.length && line.next <= now) { n++; line.next += 10000 / baud; }
+  if (n) { term.write(line.q.slice(0, n)); line.q.splice(0, n); }
+}
+
+let core = null, scheduled = false, timer = 0, startedAt = 0, result = null;
 const chan = new MessageChannel();
 chan.port1.onmessage = tick;
 let checked = store.get('checked') !== '0';
 
 function status(s) { $('st').textContent = s; }
+let shown = '';                        // the running program's name, for the status bar
+function where() {
+  $('where').textContent = shown ? shown + (checked ? ' (checked)' : '') + ' · ' + SPEEDS[baud] : SPEEDS[baud];
+}
 function run(src, name) {
   halt();
+  line.q.length = 0;
   term.reset();
   core = new B8(bytes(src), {
     live: true, checked, progAt: 0x0400, let: 0x0100, linebuf: 0x0200, heaplim: 0xFF00,
     now: () => performance.now(),
   });
-  startedAt = performance.now(); steps = 0;
-  $('where').textContent = name + (checked ? ' (checked)' : '');
+  if (baud) core.outLimit = 1;          // stop at each byte, to wait for the line
+  result = null;
+  startedAt = performance.now();
+  shown = name; where();
   status('Running');
   kick();
   focusKeys();
@@ -360,31 +391,36 @@ function kick() {
   clearTimeout(timer); timer = 0;
   if (!scheduled) { scheduled = true; chan.port2.postMessage(0); }
 }
-function flush() {
-  if (core.out.length) { term.write(core.out); core.out.length = 0; }
+function flush(now) {                  // the interpreter's output: to the line, or the screen
+  if (!core.out.length) return;
+  if (baud) lineSend(core.out, now); else term.write(core.out);
+  core.out.length = 0;
 }
 function tick() {
   scheduled = false;
-  if (!core || core.ended) return;
+  if (!core) return;
   const end = performance.now() + 12;
   for (;;) {
-    const st = core.run(20000);
-    flush();
-    if (st === 'run') {
-      steps += 20000;
-      if (performance.now() >= end) { status('Running'); kick(); return; }
-      continue;
+    let now = performance.now();
+    linePump(now);
+    // the interpreter runs while the UART has room
+    if (!result && line.q.length < 2) {
+      const st = core.run(baud ? 2000 : 20000);
+      flush(performance.now());
+      if (st === 'end' || st === 'error') result = st;
+      else if (st !== 'wait') { if (performance.now() >= end) { status('Running'); kick(); return; } continue; }
     }
-    if (st === 'wait') {
-      if (core.waitAt < 0) { status(core.line ? 'Waiting for a line' : 'Waiting for a key'); return; }
-      const d = core.waitUntil - performance.now();
-      if (d > 2) { status('Running'); timer = setTimeout(kick, d - 1); return; }
-      while (performance.now() < core.waitUntil && !core.inp.length) { /* a short wait: spin */ }
-      if (performance.now() >= end) { kick(); return; }
-      continue;
-    }
-    done(st);
-    return;
+    if (result && !line.q.length) { done(result); return; }
+    // nothing to do until the line sends a byte, a timed ? runs out, or a key comes
+    now = performance.now();
+    let wake = Infinity;
+    if (line.q.length) wake = line.next;
+    if (!result && line.q.length < 2 && core.waitAt >= 0) wake = Math.min(wake, core.waitUntil);
+    if (wake === Infinity) { status(core.line ? 'Waiting for a line' : 'Waiting for a key'); return; }
+    if (now >= end) { kick(); return; }
+    const d = wake - now;
+    if (d > 2) { status('Running'); timer = setTimeout(kick, d - 1); return; }
+    while (performance.now() < wake && !core.inp.length) { /* a short wait: spin */ }
   }
 }
 function done(st) {
@@ -395,8 +431,14 @@ function done(st) {
   else status('Ended after ' + t);
 }
 function halt() {
-  if (core && !core.ended) { core.brk(); flush(); done(core.error ? 'error' : 'end'); }
-  clearTimeout(timer); timer = 0;
+  // the break key: the program stops at once, and what the line still holds
+  // (a byte or two, and a checked build's report) goes out
+  if (core && !result) {
+    core.brk();
+    flush(performance.now());
+    result = core.error ? 'error' : 'end';
+    kick();
+  }
 }
 
 // ---------------------------------------------------------------- keys
@@ -498,6 +540,16 @@ if (store.get('pad') === '1') { document.body.classList.add('pad'); $('padb').cl
 function setChecked(v) { checked = v; $('chk').classList.toggle('on', v); store.set('checked', v ? '1' : '0'); }
 setChecked(checked);
 $('chk').onclick = () => { setChecked(!checked); focusKeys(); };
+$('speed').value = String(baud);
+$('speed').onchange = () => {
+  // takes effect at once, even in a running program
+  const now = performance.now();
+  const rest = line.q.splice(0);
+  baud = +$('speed').value; store.set('baud', baud);
+  if (core) { core.outLimit = baud ? 1 : Infinity; if (baud) lineSend(rest, now); else term.write(rest); }
+  where();
+  $('speed').blur(); focusKeys(); kick();
+};
 $('run').onclick = () => { const it = current(); if (it) run(it.src, it.name); };
 $('stop').onclick = () => { halt(); focusKeys(); };
 $('prog').onchange = () => { showInfo(); $('prog').blur(); focusKeys(); };
@@ -556,6 +608,7 @@ const pick = Object.keys(byId).find(id => want && id.toUpperCase().replace(/\.B8
   || (byId[store.get('prog')] && store.get('prog')) || 'programs/MANDEL.B8S';
 if (byId[pick]) $('prog').value = pick;
 showInfo();
+where();
 term.reset();
 term.text('B8Script\r\n\r\nPick a program and press Run. Ctrl-C stops it. ? is the help.\r\n');
 measure(); fit();

@@ -2,7 +2,7 @@
 0000                             ;  B8Script interpreter for the Z80
 0000                             ;  Spec: docs/b8script.md (2026-11-24).
 0000                             ; 
-0000                             ;  Four switches, set in the EQU lines below:
+0000                             ;  The switches, set in the EQU lines below:
 0000                             ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 0000                             ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
 0000                             ;    EDITOR   1 = with the line editor built in (see the end of this file):
@@ -13,6 +13,11 @@
 0000                             ;                 and stops on every error in the spec's table (and Ctrl-C)
 0000                             ;                 with a four-line report: the letter and the place as line
 0000                             ;                 and column, the text there, and both stacks. See `error`.
+0000                             ;    QUICK    1 = the speed-ups that cost bytes: a skip cache, a faster skip,
+0000                             ;                 "*" and "/" quicker for small and power-of-two operands, and
+0000                             ;                 more (see "Speed-ups"). 0, the default, is the smallest build.
+0000                             ;    FAST     1 = the speed build: QUICK and a dispatch table besides, with
+0000                             ;                 no size limit (see "The speed build"). Not with EDITOR.
 0000                             ;    ANSI     what the console escapes of "$" (/00bbIC8= /| /` /~) do:
 0000                             ;             1 = send ANSI (VT100) sequences through CONOUT
 0000                             ;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
@@ -28,6 +33,7 @@
 0000                CHECKED:   EQU   1   ; 1 = checked build
 0000                EDITOR:   EQU   1   ; 1 = with the line editor
 0000                ANSI:     EQU   0   ; 1 = the console escapes send ANSI sequences
+0000                QUICK:    EQU   0   ; 1 = the speed-ups that cost bytes (see "Speed-ups")
 0000                FAST:     EQU   0   ; 1 = the speed build (not with EDITOR): see "The speed build"
 0000                ANS:      EQU   ANSI+CPM-ANSI*CPM   ; (CP/M: always ANSI)
 0000                EDGEN:    EQU   EDITOR*(1-CPM)   ; (the generic build with the editor)
@@ -37,12 +43,8 @@
 0000                PTLATE:   EQU   1-(1-CPM)*(1-EDITOR)*(1-CHECKED)*(1-ANS)   ; (1: the table goes after psgn and pdec,
 0000                             ;   not before them: wherever it doesn't cross a
 0000                             ;   page. chktab.py says if it does)
-0000                QUICK:    EQU   1-(1-FAST)*(CHECKED*CPM*EDITOR+CHECKED*(1-CPM)*(1-EDITOR))   
-0000                             ; (1: the speed-ups that cost bytes: every build
-0000                             ;  but the two that are full, the checked
-0000                             ;  generic one and the checked CP/M editor.
-0000                             ;  See "Speed-ups" below)
-0000                QUICKU:   EQU   QUICK*(1-CHECKED)*(1-FAST)   ; (and those that only the unchecked
+0000                QK:       EQU   QUICK+FAST-QUICK*FAST   ; (the speed-ups: QUICK, or the speed build)
+0000                QUICKU:   EQU   QK*(1-CHECKED)*(1-FAST)   ; (and those that only the unchecked
 0000                             ;  builds take; the speed build has its own)
 0000                             ; -----------------------------------------------------------------------------
 0000                             ;  Register use, everywhere in the interpreter
@@ -127,7 +129,7 @@
                     LETPAGE:   EQU   82h   ; 8200h letter cells and line buffer
                     PROG:     EQU   8300h   ; where the loader puts the program text
                     HEAPLIM:   EQU   0F0h   ; the heap must stay below F000h (a page)
-                    CPAGE:    EQU   HEAPLIM   ; the skip cache's page (QUICK builds): the page
+                    CPAGE:    EQU   HEAPLIM   ; the skip cache's page (QK builds): the page
                                  ;   at the heap limit, which the heap never reaches
                     BASE:     EQU   0000h   ; where the image starts
 0000                          ENDIF      
@@ -310,13 +312,21 @@
 0100                          IF   1-EDGEN   
 0100   31 FC 0A               LD   SP,DSTOP   ; 00  reset, or the start of the .COM file
 0103                          ENDIF      
-0103                          IF   (1-CPM)*(1-EDITOR)*(1-CHECKED)   
+0103                          IF   (1-CPM)*(1-EDITOR)*(1-CHECKED)*(1-QK)   
+                              LD   BC,PROG   ; 03  the IP
+                              JR   st0   ; 06  (the rest of the startup is close by)
+0103                          ENDIF      
+0103                          IF   (1-CPM)*(1-EDITOR)*(1-CHECKED)*QK   
                               JP   qstart   ; 03  (the skip cache is emptied first)
                               DW   0   ; 06  spare
 0103                          ENDIF      
-0103                          IF   (1-CPM)*(1-EDITOR)*CHECKED   
+0103                          IF   (1-CPM)*(1-EDITOR)*CHECKED*(1-QK)   
                               JR   init   ; 04  (the rest of the startup is close by)
                               DW   0   ; 06  spare
+0103                          ENDIF      
+0103                          IF   (1-CPM)*(1-EDITOR)*CHECKED*QK   
+                              JP   qinit   ; 04  (the skip cache is emptied first)
+                              DB   0   ; 07  spare
 0103                          ENDIF      
 0103                          IF   EDGEN   
                               XOR   A   ; 00  reset: no program yet. (This byte, AFh,
@@ -869,10 +879,10 @@
 021E   B5                     OR   L   
 021F   E1                     POP   HL   
 0220   28 C3                  JR   Z,rdrop   
-0222                          IF   QUICK   
+0222                          IF   QK   
                               JP   closeq   ; (out of the handlers' pages: see Speed-ups)
 0222                          ENDIF      
-0222                          IF   1-QUICK   
+0222                          IF   1-QK   
 0222                          ;*Macro unroll:  POPR                    ; pop the block start ...
 0222                          DS   1-CPM,0CFh   ; pop the block start ...
 0222   CD                     DS   CPM,0CDh   
@@ -882,10 +892,10 @@
 0226   4B                     LD   C,E   
 0227   C5                     PUSH   BC   
 0228                          ENDIF      
-0228                          IF   (1-QUICK)*(1-CPM)   
+0228                          IF   (1-QK)*(1-CPM)   
                               JR   rpushn   ; ... and push it back
 0228                          ENDIF      
-0228                          IF   (1-QUICK)*CPM   
+0228                          IF   (1-QK)*CPM   
 0228   C3 A1 01               JP   rpushn   
 022B                          ENDIF      
 022B                             ; ---- arithmetic and logic: ( NOS TOS -- result ) ---------------------------
@@ -954,7 +964,7 @@
 0263   18 F2                  JR   tf   
 0265                             ; "*": shift-and-add, 16 rounds; only the low 16 bits are kept. The
 0265                             ; multiplier shifts up through A:C.
-0265                          IF   1-QUICK   
+0265                          IF   1-QK   
 0265   D1           H_MUL:    POP   DE   ; DE = multiplicand
 0266   C5                     PUSH   BC   
 0267   7C                     LD   A,H   
@@ -973,7 +983,7 @@
 0278   DD                     DS   CPM+FAST-CPM*FAST,0DDh   
 0279   E9                     DS   CPM+FAST-CPM*FAST,0E9h   
 027A                          ENDIF      
-027A                          IF   QUICK   
+027A                          IF   QK   
                     H_MUL:    POP   DE   ; DE = multiplicand
                               JP   mulq   ; (out of the handlers' pages: see Speed-ups)
 027A                          ENDIF      
@@ -1402,7 +1412,7 @@
 03C3                             ; Uses A; keeps BC (the IP) itself. The dividend shifts up through A:C while
 03C3                             ; the quotient bits arrive at the bottom of C.
 03C3                             ; Dividing by 2 is one shift (the spec wants that fast).
-03C3                          IF   1-QUICK   
+03C3                          IF   1-QK   
 03C3   7B           UDIV:     LD   A,E   
 03C4   EE 02                  XOR   2   
 03C6   B2                     OR   D   
@@ -1413,7 +1423,7 @@
 03CE   5F                     LD   E,A   ; the remainder: the bit that fell out (D is 0)
 03CF   C9                     RET      
 03D0                          ENDIF      
-03D0                          IF   QUICK   
+03D0                          IF   QK   
                                  ; (The builds with room divide by any power of two with shifts: 2, and 32,
                                  ; 64, 256 and the like, which fixed point and byte work use all the time.)
                     UDIV:     LD   A,D   
@@ -1679,19 +1689,33 @@
 0412                             ; "[" at "]", and neither may run into the NUL (N); a string with no closing
 0412                             ; quote counts as running into it. "\" takes either closer. SKPL keeps the
 0412                             ; place where the skip started, for the report.
-0412                          IF   1-QUICK   
-0412                             ; (The two full builds, both checked, have no skip cache: this is their skip.)
-0412   ED 43 3C 0B  SKIP:     LD   (SKPL),BC   
+0412                          IF   1-QK   
+0412                             ; (Without QUICK: no skip cache.)
+0412                SKIP:        
+0412                          ENDIF      
+0412                          IF   CHECKED*(1-QK)   
+0412   ED 43 3C 0B            LD   (SKPL),BC   
 0416   0B                     DEC   BC   
 0417   0A                     LD   A,(BC)   
 0418   03                     INC   BC   
 0419   5F                     LD   E,A   ; E = the opener: ( [ or \
+041A                          ENDIF      
+041A                          IF   1-QK   
 041A   16 00                  LD   D,0   
 041C   14           SK3:      INC   D   ; an opener: one deeper
 041D   0A           SK1:      LD   A,(BC)   
+041E                          ENDIF      
+041E                          IF   (1-CHECKED)*(1-QK)   
+                              INC   BC   
+                              OR   A   
+                              JP   Z,SKEND   ; (the end of the program)
+041E                          ENDIF      
+041E                          IF   CHECKED*(1-QK)   
 041E   B7                     OR   A   
 041F   28 22                  JR   Z,sk6   ; (the IP stays on the NUL)
 0421   03                     INC   BC   
+0422                          ENDIF      
+0422                          IF   1-QK   
 0422   FE 22                  CP   22h   
 0424   CC 01 04               CALL   Z,skipstr   ; leaves A = 22h, which matches nothing below
 0427   D6 28                  SUB   "("   ;   (or 0, and then the NUL is read next)
@@ -1703,6 +1727,12 @@
 0432   FE 02                  CP   "]"-"["   
 0434   20 E7                  JR   NZ,sk1   
 0436   15           SK4:      DEC   D   
+0437                          ENDIF      
+0437                          IF   (1-CHECKED)*(1-QK)   
+                              RET   Z   ; the closer at this level
+                              JR   sk1   
+0437                          ENDIF      
+0437                          IF   CHECKED*(1-QK)   
 0437   20 E4                  JR   NZ,sk1   
 0439   57                     LD   D,A   ; the closer at this level: 0 or 2. Bit 1 of the
 043A   AB                     XOR   E   ;   opener is 0 for "(" and 1 for "[", and only
@@ -1717,7 +1747,7 @@
 044C   3E 4E                  LD   A,"N"   
 044E   C3 8A 05               JP   errp   ; (errp drops skip's return address)
 0451                          ENDIF      
-0451                          IF   QUICK   
+0451                          IF   QK   
                                  ; The skip cache. Nearly every skip is one that has happened before (a loop
                                  ; skips the same false block on every pass), so the first scan from each
                                  ; place is remembered: 64 entries of 00bbc3RhcnQsIGVuZA==, at CPAGE, found by the
@@ -1753,13 +1783,13 @@
                               RET      
                     SKS:         
 0451                          ENDIF      
-0451                          IF   QUICK*CHECKED   
+0451                          IF   QK*CHECKED   
                               DEC   BC   
                               LD   A,(BC)   
                               INC   BC   
                               LD   E,A   ; E = the opener: ( [ or \
 0451                          ENDIF      
-0451                          IF   QUICK   
+0451                          IF   QK   
                                  ; The scan. Most characters are nothing to it, and two range tests rule
                                  ; them out: * to Z, and ^ and up. Only NUL " ( ) [ ] count.
                               LD   D,0   
@@ -1780,10 +1810,10 @@
                               OR   A   
                               JR   NZ,sq1   ; the rest below "(": nothing
 0451                          ENDIF      
-0451                          IF   QUICK*(1-CHECKED)   
+0451                          IF   QK*(1-CHECKED)   
                               JP   SKEND   ; NUL: the end of the program
 0451                          ENDIF      
-0451                          IF   QUICK*CHECKED   
+0451                          IF   QK*CHECKED   
                               DEC   BC   ; NUL: the IP stays on it
                               BIT   2,E   ; the text ran out:
                               JP   NZ,SKEND   ;   "\" with no closer ends the program
@@ -1791,7 +1821,7 @@
                               LD   A,"N"   
                               JP   errp   ; (errp drops skip's return address)
 0451                          ENDIF      
-0451                          IF   QUICK   
+0451                          IF   QK   
                     SQQ:      CALL   skipstr   ; step over the string
                               JR   sq1   
                     SQB:      SUB   5Ch   ; [ -1, \ 0, ] 1
@@ -1803,7 +1833,7 @@
                     SQ4:      DEC   D   
                               JR   NZ,sq1   
 0451                          ENDIF      
-0451                          IF   QUICK*CHECKED   
+0451                          IF   QK*CHECKED   
                               LD   D,A   ; the closer at this level (as above): 2 here
                               XOR   E   ;   means the wrong closer
                               AND   6   
@@ -1811,7 +1841,7 @@
                               LD   A,D   
                               JR   Z,sq7   
 0451                          ENDIF      
-0451                          IF   QUICK   
+0451                          IF   QK   
                                  ; The closer at this level: remember the skip (if it started in the program
                                  ; text), and return A = 0 for ")" or 2 for "]".
                               PUSH   AF   
@@ -1851,7 +1881,7 @@
 0451                             ;  ---- Speed-ups (QUICK builds) -------------------------------------------
 0451                             ;  The skip cache is above. These are the handlers' tails that the builds with
 0451                             ;  room take, kept here, out of the handlers' first two pages.
-0451                          IF   QUICK   
+0451                          IF   QK   
                                  ; "*" with an operand below 256 takes 8 rounds, not 16: that one becomes the
                                  ; multiplier (most multiplications have one, a count or a small constant).
                     MULQ:     LD   A,H   
@@ -1862,7 +1892,7 @@
                               JR   NZ,mq16   
                               EX   DE,HL   ; the multiplicand is: it becomes the multiplier
 0451                          ENDIF      
-0451                          IF   QUICK*(1-FAST)   
+0451                          IF   QK*(1-FAST)   
                     MQ8:      LD   A,L   
                               LD   HL,0   
                               PUSH   BC   
@@ -2048,7 +2078,7 @@
                               DS   CPM+FAST-CPM*FAST,0DDh   
                               DS   CPM+FAST-CPM*FAST,0E9h   
 0451                          ENDIF      
-0451                          IF   QUICK   
+0451                          IF   QK   
                                  ; A true ")" reads the block start where it is, on top of the return stack,
                                  ; instead of popping it and pushing it back; the break key is looked at as
                                  ; rpushn would.
@@ -2104,10 +2134,14 @@
                               DS   CPM+FAST-CPM*FAST,0DDh   
                               DS   CPM+FAST-CPM*FAST,0E9h   
 0451                          ENDIF      
-0451                          IF   (1-CPM)*(1-EDITOR)*(1-CHECKED)   
+0451                          IF   (1-CPM)*(1-EDITOR)*(1-CHECKED)*QK   
                     QSTART:   LD   BC,PROG   ; the generic reset goes on here: the IP,
                               CALL   skclr   ;   an empty skip cache, and the rest of the
                               JP   st0   ;   startup
+0451                          ENDIF      
+0451                          IF   (1-CPM)*(1-EDITOR)*CHECKED*QK   
+                    QINIT:    CALL   skclr   ; (keeps A, which init wants 0)
+                              JP   init   
 0451                          ENDIF      
 0451                             ; =============================================================================
 0451                             ;  Dispatch table: the low byte of each handler's address, in code order
@@ -3041,7 +3075,7 @@
 07CE   20 FC                  JR   NZ,st1   
 07D0   22 7C 0B               LD   (HEAP),HL   
 07D3                          ENDIF      
-07D3                          IF   EDITOR*QUICK   
+07D3                          IF   EDITOR*QK   
                               CALL   skclr   ; every run starts with an empty skip cache
 07D3                          ENDIF      
 07D3                          IF   EDITOR*CHECKED   
@@ -3343,7 +3377,11 @@
                     LD2:      LD   (HL),0   ; the end of the file counts as NUL
                               INC   HL   ; the heap starts after it
                               LD   BC,PROG   ; the IP
+0900                          ENDIF      
+0900                          IF   CPM*(1-EDITOR)*QK   
                               CALL   skclr   ; an empty skip cache
+0900                          ENDIF      
+0900                          IF   CPM*(1-EDITOR)   
                               JP   st2   
 0900                          ENDIF      
 0900                          IF   FAST   
@@ -5929,8 +5967,8 @@
 0900                          ENDIF      
 0900                          IF   CPM   
 0900                             ; RAM pages, after the image
-0900                CPAGE:    EQU   (imgend + 255) / 256   ; the skip cache (QUICK builds), first, so
-0900                RSPAGE:   EQU   CPAGE + QUICK   ;   that the letter page is still the one
+0900                CPAGE:    EQU   (imgend + 255) / 256   ; the skip cache (QK builds), first, so
+0900                RSPAGE:   EQU   CPAGE + QK   ;   that the letter page is still the one
 0900                DSPAGE:   EQU   RSPAGE + 1   ;   just below the program text
 0900                LETPAGE:   EQU   RSPAGE + 2   
 0900                PROG:     EQU   LETPAGE*256 + 256   
@@ -5938,1265 +5976,1263 @@
 0900                IMGEND:      
 
 
-CPM:                0001 DEFINED AT LINE 28
-                    > USED AT LINE 33
-                    > USED AT LINE 33
-                    > USED AT LINE 34
-                    > USED AT LINE 38
-                    > USED AT LINE 41
-                    > USED AT LINE 41
-                    > USED AT LINE 154
-                    > USED AT LINE 216
-                    > USED AT LINE 217
+CPM:                0001 DEFINED AT LINE 33
+                    > USED AT LINE 39
+                    > USED AT LINE 39
+                    > USED AT LINE 40
+                    > USED AT LINE 44
+                    > USED AT LINE 156
                     > USED AT LINE 218
                     > USED AT LINE 219
-                    > USED AT LINE 277
-                    > USED AT LINE 278
+                    > USED AT LINE 220
+                    > USED AT LINE 221
                     > USED AT LINE 279
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 280
+                    > USED AT LINE 281
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 228
-                    > USED AT LINE 229
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 230
                     > USED AT LINE 231
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 232
+                    > USED AT LINE 233
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 216
-                    > USED AT LINE 217
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 218
                     > USED AT LINE 219
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 220
+                    > USED AT LINE 221
                     > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 216
-                    > USED AT LINE 217
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 218
                     > USED AT LINE 219
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 220
+                    > USED AT LINE 221
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 216
-                    > USED AT LINE 217
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 218
                     > USED AT LINE 219
-                    > USED AT LINE 228
-                    > USED AT LINE 229
+                    > USED AT LINE 220
+                    > USED AT LINE 221
                     > USED AT LINE 230
                     > USED AT LINE 231
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 232
+                    > USED AT LINE 233
                     > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 228
-                    > USED AT LINE 229
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 230
                     > USED AT LINE 231
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 232
+                    > USED AT LINE 233
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 222
-                    > USED AT LINE 223
-                    > USED AT LINE 223
-                    > USED AT LINE 224
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 224
                     > USED AT LINE 225
                     > USED AT LINE 225
-                    > USED AT LINE 222
-                    > USED AT LINE 223
-                    > USED AT LINE 223
-                    > USED AT LINE 224
+                    > USED AT LINE 226
+                    > USED AT LINE 226
+                    > USED AT LINE 227
+                    > USED AT LINE 227
                     > USED AT LINE 224
                     > USED AT LINE 225
                     > USED AT LINE 225
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 226
+                    > USED AT LINE 226
+                    > USED AT LINE 227
+                    > USED AT LINE 227
                     > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 222
-                    > USED AT LINE 223
-                    > USED AT LINE 223
-                    > USED AT LINE 224
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 224
                     > USED AT LINE 225
                     > USED AT LINE 225
-                    > USED AT LINE 234
-                    > USED AT LINE 235
+                    > USED AT LINE 226
+                    > USED AT LINE 226
+                    > USED AT LINE 227
+                    > USED AT LINE 227
                     > USED AT LINE 236
                     > USED AT LINE 237
-                    > USED AT LINE 222
-                    > USED AT LINE 223
-                    > USED AT LINE 223
-                    > USED AT LINE 224
+                    > USED AT LINE 238
+                    > USED AT LINE 239
                     > USED AT LINE 224
                     > USED AT LINE 225
                     > USED AT LINE 225
-                    > USED AT LINE 222
-                    > USED AT LINE 223
-                    > USED AT LINE 223
-                    > USED AT LINE 224
+                    > USED AT LINE 226
+                    > USED AT LINE 226
+                    > USED AT LINE 227
+                    > USED AT LINE 227
                     > USED AT LINE 224
                     > USED AT LINE 225
                     > USED AT LINE 225
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 226
+                    > USED AT LINE 226
+                    > USED AT LINE 227
+                    > USED AT LINE 227
                     > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 234
-                    > USED AT LINE 235
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 236
                     > USED AT LINE 237
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 238
+                    > USED AT LINE 239
                     > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 234
-                    > USED AT LINE 235
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 236
                     > USED AT LINE 237
-                    > USED AT LINE 240
-                    > USED AT LINE 241
+                    > USED AT LINE 238
+                    > USED AT LINE 239
                     > USED AT LINE 242
                     > USED AT LINE 243
                     > USED AT LINE 244
                     > USED AT LINE 245
                     > USED AT LINE 246
-                    > USED AT LINE 240
-                    > USED AT LINE 241
+                    > USED AT LINE 247
+                    > USED AT LINE 248
                     > USED AT LINE 242
                     > USED AT LINE 243
                     > USED AT LINE 244
                     > USED AT LINE 245
                     > USED AT LINE 246
-                    > USED AT LINE 249
-                    > USED AT LINE 250
+                    > USED AT LINE 247
+                    > USED AT LINE 248
                     > USED AT LINE 251
                     > USED AT LINE 252
                     > USED AT LINE 253
-                    > USED AT LINE 240
-                    > USED AT LINE 241
+                    > USED AT LINE 254
+                    > USED AT LINE 255
                     > USED AT LINE 242
                     > USED AT LINE 243
                     > USED AT LINE 244
                     > USED AT LINE 245
                     > USED AT LINE 246
-                    > USED AT LINE 228
-                    > USED AT LINE 229
+                    > USED AT LINE 247
+                    > USED AT LINE 248
                     > USED AT LINE 230
                     > USED AT LINE 231
-                    > USED AT LINE 249
-                    > USED AT LINE 250
+                    > USED AT LINE 232
+                    > USED AT LINE 233
                     > USED AT LINE 251
                     > USED AT LINE 252
                     > USED AT LINE 253
-                    > USED AT LINE 282
-                    > USED AT LINE 282
-                    > USED AT LINE 283
-                    > USED AT LINE 283
+                    > USED AT LINE 254
+                    > USED AT LINE 255
                     > USED AT LINE 284
                     > USED AT LINE 284
                     > USED AT LINE 285
                     > USED AT LINE 285
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 286
+                    > USED AT LINE 286
+                    > USED AT LINE 287
+                    > USED AT LINE 287
                     > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 216
-                    > USED AT LINE 217
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 218
                     > USED AT LINE 219
-                    > USED AT LINE 234
-                    > USED AT LINE 235
+                    > USED AT LINE 220
+                    > USED AT LINE 221
                     > USED AT LINE 236
                     > USED AT LINE 237
-                    > USED AT LINE 240
-                    > USED AT LINE 241
+                    > USED AT LINE 238
+                    > USED AT LINE 239
                     > USED AT LINE 242
                     > USED AT LINE 243
                     > USED AT LINE 244
                     > USED AT LINE 245
                     > USED AT LINE 246
-                    > USED AT LINE 240
-                    > USED AT LINE 241
+                    > USED AT LINE 247
+                    > USED AT LINE 248
                     > USED AT LINE 242
                     > USED AT LINE 243
                     > USED AT LINE 244
                     > USED AT LINE 245
                     > USED AT LINE 246
-                    > USED AT LINE 240
-                    > USED AT LINE 241
+                    > USED AT LINE 247
+                    > USED AT LINE 248
                     > USED AT LINE 242
                     > USED AT LINE 243
                     > USED AT LINE 244
                     > USED AT LINE 245
                     > USED AT LINE 246
-                    > USED AT LINE 234
-                    > USED AT LINE 235
+                    > USED AT LINE 247
+                    > USED AT LINE 248
                     > USED AT LINE 236
                     > USED AT LINE 237
-                    > USED AT LINE 282
-                    > USED AT LINE 282
-                    > USED AT LINE 283
-                    > USED AT LINE 283
+                    > USED AT LINE 238
+                    > USED AT LINE 239
                     > USED AT LINE 284
                     > USED AT LINE 284
                     > USED AT LINE 285
                     > USED AT LINE 285
-                    > USED AT LINE 240
-                    > USED AT LINE 241
+                    > USED AT LINE 286
+                    > USED AT LINE 286
+                    > USED AT LINE 287
+                    > USED AT LINE 287
                     > USED AT LINE 242
                     > USED AT LINE 243
                     > USED AT LINE 244
                     > USED AT LINE 245
                     > USED AT LINE 246
-                    > USED AT LINE 234
-                    > USED AT LINE 235
+                    > USED AT LINE 247
+                    > USED AT LINE 248
                     > USED AT LINE 236
                     > USED AT LINE 237
-                    > USED AT LINE 234
-                    > USED AT LINE 235
+                    > USED AT LINE 238
+                    > USED AT LINE 239
                     > USED AT LINE 236
                     > USED AT LINE 237
-                    > USED AT LINE 240
-                    > USED AT LINE 241
+                    > USED AT LINE 238
+                    > USED AT LINE 239
                     > USED AT LINE 242
                     > USED AT LINE 243
                     > USED AT LINE 244
                     > USED AT LINE 245
                     > USED AT LINE 246
-                    > USED AT LINE 234
-                    > USED AT LINE 235
+                    > USED AT LINE 247
+                    > USED AT LINE 248
                     > USED AT LINE 236
                     > USED AT LINE 237
-                    > USED AT LINE 228
-                    > USED AT LINE 229
+                    > USED AT LINE 238
+                    > USED AT LINE 239
                     > USED AT LINE 230
                     > USED AT LINE 231
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 232
+                    > USED AT LINE 233
                     > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 234
-                    > USED AT LINE 235
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 236
                     > USED AT LINE 237
-                    > USED AT LINE 234
-                    > USED AT LINE 235
+                    > USED AT LINE 238
+                    > USED AT LINE 239
                     > USED AT LINE 236
                     > USED AT LINE 237
-CHECKED:            0001 DEFINED AT LINE 29
-                    > USED AT LINE 37
-                    > USED AT LINE 38
-                    > USED AT LINE 41
-                    > USED AT LINE 41
-                    > USED AT LINE 46
-EDITOR:             0001 DEFINED AT LINE 30
-                    > USED AT LINE 34
-                    > USED AT LINE 38
-                    > USED AT LINE 41
-                    > USED AT LINE 41
-ANSI:               0000 DEFINED AT LINE 31
-                    > USED AT LINE 33
-                    > USED AT LINE 33
-FAST:               0000 DEFINED AT LINE 32
-                    > USED AT LINE 41
-                    > USED AT LINE 46
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 238
+                    > USED AT LINE 239
+CHECKED:            0001 DEFINED AT LINE 34
+                    > USED AT LINE 43
+                    > USED AT LINE 44
+                    > USED AT LINE 48
+EDITOR:             0001 DEFINED AT LINE 35
+                    > USED AT LINE 40
+                    > USED AT LINE 44
+ANSI:               0000 DEFINED AT LINE 36
+                    > USED AT LINE 39
+                    > USED AT LINE 39
+QUICK:              0000 DEFINED AT LINE 37
+                    > USED AT LINE 47
+                    > USED AT LINE 47
+FAST:               0000 DEFINED AT LINE 38
+                    > USED AT LINE 47
+                    > USED AT LINE 47
+                    > USED AT LINE 48
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 222
-                    > USED AT LINE 223
-                    > USED AT LINE 223
-                    > USED AT LINE 224
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 224
                     > USED AT LINE 225
                     > USED AT LINE 225
-                    > USED AT LINE 222
-                    > USED AT LINE 223
-                    > USED AT LINE 223
-                    > USED AT LINE 224
+                    > USED AT LINE 226
+                    > USED AT LINE 226
+                    > USED AT LINE 227
+                    > USED AT LINE 227
                     > USED AT LINE 224
                     > USED AT LINE 225
                     > USED AT LINE 225
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 226
+                    > USED AT LINE 226
+                    > USED AT LINE 227
+                    > USED AT LINE 227
                     > USED AT LINE 258
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
+                    > USED AT LINE 224
+                    > USED AT LINE 225
+                    > USED AT LINE 225
+                    > USED AT LINE 226
+                    > USED AT LINE 226
+                    > USED AT LINE 227
+                    > USED AT LINE 227
+                    > USED AT LINE 224
+                    > USED AT LINE 225
+                    > USED AT LINE 225
+                    > USED AT LINE 226
+                    > USED AT LINE 226
+                    > USED AT LINE 227
+                    > USED AT LINE 227
+                    > USED AT LINE 224
+                    > USED AT LINE 225
+                    > USED AT LINE 225
+                    > USED AT LINE 226
+                    > USED AT LINE 226
+                    > USED AT LINE 227
+                    > USED AT LINE 227
                     > USED AT LINE 258
-                    > USED AT LINE 222
-                    > USED AT LINE 223
-                    > USED AT LINE 223
-                    > USED AT LINE 224
-                    > USED AT LINE 224
-                    > USED AT LINE 225
-                    > USED AT LINE 225
-                    > USED AT LINE 222
-                    > USED AT LINE 223
-                    > USED AT LINE 223
-                    > USED AT LINE 224
-                    > USED AT LINE 224
-                    > USED AT LINE 225
-                    > USED AT LINE 225
-                    > USED AT LINE 222
-                    > USED AT LINE 223
-                    > USED AT LINE 223
-                    > USED AT LINE 224
-                    > USED AT LINE 224
-                    > USED AT LINE 225
-                    > USED AT LINE 225
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
-                    > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 282
-                    > USED AT LINE 282
-                    > USED AT LINE 283
-                    > USED AT LINE 283
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 284
                     > USED AT LINE 284
                     > USED AT LINE 285
                     > USED AT LINE 285
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 286
+                    > USED AT LINE 286
+                    > USED AT LINE 287
+                    > USED AT LINE 287
                     > USED AT LINE 258
-                    > USED AT LINE 258
-                    > USED AT LINE 282
-                    > USED AT LINE 282
-                    > USED AT LINE 283
-                    > USED AT LINE 283
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
                     > USED AT LINE 284
                     > USED AT LINE 284
                     > USED AT LINE 285
                     > USED AT LINE 285
-                    > USED AT LINE 256
-                    > USED AT LINE 257
-                    > USED AT LINE 257
+                    > USED AT LINE 286
+                    > USED AT LINE 286
+                    > USED AT LINE 287
+                    > USED AT LINE 287
                     > USED AT LINE 258
-                    > USED AT LINE 258
-ANS:                0001 DEFINED AT LINE 33
-                    > USED AT LINE 38
-EDGEN:              0000 DEFINED AT LINE 34
-                    > USED AT LINE 37
-TABP0:              0000 DEFINED AT LINE 37
-PTLATE:             0001 DEFINED AT LINE 38
-QUICK:              0000 DEFINED AT LINE 41
-                    > USED AT LINE 46
-                    > USED AT LINE 4009
-QUICKU:             0000 DEFINED AT LINE 46
-BDOS:               0005 DEFINED AT LINE 103
-                    > USED AT LINE 2056
-                    > USED AT LINE 2857
-                    > USED AT LINE 2904
-BASE:               0100 DEFINED AT LINE 104
-                    > USED AT LINE 293
-                    > USED AT LINE 1885
-                    > USED AT LINE 1886
-                    > USED AT LINE 1887
-                    > USED AT LINE 1888
-LEAVE:              0000 DEFINED AT LINE 144
-                    > USED AT LINE 2577
-EXIT:               0689 DEFINED AT LINE 147
-                    > USED AT LINE 374
-SKEND:              0688 DEFINED AT LINE 2444
-                    > USED AT LINE 148
-                    > USED AT LINE 1502
-MSLOOP:             0004 DEFINED AT LINE 154
-                    > USED AT LINE 971
-                    > USED AT LINE 1977
-                    > USED AT LINE 2401
-LET:                0B00 DEFINED AT LINE 163
-                    > USED AT LINE 164
-                    > USED AT LINE 165
-                    > USED AT LINE 168
-                    > USED AT LINE 169
+                    > USED AT LINE 259
+                    > USED AT LINE 259
+                    > USED AT LINE 260
+                    > USED AT LINE 260
+ANS:                0001 DEFINED AT LINE 39
+                    > USED AT LINE 44
+EDGEN:              0000 DEFINED AT LINE 40
+                    > USED AT LINE 43
+TABP0:              0000 DEFINED AT LINE 43
+PTLATE:             0001 DEFINED AT LINE 44
+QK:                 0000 DEFINED AT LINE 47
+                    > USED AT LINE 48
+                    > USED AT LINE 4047
+QUICKU:             0000 DEFINED AT LINE 48
+BDOS:               0005 DEFINED AT LINE 105
+                    > USED AT LINE 2090
+                    > USED AT LINE 2891
+                    > USED AT LINE 2938
+BASE:               0100 DEFINED AT LINE 106
+                    > USED AT LINE 295
+                    > USED AT LINE 1919
+                    > USED AT LINE 1920
+                    > USED AT LINE 1921
+                    > USED AT LINE 1922
+LEAVE:              0000 DEFINED AT LINE 146
+                    > USED AT LINE 2611
+EXIT:               0689 DEFINED AT LINE 149
+                    > USED AT LINE 384
+SKEND:              0688 DEFINED AT LINE 2478
+                    > USED AT LINE 150
+                    > USED AT LINE 1532
+MSLOOP:             0004 DEFINED AT LINE 156
+                    > USED AT LINE 981
+                    > USED AT LINE 2011
+                    > USED AT LINE 2435
+LET:                0B00 DEFINED AT LINE 165
+                    > USED AT LINE 166
+                    > USED AT LINE 167
                     > USED AT LINE 170
+                    > USED AT LINE 171
                     > USED AT LINE 172
                     > USED AT LINE 174
                     > USED AT LINE 176
                     > USED AT LINE 178
-                    > USED AT LINE 322
-HEAP:               0B7C DEFINED AT LINE 164
-                    > USED AT LINE 574
-                    > USED AT LINE 582
-                    > USED AT LINE 2678
-RSAVE:              0B34 DEFINED AT LINE 165
-                    > USED AT LINE 951
-                    > USED AT LINE 2031
-                    > USED AT LINE 2033
-                    > USED AT LINE 2193
-PCNT:               0B36 DEFINED AT LINE 168
-                    > USED AT LINE 641
-SKPL:               0B3C DEFINED AT LINE 169
-                    > USED AT LINE 1471
-                    > USED AT LINE 1503
-NPEND:              0B38 DEFINED AT LINE 170
-                    > USED AT LINE 2142
-                    > USED AT LINE 2685
-EDLN:               0B3A DEFINED AT LINE 172
-                    > USED AT LINE 2451
-                    > USED AT LINE 2594
-                    > USED AT LINE 2616
-KEYBUF:             0B7A DEFINED AT LINE 174
-                    > USED AT LINE 1966
-                    > USED AT LINE 1989
-                    > USED AT LINE 1995
-                    > USED AT LINE 2450
-BRKOFF:             0B7B DEFINED AT LINE 176
-                    > USED AT LINE 1973
-LINEBUF:            0B80 DEFINED AT LINE 178
-                    > USED AT LINE 1001
-                    > USED AT LINE 1022
-                    > USED AT LINE 2223
-                    > USED AT LINE 2452
-                    > USED AT LINE 2491
-                    > USED AT LINE 2595
-                    > USED AT LINE 2870
-RSTOP:              09E0 DEFINED AT LINE 179
-                    > USED AT LINE 2089
-                    > USED AT LINE 2091
-                    > USED AT LINE 2294
-                    > USED AT LINE 2447
-DSTOP:              0AFC DEFINED AT LINE 181
-                    > USED AT LINE 298
-                    > USED AT LINE 1098
-                    > USED AT LINE 2077
-                    > USED AT LINE 2098
-                    > USED AT LINE 2262
-                    > USED AT LINE 2432
-AROP:               04DF DEFINED AT LINE 195
-                    > USED AT LINE 218
-                    > USED AT LINE 219
-                    > USED AT LINE 218
-                    > USED AT LINE 219
-                    > USED AT LINE 218
-                    > USED AT LINE 219
-                    > USED AT LINE 218
-                    > USED AT LINE 219
-                    > USED AT LINE 218
-                    > USED AT LINE 219
-ANEG:               04EA DEFINED AT LINE 196
-                    > USED AT LINE 230
-                    > USED AT LINE 231
-                    > USED AT LINE 230
-                    > USED AT LINE 231
-                    > USED AT LINE 230
-                    > USED AT LINE 231
-                    > USED AT LINE 230
-                    > USED AT LINE 231
-                    > USED AT LINE 230
-                    > USED AT LINE 231
-APUT:               050B DEFINED AT LINE 197
-                    > USED AT LINE 236
-                    > USED AT LINE 237
-                    > USED AT LINE 236
-                    > USED AT LINE 237
-                    > USED AT LINE 236
-                    > USED AT LINE 237
-                    > USED AT LINE 252
-                    > USED AT LINE 253
-                    > USED AT LINE 252
-                    > USED AT LINE 253
-                    > USED AT LINE 236
-                    > USED AT LINE 237
-                    > USED AT LINE 236
-                    > USED AT LINE 237
-                    > USED AT LINE 236
-                    > USED AT LINE 237
-                    > USED AT LINE 236
-                    > USED AT LINE 237
-                    > USED AT LINE 236
-                    > USED AT LINE 237
-                    > USED AT LINE 236
-                    > USED AT LINE 237
-                    > USED AT LINE 236
-                    > USED AT LINE 237
-APTK:               0507 DEFINED AT LINE 198
-                    > USED AT LINE 244
-                    > USED AT LINE 245
-                    > USED AT LINE 244
-                    > USED AT LINE 245
-                    > USED AT LINE 244
-                    > USED AT LINE 245
-                    > USED AT LINE 244
-                    > USED AT LINE 245
-                    > USED AT LINE 244
-                    > USED AT LINE 245
-                    > USED AT LINE 244
-                    > USED AT LINE 245
-                    > USED AT LINE 244
-                    > USED AT LINE 245
-                    > USED AT LINE 244
-                    > USED AT LINE 245
-ANXT:               0120 DEFINED AT LINE 202
-                    > USED AT LINE 284
-                    > USED AT LINE 285
-                    > USED AT LINE 284
-                    > USED AT LINE 285
-ACHK:               0521 DEFINED AT LINE 204
-DTPG:               0000 DEFINED AT LINE 213
-INI1:               0107 DEFINED AT LINE 324
-                    > USED AT LINE 326
-H_FROMR:            0112 DEFINED AT LINE 347
-                    > USED AT LINE 461
-CTL:                0119 DEFINED AT LINE 372
-                    > USED AT LINE 400
-ENDPROG:            011D DEFINED AT LINE 374
-NEXT0:              0120 DEFINED AT LINE 391
-                    > USED AT LINE 202
-                    > USED AT LINE 373
-                    > USED AT LINE 421
-P5B:                014E DEFINED AT LINE 426
-                    > USED AT LINE 412
-P3A:                0150 DEFINED AT LINE 427
-                    > USED AT LINE 407
-PUNCT:              0152 DEFINED AT LINE 468
-                    > USED AT LINE 402
-PU1:                0160 DEFINED AT LINE 485
-                    > USED AT LINE 483
-H_XOR:              0162 DEFINED AT LINE 550
-                    > USED AT LINE 456
-H_OR:               016B DEFINED AT LINE 559
-                    > USED AT LINE 460
-H_NOT:              0174 DEFINED AT LINE 228
-                    > USED AT LINE 462
-H_ALLOC:            017A DEFINED AT LINE 574
-                    > USED AT LINE 457
-DIGIT:              0189 DEFINED AT LINE 599
-                    > USED AT LINE 405
-LOWER:              0190 DEFINED AT LINE 607
-                    > USED AT LINE 414
-UPPER:              0197 DEFINED AT LINE 619
-                    > USED AT LINE 410
-RPUSHN:             01A1 DEFINED AT LINE 635
-                    > USED AT LINE 648
-                    > USED AT LINE 755
-                    > USED AT LINE 776
-H_TOR:              01B7 DEFINED AT LINE 647
-                    > USED AT LINE 459
-JPHL:               01BA DEFINED AT LINE 649
-                    > USED AT LINE 2032
-H_GRAVE:            01BB DEFINED AT LINE 658
-                    > USED AT LINE 458
-HX1:                01C1 DEFINED AT LINE 665
-                    > USED AT LINE 671
-HX2:                01CF DEFINED AT LINE 672
-                    > USED AT LINE 667
-H_RET:              01D3 DEFINED AT LINE 216
-                    > USED AT LINE 695
-                    > USED AT LINE 1885
-                    > USED AT LINE 455
-BRK1:               01D8 DEFINED AT LINE 256
-                    > USED AT LINE 692
-H_BREAK:            01DA DEFINED AT LINE 689
-                    > USED AT LINE 1886
-                    > USED AT LINE 454
-RDROP:              01E5 DEFINED AT LINE 216
-                    > USED AT LINE 762
-H_DEF:              01EA DEFINED AT LINE 704
-                    > USED AT LINE 1887
-                    > USED AT LINE 453
-DEF2:               0200 DEFINED AT LINE 719
-                    > USED AT LINE 710
-SKIPNX:             0209 DEFINED AT LINE 728
-                    > USED AT LINE 718
-SKIPO:              020A DEFINED AT LINE 732
-                    > USED AT LINE 753
-H_FETCH:            020F DEFINED AT LINE 735
-                    > USED AT LINE 1888
-                    > USED AT LINE 452
-H_OPEN:             0215 DEFINED AT LINE 750
-                    > USED AT LINE 438
-H_CLOSE:            021D DEFINED AT LINE 759
-                    > USED AT LINE 439
-H_SUB:              022B DEFINED AT LINE 782
-                    > USED AT LINE 443
-H_ADD:              0235 DEFINED AT LINE 787
-                    > USED AT LINE 441
-NEGNUM:             0239 DEFINED AT LINE 790
-                    > USED AT LINE 785
-H_AND:              0242 DEFINED AT LINE 795
-                    > USED AT LINE 436
-H_LT:               024B DEFINED AT LINE 809
-                    > USED AT LINE 448
-H_GT:               024C DEFINED AT LINE 810
-                    > USED AT LINE 450
-TF:                 0257 DEFINED AT LINE 818
-                    > USED AT LINE 827
-H_EQ:               025B DEFINED AT LINE 821
-                    > USED AT LINE 449
-H_MUL:              0265 DEFINED AT LINE 832
-                    > USED AT LINE 440
-MUL1:               026E DEFINED AT LINE 838
-                    > USED AT LINE 843
-MUL2:               0275 DEFINED AT LINE 843
-                    > USED AT LINE 841
-H_DIV:              027A DEFINED AT LINE 856
-                    > USED AT LINE 445
-H_DUP:              029F DEFINED AT LINE 884
-                    > USED AT LINE 446
-H_SWAP:             02A2 DEFINED AT LINE 887
-                    > USED AT LINE 435
-H_CSTORE:           02A5 DEFINED AT LINE 892
-                    > USED AT LINE 444
-H_DROP:             02AA DEFINED AT LINE 222
-                    > USED AT LINE 447
-H_STORE:            02AD DEFINED AT LINE 900
-                    > USED AT LINE 431
-H_STR:              02B7 DEFINED AT LINE 914
-                    > USED AT LINE 432
-H_PRINT:            02C3 DEFINED AT LINE 951
-                    > USED AT LINE 434
-HP1:                02C6 DEFINED AT LINE 952
-                    > USED AT LINE 1050
-H_EMIT:             02CC DEFINED AT LINE 956
-                    > USED AT LINE 437
-PR9:                02D0 DEFINED AT LINE 222
-H_NUM:              02D3 DEFINED AT LINE 961
-                    > USED AT LINE 433
-H_KEY:              02D9 DEFINED AT LINE 969
-                    > USED AT LINE 451
-KT1:                02DD DEFINED AT LINE 971
-                    > USED AT LINE 978
-                    > USED AT LINE 982
-KT2:                02DF DEFINED AT LINE 972
-                    > USED AT LINE 975
-H_CFETCH:           02F1 DEFINED AT LINE 984
-                    > USED AT LINE 442
-KT3:                02F2 DEFINED AT LINE 985
-                    > USED AT LINE 973
-LINE:               02F7 DEFINED AT LINE 994
-                    > USED AT LINE 970
-LN2:                0302 DEFINED AT LINE 1002
-                    > USED AT LINE 1003
-                    > USED AT LINE 1011
-                    > USED AT LINE 1016
-                    > USED AT LINE 1020
-LN3:                0317 DEFINED AT LINE 234
-                    > USED AT LINE 1018
-LN4:                031C DEFINED AT LINE 1017
-                    > USED AT LINE 1007
-LN5:                0323 DEFINED AT LINE 1021
-                    > USED AT LINE 1005
-PRSTR:              0328 DEFINED AT LINE 1032
-                    > USED AT LINE 952
-                    > USED AT LINE 1048
-                    > USED AT LINE 1049
-                    > USED AT LINE 1057
-PRS0:               033F DEFINED AT LINE 1046
-                    > USED AT LINE 1043
-PRS1:               0341 DEFINED AT LINE 234
-                    > USED AT LINE 1039
-PRLOOP:             0328 DEFINED AT LINE 1049
-                    > USED AT LINE 1072
-PRAGAIN:            02C6 DEFINED AT LINE 1050
-                    > USED AT LINE 1129
-PNL:                0346 DEFINED AT LINE 1054
-                    > USED AT LINE 2213
-                    > USED AT LINE 2260
-                    > USED AT LINE 2290
-                    > USED AT LINE 2299
-PMSG:               034C DEFINED AT LINE 1056
-                    > USED AT LINE 1054
-                    > USED AT LINE 1139
-                    > USED AT LINE 1155
-                    > USED AT LINE 2217
-                    > USED AT LINE 2270
-PESC:               0352 DEFINED AT LINE 1070
-                    > USED AT LINE 1045
-PAT:                0372 DEFINED AT LINE 1095
-                    > USED AT LINE 1071
-PSHOW:              0396 DEFINED AT LINE 1132
-                    > USED AT LINE 1146
-                    > USED AT LINE 2436
-PHIDE:              0399 DEFINED AT LINE 1134
-                    > USED AT LINE 1077
-PSE:                03A4 DEFINED AT LINE 1141
-                    > USED AT LINE 1154
-PCON:               03A8 DEFINED AT LINE 1145
-                    > USED AT LINE 1075
-CSE:                03B7 DEFINED AT LINE 1153
-                    > USED AT LINE 1148
-                    > USED AT LINE 1150
-CSI:                03BC DEFINED AT LINE 1155
-                    > USED AT LINE 1120
-                    > USED AT LINE 1153
-UDIV:               03C3 DEFINED AT LINE 1190
-                    > USED AT LINE 872
-                    > USED AT LINE 1919
-UDV0:               03D0 DEFINED AT LINE 1247
-                    > USED AT LINE 1193
-UDV1:               03D8 DEFINED AT LINE 1252
-                    > USED AT LINE 1260
-UDV2:               03E3 DEFINED AT LINE 1259
-                    > USED AT LINE 1256
-RDNUM:              03EB DEFINED AT LINE 1410
-                    > USED AT LINE 601
-                    > USED AT LINE 791
-                    > USED AT LINE 2587
-                    > USED AT LINE 2624
-                    > USED AT LINE 2692
-RDN1:               03EE DEFINED AT LINE 1411
-                    > USED AT LINE 1425
-SKIPSTR:            0401 DEFINED AT LINE 1442
-                    > USED AT LINE 917
-                    > USED AT LINE 1449
-                    > USED AT LINE 1454
-                    > USED AT LINE 1483
-SKIP:               0412 DEFINED AT LINE 1471
-                    > USED AT LINE 693
-                    > USED AT LINE 732
-SK3:                041C DEFINED AT LINE 1477
-                    > USED AT LINE 1485
-                    > USED AT LINE 1489
-SK1:                041D DEFINED AT LINE 1478
-                    > USED AT LINE 1491
-                    > USED AT LINE 1493
-SK4:                0436 DEFINED AT LINE 1492
-                    > USED AT LINE 1487
-SK6:                0443 DEFINED AT LINE 1501
-                    > USED AT LINE 1480
-SK7:                0448 DEFINED AT LINE 1503
-                    > USED AT LINE 1500
-PGRET:              0000 DEFINED AT LINE 1885
-                    > USED AT LINE 1889
-PGBRK:              0000 DEFINED AT LINE 1886
-                    > USED AT LINE 1889
-PGDEF:              0000 DEFINED AT LINE 1887
-                    > USED AT LINE 1889
-PGFET:              0001 DEFINED AT LINE 1888
-                    > USED AT LINE 1889
-NPG1:               0016 DEFINED AT LINE 1889
-                    > USED AT LINE 471
-HEXC:               0451 DEFINED AT LINE 1899
-                    > USED AT LINE 658
-                    > USED AT LINE 666
-                    > USED AT LINE 670
-HC1:                0461 DEFINED AT LINE 1908
-                    > USED AT LINE 1902
-PSGN:               0463 DEFINED AT LINE 1912
-                    > USED AT LINE 961
-                    > USED AT LINE 1087
-                    > USED AT LINE 2287
-PDEC:               046E DEFINED AT LINE 1918
-                    > USED AT LINE 1122
-                    > USED AT LINE 1126
-                    > USED AT LINE 1913
-                    > USED AT LINE 1924
-                    > USED AT LINE 2247
-                    > USED AT LINE 2254
-                    > USED AT LINE 2313
+                    > USED AT LINE 180
+                    > USED AT LINE 332
+HEAP:               0B7C DEFINED AT LINE 166
+                    > USED AT LINE 584
+                    > USED AT LINE 592
                     > USED AT LINE 2712
-PTPH:               0081 DEFINED AT LINE 1933
-                    > USED AT LINE 1934
-                    > USED AT LINE 1935
-PTPX:               0000 DEFINED AT LINE 1934
-                    > USED AT LINE 1935
-PTPAD:              0000 DEFINED AT LINE 1935
-                    > USED AT LINE 1936
-PTAB:               0481 DEFINED AT LINE 1937
-                    > USED AT LINE 468
-                    > USED AT LINE 470
-                    > USED AT LINE 471
-PTABEND:            04A1 DEFINED AT LINE 1939
-POLLK:              04A1 DEFINED AT LINE 1964
-                    > USED AT LINE 644
-PK1:                04A8 DEFINED AT LINE 1967
-                    > USED AT LINE 2003
-CTLC:               04AB DEFINED AT LINE 1973
-CT0:                04AF DEFINED AT LINE 1975
-                    > USED AT LINE 1986
-CT1:                04B6 DEFINED AT LINE 1978
-                    > USED AT LINE 1983
-CT2:                04C0 DEFINED AT LINE 1984
-                    > USED AT LINE 1979
-CT3:                04CB DEFINED AT LINE 1990
-                    > USED AT LINE 1988
-GETK:               04CF DEFINED AT LINE 1994
-                    > USED AT LINE 972
-                    > USED AT LINE 1002
-BRK:                0588 DEFINED AT LINE 2011
-                    > USED AT LINE 1975
-RPOP:               04DF DEFINED AT LINE 2017
-                    > USED AT LINE 195
-NEG16:              04EA DEFINED AT LINE 2022
-                    > USED AT LINE 196
-                    > USED AT LINE 868
-                    > USED AT LINE 871
-                    > USED AT LINE 874
-                    > USED AT LINE 878
-EXEC:               04F1 DEFINED AT LINE 2031
-                    > USED AT LINE 663
-RAWK:               0503 DEFINED AT LINE 2039
-                    > USED AT LINE 1964
-                    > USED AT LINE 1978
-                    > USED AT LINE 2001
-                    > USED AT LINE 2402
-                    > USED AT LINE 2557
-                    > USED AT LINE 2703
-PUTK:               0507 DEFINED AT LINE 2041
-                    > USED AT LINE 198
-PUTC:               050B DEFINED AT LINE 2049
-                    > USED AT LINE 197
-                    > USED AT LINE 2040
-CHKSTK:             0521 DEFINED AT LINE 2076
-                    > USED AT LINE 204
-                    > USED AT LINE 394
-                    > USED AT LINE 2191
-E_ROVER:            0540 DEFINED AT LINE 2094
-                    > USED AT LINE 2088
-E_OVER:             0543 DEFINED AT LINE 2096
-                    > USED AT LINE 2082
-E_UNDER:            0547 DEFINED AT LINE 2098
-                    > USED AT LINE 1100
-                    > USED AT LINE 2080
-E_HI:               054E DEFINED AT LINE 2106
-                    > USED AT LINE 422
-CHKHP:              055A DEFINED AT LINE 2117
-                    > USED AT LINE 580
-E_HEAP:             0570 DEFINED AT LINE 2147
-                    > USED AT LINE 2126
-                    > USED AT LINE 2130
-CHKST:              0577 DEFINED AT LINE 2159
-                    > USED AT LINE 894
-                    > USED AT LINE 902
-E_STORE:            0585 DEFINED AT LINE 2179
-                    > USED AT LINE 2163
-E_BREAK:            0588 DEFINED AT LINE 2181
-                    > USED AT LINE 2011
-ERRP:               058A DEFINED AT LINE 2183
-                    > USED AT LINE 1505
-                    > USED AT LINE 2093
-                    > USED AT LINE 2097
-                    > USED AT LINE 2150
-E_DOLLAR:           058D DEFINED AT LINE 2189
-                    > USED AT LINE 1037
-E_QUOTE:            0597 DEFINED AT LINE 2195
-                    > USED AT LINE 920
-E_RESV:             059C DEFINED AT LINE 2199
-                    > USED AT LINE 2107
-E_ZERO:             059F DEFINED AT LINE 2201
-                    > USED AT LINE 860
-E_BRACK:            05A2 DEFINED AT LINE 2203
-                    > USED AT LINE 723
-ERROR:              05A4 DEFINED AT LINE 2211
-                    > USED AT LINE 2100
-                    > USED AT LINE 2112
-                    > USED AT LINE 2184
-ER1:                05C7 DEFINED AT LINE 2230
-                    > USED AT LINE 2242
-ER2:                05C9 DEFINED AT LINE 2232
-                    > USED AT LINE 2240
-ER2X:               05D8 DEFINED AT LINE 2243
-                    > USED AT LINE 2236
-ER3:                05D9 DEFINED AT LINE 2244
+RSAVE:              0B34 DEFINED AT LINE 167
+                    > USED AT LINE 961
+                    > USED AT LINE 2065
+                    > USED AT LINE 2067
                     > USED AT LINE 2227
-ER6:                060D DEFINED AT LINE 2273
-                    > USED AT LINE 2269
-ER7:                0613 DEFINED AT LINE 2278
-                    > USED AT LINE 2289
-ER8:                0626 DEFINED AT LINE 2290
-                    > USED AT LINE 2279
-PHALF:              063E DEFINED AT LINE 2310
-                    > USED AT LINE 2265
-                    > USED AT LINE 2298
-RIGHT:              0648 DEFINED AT LINE 2391
-                    > USED AT LINE 2416
-ESC:                0650 DEFINED AT LINE 2401
-                    > USED AT LINE 2464
-ES1:                0653 DEFINED AT LINE 2402
-                    > USED AT LINE 2407
-ES2:                0662 DEFINED AT LINE 2410
-                    > USED AT LINE 2403
-ES3:                0666 DEFINED AT LINE 2412
-                    > USED AT LINE 2414
-LEFT:               0674 DEFINED AT LINE 2420
-LF1:                067B DEFINED AT LINE 234
-                    > USED AT LINE 2396
-EDIT0:              0680 DEFINED AT LINE 2432
-                    > USED AT LINE 330
-                    > USED AT LINE 2306
-EDEND:              0689 DEFINED AT LINE 2445
-                    > USED AT LINE 147
-EDIT:               068A DEFINED AT LINE 2447
-                    > USED AT LINE 2409
-                    > USED AT LINE 2666
-                    > USED AT LINE 2850
-                    > USED AT LINE 2909
-ED1:                069F DEFINED AT LINE 2454
-                    > USED AT LINE 2393
-                    > USED AT LINE 2411
-                    > USED AT LINE 2418
-                    > USED AT LINE 2422
-                    > USED AT LINE 2426
-                    > USED AT LINE 2475
-                    > USED AT LINE 2499
-                    > USED AT LINE 2522
-                    > USED AT LINE 2538
-                    > USED AT LINE 2610
-ED2:                06BC DEFINED AT LINE 2468
-                    > USED AT LINE 2473
-ED3:                06C7 DEFINED AT LINE 2476
-                    > USED AT LINE 2470
-FIN:                06CC DEFINED AT LINE 2483
-                    > USED AT LINE 2408
-BSP:                06DE DEFINED AT LINE 2497
-                    > USED AT LINE 2456
-                    > USED AT LINE 2462
-BS1:                06E8 DEFINED AT LINE 2503
-                    > USED AT LINE 2510
-INSC:               06F9 DEFINED AT LINE 2519
-                    > USED AT LINE 2458
-                    > USED AT LINE 2460
-IC1:                0704 DEFINED AT LINE 2526
-                    > USED AT LINE 2532
-IC2:                0710 DEFINED AT LINE 2537
-                    > USED AT LINE 2516
-TAIL:               0715 DEFINED AT LINE 2541
-                    > USED AT LINE 2537
-TA1:                0716 DEFINED AT LINE 2542
-                    > USED AT LINE 2548
-TA2:                0721 DEFINED AT LINE 2549
-                    > USED AT LINE 2544
-                    > USED AT LINE 2554
-EKEY:               072B DEFINED AT LINE 2557
-                    > USED AT LINE 2412
-                    > USED AT LINE 2454
-                    > USED AT LINE 2558
-                    > USED AT LINE 2706
-CMDS:               0731 DEFINED AT LINE 2562
-                    > USED AT LINE 2466
-NCMD:               0008 DEFINED AT LINE 2578
-                    > USED AT LINE 2467
-CNEW:               0749 DEFINED AT LINE 2581
-                    > USED AT LINE 2575
-GED0:               074D DEFINED AT LINE 2583
-                    > USED AT LINE 2593
-CEDLN:              074F DEFINED AT LINE 2587
-                    > USED AT LINE 2569
-CE1:                0762 DEFINED AT LINE 2596
-                    > USED AT LINE 2607
-CE2:                0776 DEFINED AT LINE 2608
-                    > USED AT LINE 2598
-                    > USED AT LINE 2600
-CRET:               077B DEFINED AT LINE 2615
-                    > USED AT LINE 2563
-CR1:                078A DEFINED AT LINE 2624
-                    > USED AT LINE 2619
-CR2:                079C DEFINED AT LINE 2634
-                    > USED AT LINE 2630
-INS:                079D DEFINED AT LINE 2638
-                    > USED AT LINE 2623
-GEDIT:              07C0 DEFINED AT LINE 2666
-                    > USED AT LINE 2583
-                    > USED AT LINE 2633
-                    > USED AT LINE 2702
-                    > USED AT LINE 2708
-CRUN:               07C3 DEFINED AT LINE 2669
-                    > USED AT LINE 2565
-ST0P:               07C7 DEFINED AT LINE 2671
-                    > USED AT LINE 2627
-ST0:                07C8 DEFINED AT LINE 2673
-ST1:                07CC DEFINED AT LINE 2675
-                    > USED AT LINE 2677
-CLIST:              07DC DEFINED AT LINE 2692
-                    > USED AT LINE 2567
-LI0:                07E4 DEFINED AT LINE 2697
-                    > USED AT LINE 2695
-LI1:                07E9 DEFINED AT LINE 2700
+PCNT:               0B36 DEFINED AT LINE 170
+                    > USED AT LINE 651
+SKPL:               0B3C DEFINED AT LINE 171
+                    > USED AT LINE 1484
+                    > USED AT LINE 1533
+NPEND:              0B38 DEFINED AT LINE 172
+                    > USED AT LINE 2176
                     > USED AT LINE 2719
-LI3:                07FB DEFINED AT LINE 2709
-                    > USED AT LINE 2704
-DELLN:              080E DEFINED AT LINE 2722
-                    > USED AT LINE 2621
-                    > USED AT LINE 2632
-DE1:                0816 DEFINED AT LINE 2726
-                    > USED AT LINE 2731
-FIND:               081E DEFINED AT LINE 2736
-                    > USED AT LINE 2589
-                    > USED AT LINE 2638
-                    > USED AT LINE 2698
-                    > USED AT LINE 2722
-FI1:                0822 DEFINED AT LINE 2738
-                    > USED AT LINE 2743
-NXL:                082C DEFINED AT LINE 2748
-                    > USED AT LINE 2725
-                    > USED AT LINE 2742
-                    > USED AT LINE 2753
-PRL:                0836 DEFINED AT LINE 2758
-                    > USED AT LINE 2489
-                    > USED AT LINE 2718
-                    > USED AT LINE 2763
-CFCB:               005C DEFINED AT LINE 2813
-                    > USED AT LINE 2874
-                    > USED AT LINE 2880
-                    > USED AT LINE 2887
-                    > USED AT LINE 2895
-                    > USED AT LINE 2903
-CWRITE:             0841 DEFINED AT LINE 2819
-                    > USED AT LINE 2573
-CW1:                0852 DEFINED AT LINE 2826
-                    > USED AT LINE 2828
-CW2:                085A DEFINED AT LINE 2832
-                    > USED AT LINE 2834
-CW3:                0863 DEFINED AT LINE 2837
-                    > USED AT LINE 2846
-CW4:                0872 DEFINED AT LINE 2847
-                    > USED AT LINE 2841
-FREC:               087C DEFINED AT LINE 2854
-                    > USED AT LINE 2844
-                    > USED AT LINE 2921
-SETNAME:            088E DEFINED AT LINE 2870
-                    > USED AT LINE 2819
-                    > USED AT LINE 2908
-SN1:                089D DEFINED AT LINE 2877
-                    > USED AT LINE 2879
-SN2:                08A4 DEFINED AT LINE 2881
-                    > USED AT LINE 2888
-                    > USED AT LINE 2894
-SN3:                08B2 DEFINED AT LINE 2889
-                    > USED AT LINE 2886
-SN4:                08B8 DEFINED AT LINE 2892
-                    > USED AT LINE 2890
-FCBCLR:             08BC DEFINED AT LINE 2895
-                    > USED AT LINE 2873
-                    > USED AT LINE 2884
-FC1:                08C1 DEFINED AT LINE 2897
-                    > USED AT LINE 2899
-FBDOS:              08C7 DEFINED AT LINE 2903
-                    > USED AT LINE 2821
-                    > USED AT LINE 2823
-                    > USED AT LINE 2849
-                    > USED AT LINE 2859
-                    > USED AT LINE 2918
-CREAD:              08CD DEFINED AT LINE 2908
-                    > USED AT LINE 2571
-LOAD:               08D4 DEFINED AT LINE 2917
-                    > USED AT LINE 329
-LD1:                08DC DEFINED AT LINE 2920
-                    > USED AT LINE 2923
-TR1:                08EB DEFINED AT LINE 2927
-                    > USED AT LINE 2931
-TR2:                08FD DEFINED AT LINE 2939
-                    > USED AT LINE 2934
-START:              0900 DEFINED AT LINE 2946
-CPAGE:              0009 DEFINED AT LINE 4008
-                    > USED AT LINE 4009
-RSPAGE:             0009 DEFINED AT LINE 4009
-                    > USED AT LINE 179
-                    > USED AT LINE 2086
-                    > USED AT LINE 4010
-                    > USED AT LINE 4011
-DSPAGE:             000A DEFINED AT LINE 4010
-                    > USED AT LINE 181
-LETPAGE:            000B DEFINED AT LINE 4011
-                    > USED AT LINE 163
-                    > USED AT LINE 610
-                    > USED AT LINE 623
-                    > USED AT LINE 712
+EDLN:               0B3A DEFINED AT LINE 174
+                    > USED AT LINE 2485
+                    > USED AT LINE 2628
+                    > USED AT LINE 2650
+KEYBUF:             0B7A DEFINED AT LINE 176
+                    > USED AT LINE 2000
+                    > USED AT LINE 2023
+                    > USED AT LINE 2029
+                    > USED AT LINE 2484
+BRKOFF:             0B7B DEFINED AT LINE 178
+                    > USED AT LINE 2007
+LINEBUF:            0B80 DEFINED AT LINE 180
+                    > USED AT LINE 1011
+                    > USED AT LINE 1032
+                    > USED AT LINE 2257
+                    > USED AT LINE 2486
+                    > USED AT LINE 2525
+                    > USED AT LINE 2629
+                    > USED AT LINE 2904
+RSTOP:              09E0 DEFINED AT LINE 181
+                    > USED AT LINE 2123
+                    > USED AT LINE 2125
+                    > USED AT LINE 2328
+                    > USED AT LINE 2481
+DSTOP:              0AFC DEFINED AT LINE 183
+                    > USED AT LINE 300
+                    > USED AT LINE 1108
+                    > USED AT LINE 2111
+                    > USED AT LINE 2132
+                    > USED AT LINE 2296
+                    > USED AT LINE 2466
+AROP:               04DF DEFINED AT LINE 197
+                    > USED AT LINE 220
+                    > USED AT LINE 221
+                    > USED AT LINE 220
+                    > USED AT LINE 221
+                    > USED AT LINE 220
+                    > USED AT LINE 221
+                    > USED AT LINE 220
+                    > USED AT LINE 221
+                    > USED AT LINE 220
+                    > USED AT LINE 221
+ANEG:               04EA DEFINED AT LINE 198
+                    > USED AT LINE 232
+                    > USED AT LINE 233
+                    > USED AT LINE 232
+                    > USED AT LINE 233
+                    > USED AT LINE 232
+                    > USED AT LINE 233
+                    > USED AT LINE 232
+                    > USED AT LINE 233
+                    > USED AT LINE 232
+                    > USED AT LINE 233
+APUT:               050B DEFINED AT LINE 199
+                    > USED AT LINE 238
+                    > USED AT LINE 239
+                    > USED AT LINE 238
+                    > USED AT LINE 239
+                    > USED AT LINE 238
+                    > USED AT LINE 239
+                    > USED AT LINE 254
+                    > USED AT LINE 255
+                    > USED AT LINE 254
+                    > USED AT LINE 255
+                    > USED AT LINE 238
+                    > USED AT LINE 239
+                    > USED AT LINE 238
+                    > USED AT LINE 239
+                    > USED AT LINE 238
+                    > USED AT LINE 239
+                    > USED AT LINE 238
+                    > USED AT LINE 239
+                    > USED AT LINE 238
+                    > USED AT LINE 239
+                    > USED AT LINE 238
+                    > USED AT LINE 239
+                    > USED AT LINE 238
+                    > USED AT LINE 239
+APTK:               0507 DEFINED AT LINE 200
+                    > USED AT LINE 246
+                    > USED AT LINE 247
+                    > USED AT LINE 246
+                    > USED AT LINE 247
+                    > USED AT LINE 246
+                    > USED AT LINE 247
+                    > USED AT LINE 246
+                    > USED AT LINE 247
+                    > USED AT LINE 246
+                    > USED AT LINE 247
+                    > USED AT LINE 246
+                    > USED AT LINE 247
+                    > USED AT LINE 246
+                    > USED AT LINE 247
+                    > USED AT LINE 246
+                    > USED AT LINE 247
+ANXT:               0120 DEFINED AT LINE 204
+                    > USED AT LINE 286
+                    > USED AT LINE 287
+                    > USED AT LINE 286
+                    > USED AT LINE 287
+ACHK:               0521 DEFINED AT LINE 206
+DTPG:               0000 DEFINED AT LINE 215
+INI1:               0107 DEFINED AT LINE 334
+                    > USED AT LINE 336
+H_FROMR:            0112 DEFINED AT LINE 357
+                    > USED AT LINE 471
+CTL:                0119 DEFINED AT LINE 382
+                    > USED AT LINE 410
+ENDPROG:            011D DEFINED AT LINE 384
+NEXT0:              0120 DEFINED AT LINE 401
+                    > USED AT LINE 204
+                    > USED AT LINE 383
+                    > USED AT LINE 431
+P5B:                014E DEFINED AT LINE 436
+                    > USED AT LINE 422
+P3A:                0150 DEFINED AT LINE 437
+                    > USED AT LINE 417
+PUNCT:              0152 DEFINED AT LINE 478
+                    > USED AT LINE 412
+PU1:                0160 DEFINED AT LINE 495
+                    > USED AT LINE 493
+H_XOR:              0162 DEFINED AT LINE 560
+                    > USED AT LINE 466
+H_OR:               016B DEFINED AT LINE 569
+                    > USED AT LINE 470
+H_NOT:              0174 DEFINED AT LINE 230
+                    > USED AT LINE 472
+H_ALLOC:            017A DEFINED AT LINE 584
+                    > USED AT LINE 467
+DIGIT:              0189 DEFINED AT LINE 609
+                    > USED AT LINE 415
+LOWER:              0190 DEFINED AT LINE 617
+                    > USED AT LINE 424
+UPPER:              0197 DEFINED AT LINE 629
+                    > USED AT LINE 420
+RPUSHN:             01A1 DEFINED AT LINE 645
+                    > USED AT LINE 658
+                    > USED AT LINE 765
+                    > USED AT LINE 786
+H_TOR:              01B7 DEFINED AT LINE 657
+                    > USED AT LINE 469
+JPHL:               01BA DEFINED AT LINE 659
+                    > USED AT LINE 2066
+H_GRAVE:            01BB DEFINED AT LINE 668
+                    > USED AT LINE 468
+HX1:                01C1 DEFINED AT LINE 675
+                    > USED AT LINE 681
+HX2:                01CF DEFINED AT LINE 682
+                    > USED AT LINE 677
+H_RET:              01D3 DEFINED AT LINE 218
+                    > USED AT LINE 705
+                    > USED AT LINE 1919
+                    > USED AT LINE 465
+BRK1:               01D8 DEFINED AT LINE 258
+                    > USED AT LINE 702
+H_BREAK:            01DA DEFINED AT LINE 699
+                    > USED AT LINE 1920
+                    > USED AT LINE 464
+RDROP:              01E5 DEFINED AT LINE 218
+                    > USED AT LINE 772
+H_DEF:              01EA DEFINED AT LINE 714
+                    > USED AT LINE 1921
+                    > USED AT LINE 463
+DEF2:               0200 DEFINED AT LINE 729
+                    > USED AT LINE 720
+SKIPNX:             0209 DEFINED AT LINE 738
+                    > USED AT LINE 728
+SKIPO:              020A DEFINED AT LINE 742
+                    > USED AT LINE 763
+H_FETCH:            020F DEFINED AT LINE 745
+                    > USED AT LINE 1922
+                    > USED AT LINE 462
+H_OPEN:             0215 DEFINED AT LINE 760
+                    > USED AT LINE 448
+H_CLOSE:            021D DEFINED AT LINE 769
+                    > USED AT LINE 449
+H_SUB:              022B DEFINED AT LINE 792
+                    > USED AT LINE 453
+H_ADD:              0235 DEFINED AT LINE 797
+                    > USED AT LINE 451
+NEGNUM:             0239 DEFINED AT LINE 800
+                    > USED AT LINE 795
+H_AND:              0242 DEFINED AT LINE 805
+                    > USED AT LINE 446
+H_LT:               024B DEFINED AT LINE 819
+                    > USED AT LINE 458
+H_GT:               024C DEFINED AT LINE 820
+                    > USED AT LINE 460
+TF:                 0257 DEFINED AT LINE 828
+                    > USED AT LINE 837
+H_EQ:               025B DEFINED AT LINE 831
+                    > USED AT LINE 459
+H_MUL:              0265 DEFINED AT LINE 842
+                    > USED AT LINE 450
+MUL1:               026E DEFINED AT LINE 848
+                    > USED AT LINE 853
+MUL2:               0275 DEFINED AT LINE 853
+                    > USED AT LINE 851
+H_DIV:              027A DEFINED AT LINE 866
+                    > USED AT LINE 455
+H_DUP:              029F DEFINED AT LINE 894
+                    > USED AT LINE 456
+H_SWAP:             02A2 DEFINED AT LINE 897
+                    > USED AT LINE 445
+H_CSTORE:           02A5 DEFINED AT LINE 902
+                    > USED AT LINE 454
+H_DROP:             02AA DEFINED AT LINE 224
+                    > USED AT LINE 457
+H_STORE:            02AD DEFINED AT LINE 910
+                    > USED AT LINE 441
+H_STR:              02B7 DEFINED AT LINE 924
+                    > USED AT LINE 442
+H_PRINT:            02C3 DEFINED AT LINE 961
+                    > USED AT LINE 444
+HP1:                02C6 DEFINED AT LINE 962
+                    > USED AT LINE 1060
+H_EMIT:             02CC DEFINED AT LINE 966
+                    > USED AT LINE 447
+PR9:                02D0 DEFINED AT LINE 224
+H_NUM:              02D3 DEFINED AT LINE 971
+                    > USED AT LINE 443
+H_KEY:              02D9 DEFINED AT LINE 979
+                    > USED AT LINE 461
+KT1:                02DD DEFINED AT LINE 981
+                    > USED AT LINE 988
+                    > USED AT LINE 992
+KT2:                02DF DEFINED AT LINE 982
+                    > USED AT LINE 985
+H_CFETCH:           02F1 DEFINED AT LINE 994
+                    > USED AT LINE 452
+KT3:                02F2 DEFINED AT LINE 995
+                    > USED AT LINE 983
+LINE:               02F7 DEFINED AT LINE 1004
+                    > USED AT LINE 980
+LN2:                0302 DEFINED AT LINE 1012
+                    > USED AT LINE 1013
+                    > USED AT LINE 1021
+                    > USED AT LINE 1026
+                    > USED AT LINE 1030
+LN3:                0317 DEFINED AT LINE 236
+                    > USED AT LINE 1028
+LN4:                031C DEFINED AT LINE 1027
+                    > USED AT LINE 1017
+LN5:                0323 DEFINED AT LINE 1031
+                    > USED AT LINE 1015
+PRSTR:              0328 DEFINED AT LINE 1042
+                    > USED AT LINE 962
+                    > USED AT LINE 1058
+                    > USED AT LINE 1059
+                    > USED AT LINE 1067
+PRS0:               033F DEFINED AT LINE 1056
+                    > USED AT LINE 1053
+PRS1:               0341 DEFINED AT LINE 236
+                    > USED AT LINE 1049
+PRLOOP:             0328 DEFINED AT LINE 1059
                     > USED AT LINE 1082
-                    > USED AT LINE 2162
-                    > USED AT LINE 2483
-                    > USED AT LINE 4012
-PROG:               0C00 DEFINED AT LINE 4012
-                    > USED AT LINE 2226
-                    > USED AT LINE 2582
-                    > USED AT LINE 2669
-                    > USED AT LINE 2673
+PRAGAIN:            02C6 DEFINED AT LINE 1060
+                    > USED AT LINE 1139
+PNL:                0346 DEFINED AT LINE 1064
+                    > USED AT LINE 2247
+                    > USED AT LINE 2294
+                    > USED AT LINE 2324
+                    > USED AT LINE 2333
+PMSG:               034C DEFINED AT LINE 1066
+                    > USED AT LINE 1064
+                    > USED AT LINE 1149
+                    > USED AT LINE 1165
+                    > USED AT LINE 2251
+                    > USED AT LINE 2304
+PESC:               0352 DEFINED AT LINE 1080
+                    > USED AT LINE 1055
+PAT:                0372 DEFINED AT LINE 1105
+                    > USED AT LINE 1081
+PSHOW:              0396 DEFINED AT LINE 1142
+                    > USED AT LINE 1156
+                    > USED AT LINE 2470
+PHIDE:              0399 DEFINED AT LINE 1144
+                    > USED AT LINE 1087
+PSE:                03A4 DEFINED AT LINE 1151
+                    > USED AT LINE 1164
+PCON:               03A8 DEFINED AT LINE 1155
+                    > USED AT LINE 1085
+CSE:                03B7 DEFINED AT LINE 1163
+                    > USED AT LINE 1158
+                    > USED AT LINE 1160
+CSI:                03BC DEFINED AT LINE 1165
+                    > USED AT LINE 1130
+                    > USED AT LINE 1163
+UDIV:               03C3 DEFINED AT LINE 1200
+                    > USED AT LINE 882
+                    > USED AT LINE 1953
+UDV0:               03D0 DEFINED AT LINE 1257
+                    > USED AT LINE 1203
+UDV1:               03D8 DEFINED AT LINE 1262
+                    > USED AT LINE 1270
+UDV2:               03E3 DEFINED AT LINE 1269
+                    > USED AT LINE 1266
+RDNUM:              03EB DEFINED AT LINE 1420
+                    > USED AT LINE 611
+                    > USED AT LINE 801
+                    > USED AT LINE 2621
+                    > USED AT LINE 2658
+                    > USED AT LINE 2726
+RDN1:               03EE DEFINED AT LINE 1421
+                    > USED AT LINE 1435
+SKIPSTR:            0401 DEFINED AT LINE 1452
+                    > USED AT LINE 927
+                    > USED AT LINE 1459
+                    > USED AT LINE 1464
+                    > USED AT LINE 1507
+SKIP:               0412 DEFINED AT LINE 1481
+                    > USED AT LINE 703
+                    > USED AT LINE 742
+SK3:                041C DEFINED AT LINE 1492
+                    > USED AT LINE 1509
+                    > USED AT LINE 1513
+SK1:                041D DEFINED AT LINE 1493
+                    > USED AT LINE 1515
+                    > USED AT LINE 1523
+SK4:                0436 DEFINED AT LINE 1516
+                    > USED AT LINE 1511
+SK6:                0443 DEFINED AT LINE 1531
+                    > USED AT LINE 1502
+SK7:                0448 DEFINED AT LINE 1533
+                    > USED AT LINE 1530
+PGRET:              0000 DEFINED AT LINE 1919
+                    > USED AT LINE 1923
+PGBRK:              0000 DEFINED AT LINE 1920
+                    > USED AT LINE 1923
+PGDEF:              0000 DEFINED AT LINE 1921
+                    > USED AT LINE 1923
+PGFET:              0001 DEFINED AT LINE 1922
+                    > USED AT LINE 1923
+NPG1:               0016 DEFINED AT LINE 1923
+                    > USED AT LINE 481
+HEXC:               0451 DEFINED AT LINE 1933
+                    > USED AT LINE 668
+                    > USED AT LINE 676
+                    > USED AT LINE 680
+HC1:                0461 DEFINED AT LINE 1942
+                    > USED AT LINE 1936
+PSGN:               0463 DEFINED AT LINE 1946
+                    > USED AT LINE 971
+                    > USED AT LINE 1097
+                    > USED AT LINE 2321
+PDEC:               046E DEFINED AT LINE 1952
+                    > USED AT LINE 1132
+                    > USED AT LINE 1136
+                    > USED AT LINE 1947
+                    > USED AT LINE 1958
+                    > USED AT LINE 2281
+                    > USED AT LINE 2288
+                    > USED AT LINE 2347
+                    > USED AT LINE 2746
+PTPH:               0081 DEFINED AT LINE 1967
+                    > USED AT LINE 1968
+                    > USED AT LINE 1969
+PTPX:               0000 DEFINED AT LINE 1968
+                    > USED AT LINE 1969
+PTPAD:              0000 DEFINED AT LINE 1969
+                    > USED AT LINE 1970
+PTAB:               0481 DEFINED AT LINE 1971
+                    > USED AT LINE 478
+                    > USED AT LINE 480
+                    > USED AT LINE 481
+PTABEND:            04A1 DEFINED AT LINE 1973
+POLLK:              04A1 DEFINED AT LINE 1998
+                    > USED AT LINE 654
+PK1:                04A8 DEFINED AT LINE 2001
+                    > USED AT LINE 2037
+CTLC:               04AB DEFINED AT LINE 2007
+CT0:                04AF DEFINED AT LINE 2009
+                    > USED AT LINE 2020
+CT1:                04B6 DEFINED AT LINE 2012
+                    > USED AT LINE 2017
+CT2:                04C0 DEFINED AT LINE 2018
+                    > USED AT LINE 2013
+CT3:                04CB DEFINED AT LINE 2024
+                    > USED AT LINE 2022
+GETK:               04CF DEFINED AT LINE 2028
+                    > USED AT LINE 982
+                    > USED AT LINE 1012
+BRK:                0588 DEFINED AT LINE 2045
+                    > USED AT LINE 2009
+RPOP:               04DF DEFINED AT LINE 2051
+                    > USED AT LINE 197
+NEG16:              04EA DEFINED AT LINE 2056
+                    > USED AT LINE 198
+                    > USED AT LINE 878
+                    > USED AT LINE 881
+                    > USED AT LINE 884
+                    > USED AT LINE 888
+EXEC:               04F1 DEFINED AT LINE 2065
+                    > USED AT LINE 673
+RAWK:               0503 DEFINED AT LINE 2073
+                    > USED AT LINE 1998
+                    > USED AT LINE 2012
+                    > USED AT LINE 2035
+                    > USED AT LINE 2436
+                    > USED AT LINE 2591
                     > USED AT LINE 2737
-                    > USED AT LINE 2824
-                    > USED AT LINE 2836
-                    > USED AT LINE 2919
-                    > USED AT LINE 2925
-IMGEND:             0900 DEFINED AT LINE 4014
-                    > USED AT LINE 4008
+PUTK:               0507 DEFINED AT LINE 2075
+                    > USED AT LINE 200
+PUTC:               050B DEFINED AT LINE 2083
+                    > USED AT LINE 199
+                    > USED AT LINE 2074
+CHKSTK:             0521 DEFINED AT LINE 2110
+                    > USED AT LINE 206
+                    > USED AT LINE 404
+                    > USED AT LINE 2225
+E_ROVER:            0540 DEFINED AT LINE 2128
+                    > USED AT LINE 2122
+E_OVER:             0543 DEFINED AT LINE 2130
+                    > USED AT LINE 2116
+E_UNDER:            0547 DEFINED AT LINE 2132
+                    > USED AT LINE 1110
+                    > USED AT LINE 2114
+E_HI:               054E DEFINED AT LINE 2140
+                    > USED AT LINE 432
+CHKHP:              055A DEFINED AT LINE 2151
+                    > USED AT LINE 590
+E_HEAP:             0570 DEFINED AT LINE 2181
+                    > USED AT LINE 2160
+                    > USED AT LINE 2164
+CHKST:              0577 DEFINED AT LINE 2193
+                    > USED AT LINE 904
+                    > USED AT LINE 912
+E_STORE:            0585 DEFINED AT LINE 2213
+                    > USED AT LINE 2197
+E_BREAK:            0588 DEFINED AT LINE 2215
+                    > USED AT LINE 2045
+ERRP:               058A DEFINED AT LINE 2217
+                    > USED AT LINE 1535
+                    > USED AT LINE 2127
+                    > USED AT LINE 2131
+                    > USED AT LINE 2184
+E_DOLLAR:           058D DEFINED AT LINE 2223
+                    > USED AT LINE 1047
+E_QUOTE:            0597 DEFINED AT LINE 2229
+                    > USED AT LINE 930
+E_RESV:             059C DEFINED AT LINE 2233
+                    > USED AT LINE 2141
+E_ZERO:             059F DEFINED AT LINE 2235
+                    > USED AT LINE 870
+E_BRACK:            05A2 DEFINED AT LINE 2237
+                    > USED AT LINE 733
+ERROR:              05A4 DEFINED AT LINE 2245
+                    > USED AT LINE 2134
+                    > USED AT LINE 2146
+                    > USED AT LINE 2218
+ER1:                05C7 DEFINED AT LINE 2264
+                    > USED AT LINE 2276
+ER2:                05C9 DEFINED AT LINE 2266
+                    > USED AT LINE 2274
+ER2X:               05D8 DEFINED AT LINE 2277
+                    > USED AT LINE 2270
+ER3:                05D9 DEFINED AT LINE 2278
+                    > USED AT LINE 2261
+ER6:                060D DEFINED AT LINE 2307
+                    > USED AT LINE 2303
+ER7:                0613 DEFINED AT LINE 2312
+                    > USED AT LINE 2323
+ER8:                0626 DEFINED AT LINE 2324
+                    > USED AT LINE 2313
+PHALF:              063E DEFINED AT LINE 2344
+                    > USED AT LINE 2299
+                    > USED AT LINE 2332
+RIGHT:              0648 DEFINED AT LINE 2425
+                    > USED AT LINE 2450
+ESC:                0650 DEFINED AT LINE 2435
+                    > USED AT LINE 2498
+ES1:                0653 DEFINED AT LINE 2436
+                    > USED AT LINE 2441
+ES2:                0662 DEFINED AT LINE 2444
+                    > USED AT LINE 2437
+ES3:                0666 DEFINED AT LINE 2446
+                    > USED AT LINE 2448
+LEFT:               0674 DEFINED AT LINE 2454
+LF1:                067B DEFINED AT LINE 236
+                    > USED AT LINE 2430
+EDIT0:              0680 DEFINED AT LINE 2466
+                    > USED AT LINE 340
+                    > USED AT LINE 2340
+EDEND:              0689 DEFINED AT LINE 2479
+                    > USED AT LINE 149
+EDIT:               068A DEFINED AT LINE 2481
+                    > USED AT LINE 2443
+                    > USED AT LINE 2700
+                    > USED AT LINE 2884
+                    > USED AT LINE 2943
+ED1:                069F DEFINED AT LINE 2488
+                    > USED AT LINE 2427
+                    > USED AT LINE 2445
+                    > USED AT LINE 2452
+                    > USED AT LINE 2456
+                    > USED AT LINE 2460
+                    > USED AT LINE 2509
+                    > USED AT LINE 2533
+                    > USED AT LINE 2556
+                    > USED AT LINE 2572
+                    > USED AT LINE 2644
+ED2:                06BC DEFINED AT LINE 2502
+                    > USED AT LINE 2507
+ED3:                06C7 DEFINED AT LINE 2510
+                    > USED AT LINE 2504
+FIN:                06CC DEFINED AT LINE 2517
+                    > USED AT LINE 2442
+BSP:                06DE DEFINED AT LINE 2531
+                    > USED AT LINE 2490
+                    > USED AT LINE 2496
+BS1:                06E8 DEFINED AT LINE 2537
+                    > USED AT LINE 2544
+INSC:               06F9 DEFINED AT LINE 2553
+                    > USED AT LINE 2492
+                    > USED AT LINE 2494
+IC1:                0704 DEFINED AT LINE 2560
+                    > USED AT LINE 2566
+IC2:                0710 DEFINED AT LINE 2571
+                    > USED AT LINE 2550
+TAIL:               0715 DEFINED AT LINE 2575
+                    > USED AT LINE 2571
+TA1:                0716 DEFINED AT LINE 2576
+                    > USED AT LINE 2582
+TA2:                0721 DEFINED AT LINE 2583
+                    > USED AT LINE 2578
+                    > USED AT LINE 2588
+EKEY:               072B DEFINED AT LINE 2591
+                    > USED AT LINE 2446
+                    > USED AT LINE 2488
+                    > USED AT LINE 2592
+                    > USED AT LINE 2740
+CMDS:               0731 DEFINED AT LINE 2596
+                    > USED AT LINE 2500
+NCMD:               0008 DEFINED AT LINE 2612
+                    > USED AT LINE 2501
+CNEW:               0749 DEFINED AT LINE 2615
+                    > USED AT LINE 2609
+GED0:               074D DEFINED AT LINE 2617
+                    > USED AT LINE 2627
+CEDLN:              074F DEFINED AT LINE 2621
+                    > USED AT LINE 2603
+CE1:                0762 DEFINED AT LINE 2630
+                    > USED AT LINE 2641
+CE2:                0776 DEFINED AT LINE 2642
+                    > USED AT LINE 2632
+                    > USED AT LINE 2634
+CRET:               077B DEFINED AT LINE 2649
+                    > USED AT LINE 2597
+CR1:                078A DEFINED AT LINE 2658
+                    > USED AT LINE 2653
+CR2:                079C DEFINED AT LINE 2668
+                    > USED AT LINE 2664
+INS:                079D DEFINED AT LINE 2672
+                    > USED AT LINE 2657
+GEDIT:              07C0 DEFINED AT LINE 2700
+                    > USED AT LINE 2617
+                    > USED AT LINE 2667
+                    > USED AT LINE 2736
+                    > USED AT LINE 2742
+CRUN:               07C3 DEFINED AT LINE 2703
+                    > USED AT LINE 2599
+ST0P:               07C7 DEFINED AT LINE 2705
+                    > USED AT LINE 2661
+ST0:                07C8 DEFINED AT LINE 2707
+ST1:                07CC DEFINED AT LINE 2709
+                    > USED AT LINE 2711
+CLIST:              07DC DEFINED AT LINE 2726
+                    > USED AT LINE 2601
+LI0:                07E4 DEFINED AT LINE 2731
+                    > USED AT LINE 2729
+LI1:                07E9 DEFINED AT LINE 2734
+                    > USED AT LINE 2753
+LI3:                07FB DEFINED AT LINE 2743
+                    > USED AT LINE 2738
+DELLN:              080E DEFINED AT LINE 2756
+                    > USED AT LINE 2655
+                    > USED AT LINE 2666
+DE1:                0816 DEFINED AT LINE 2760
+                    > USED AT LINE 2765
+FIND:               081E DEFINED AT LINE 2770
+                    > USED AT LINE 2623
+                    > USED AT LINE 2672
+                    > USED AT LINE 2732
+                    > USED AT LINE 2756
+FI1:                0822 DEFINED AT LINE 2772
+                    > USED AT LINE 2777
+NXL:                082C DEFINED AT LINE 2782
+                    > USED AT LINE 2759
+                    > USED AT LINE 2776
+                    > USED AT LINE 2787
+PRL:                0836 DEFINED AT LINE 2792
+                    > USED AT LINE 2523
+                    > USED AT LINE 2752
+                    > USED AT LINE 2797
+CFCB:               005C DEFINED AT LINE 2847
+                    > USED AT LINE 2908
+                    > USED AT LINE 2914
+                    > USED AT LINE 2921
+                    > USED AT LINE 2929
+                    > USED AT LINE 2937
+CWRITE:             0841 DEFINED AT LINE 2853
+                    > USED AT LINE 2607
+CW1:                0852 DEFINED AT LINE 2860
+                    > USED AT LINE 2862
+CW2:                085A DEFINED AT LINE 2866
+                    > USED AT LINE 2868
+CW3:                0863 DEFINED AT LINE 2871
+                    > USED AT LINE 2880
+CW4:                0872 DEFINED AT LINE 2881
+                    > USED AT LINE 2875
+FREC:               087C DEFINED AT LINE 2888
+                    > USED AT LINE 2878
+                    > USED AT LINE 2955
+SETNAME:            088E DEFINED AT LINE 2904
+                    > USED AT LINE 2853
+                    > USED AT LINE 2942
+SN1:                089D DEFINED AT LINE 2911
+                    > USED AT LINE 2913
+SN2:                08A4 DEFINED AT LINE 2915
+                    > USED AT LINE 2922
+                    > USED AT LINE 2928
+SN3:                08B2 DEFINED AT LINE 2923
+                    > USED AT LINE 2920
+SN4:                08B8 DEFINED AT LINE 2926
+                    > USED AT LINE 2924
+FCBCLR:             08BC DEFINED AT LINE 2929
+                    > USED AT LINE 2907
+                    > USED AT LINE 2918
+FC1:                08C1 DEFINED AT LINE 2931
+                    > USED AT LINE 2933
+FBDOS:              08C7 DEFINED AT LINE 2937
+                    > USED AT LINE 2855
+                    > USED AT LINE 2857
+                    > USED AT LINE 2883
+                    > USED AT LINE 2893
+                    > USED AT LINE 2952
+CREAD:              08CD DEFINED AT LINE 2942
+                    > USED AT LINE 2605
+LOAD:               08D4 DEFINED AT LINE 2951
+                    > USED AT LINE 339
+LD1:                08DC DEFINED AT LINE 2954
+                    > USED AT LINE 2957
+TR1:                08EB DEFINED AT LINE 2961
+                    > USED AT LINE 2965
+TR2:                08FD DEFINED AT LINE 2973
+                    > USED AT LINE 2968
+START:              0900 DEFINED AT LINE 2980
+CPAGE:              0009 DEFINED AT LINE 4046
+                    > USED AT LINE 4047
+RSPAGE:             0009 DEFINED AT LINE 4047
+                    > USED AT LINE 181
+                    > USED AT LINE 2120
+                    > USED AT LINE 4048
+                    > USED AT LINE 4049
+DSPAGE:             000A DEFINED AT LINE 4048
+                    > USED AT LINE 183
+LETPAGE:            000B DEFINED AT LINE 4049
+                    > USED AT LINE 165
+                    > USED AT LINE 620
+                    > USED AT LINE 633
+                    > USED AT LINE 722
+                    > USED AT LINE 1092
+                    > USED AT LINE 2196
+                    > USED AT LINE 2517
+                    > USED AT LINE 4050
+PROG:               0C00 DEFINED AT LINE 4050
+                    > USED AT LINE 2260
+                    > USED AT LINE 2616
+                    > USED AT LINE 2703
+                    > USED AT LINE 2707
+                    > USED AT LINE 2771
+                    > USED AT LINE 2858
+                    > USED AT LINE 2870
+                    > USED AT LINE 2953
+                    > USED AT LINE 2959
+IMGEND:             0900 DEFINED AT LINE 4052
+                    > USED AT LINE 4046

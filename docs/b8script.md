@@ -262,7 +262,7 @@ Then `3#` runs and prints 3. Nothing else printed, and word A was never defined,
 
 **Brackets must balance.** Any text that may be skipped must balance by the skipper's count, and each opener must close with its own kind: `(` with `)`, `[` with `]`. Mixed kinds are unsafe. They balance for the skipper but run differently, and nothing useful comes of it. A checked build stops with `N` when a skip from `(` or `[` reaches NUL or reaches a closer of the wrong kind at its own level. A `\` that finds no closer still ends the program, as `1\` does.
 
-**A skip may be remembered.** The text of a running program doesn't change, so an implementation may remember where a skip from each place ended, and the next time skip there at once (the Z80 builds do: see [Speed](#speed)). A program that changes its own text while it runs may then be skipped by the old text: that is unsafe.
+**A skip may be remembered.** The text of a running program doesn't change, so an implementation may remember where a skip from each place ended, and the next time skip there at once (the Z80's `QUICK` and speed builds do: see [Speed](#speed)). A program that changes its own text while it runs may then be skipped by the old text: that is unsafe.
 
 **The return stack is exposed.** It holds plain 16-bit addresses and values. `{` and `}` need not be balanced: `)` and `]` act on whatever is on top. That makes goto, eval and tail calls possible (see Idioms).
 
@@ -763,9 +763,9 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 
 **Where the time goes.** On the Z80, `+` takes about 160 clock cycles, but its own work is three instructions, about 21. The rest is the inner loop: getting back to it, sorting the character by range, and the jump through the table. `*` and `/` take about 900 and 1,500 cycles, as each always runs 16 rounds, and a skip reads every character it passes, about 100 cycles each. So a faster interpreter makes each dispatch cheaper, does fewer dispatches, makes the slow commands faster, or skips less.
 
-**What the Z80 does.** It has two levels.
+**What the Z80 does.** Its builds are tuned for size, and two switches, both off by default, add speed:
 
-- **Speed-ups in the size-tuned builds.** Every Z80 build but the two that are full (the checked generic ROM, which keeps to a 1,280-byte page limit, and the checked CP/M editor, at 2,048 bytes) takes the speed-ups that cost about a hundred bytes:
+- **`QUICK`** adds the speed-ups that cost 180 to 230 bytes, to any of the eight builds:
   - **A skip cache.** Nearly every skip has happened before: a loop skips the same false block on every pass. So the end of each skip is remembered, in a 256-byte page of 64 entries found by the start's low byte, and the next skip from there is one lookup. Only skips that start in the program text are kept (the line buffer changes), and the cache is emptied whenever a run starts.
   - **A faster skip.** Two range tests rule out most characters (`*` to `Z`, and `^` and up) before the six that matter are tested.
   - **`*` in 8 rounds** when either operand is below 256, which most multiplications have.
@@ -777,11 +777,11 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
   - **The dispatcher inline** at the end of every entry of the speed build's own, so there is no jump back to the loop.
   - **One entry per letter and digit,** each knowing its cell or its value already: a variable is `LD HL,cell`, a word call reads its own cell, and a one-digit number needs no loop.
   - **The commonest punctuation written for the table** (`+ - : ; % @ , < = > & | ^ ~ * ( ) ]`, and `!` and `.` unchecked), the rest reached through a two-instruction thunk.
-  - **`*` and `/` unrolled,** besides everything the size-tuned builds have.
+  - **`*` and `/` unrolled,** besides everything `QUICK` has.
 
-Measured in Z80 clock cycles on the generic builds, against the size-tuned build before these speed-ups (same output in every case):
+Measured in Z80 clock cycles on the generic builds, against the regular build (same output in every case):
 
-| Program | Before | Speed-ups (size-tuned build) | Speed build |
+| Program | Regular | `QUICK` | Speed build |
 |---|---|---|---|
 | SIEVE, 1 pass | 56.8 M | 1.09× | 2.24× |
 | PI, 100 digits | 316.2 M | 1.21× | 2.05× |
@@ -1062,22 +1062,22 @@ q@0=)
 
 ## Appendix A: Z80
 
-Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`, `ANSI`, and `FAST` for the speed builds.
+Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`, `ANSI`, and for speed `QUICK` and `FAST` (both off by default; see [Speed](#speed)).
 
 **Builds**
 
 | Build | File | Bytes | Notes |
 |---|---|---|---|
-| Generic ROM | `b8s-z80-rom-0000.bin` | 1,054 | Starts at 0000h (reset); owns page zero. `ANSI = 0`; with `ANSI = 1`, 1,118 |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,219 | With `ANSI = 1`, 1,266. No speed-ups: it is full |
-| CP/M runner | `B8SZ80.COM` | 1,231 | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` | 1,593 |  |
-| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,568 | The suggested standard under [Environments](#environments); see the interpreters README |
-| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,951 |  |
-| CP/M with the line editor | `B8SZ80E.COM` | 1,860 | `B8SZ80E PROG.B8S`, or with no file |
-| The same, checked | `B8SZ80EC.COM` | 2,048 | No speed-ups: it is full |
-| Speed build, generic ROM | `fast/b8s-z80-fast-rom-0000.bin` | 4,352 | Checked: 4,608. See [Speed](#speed) |
-| Speed build, CP/M | `fast/B8SZ80F.COM` | 4,608 | Checked: `B8SZ80FC.COM`, 4,864 |
+| Generic ROM | `b8s-z80-rom-0000.bin` | 835 | Starts at 0000h (reset); owns page zero. `ANSI = 0`; with `ANSI = 1`, 886 |
+| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,219 | With `ANSI = 1`, 1,266 |
+| CP/M runner | `B8SZ80.COM` | 1,017 | `B8SZ80 PROG.B8S` |
+| CP/M runner, checked | `B8SZ80C.COM` | 1,414 |  |
+| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,355 | The suggested standard under [Environments](#environments); see the interpreters README |
+| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,742 |  |
+| CP/M with the line editor | `B8SZ80E.COM` | 1,646 | `B8SZ80E PROG.B8S`, or with no file |
+| The same, checked | `B8SZ80EC.COM` | 2,048 |  |
+
+Each of these also comes with `QUICK = 1`, in `B8Script-interpreters/quick/` (`B8SZ80Q.COM` and so on, a Q after the Z80), 180 to 230 bytes bigger and 1.1 to 1.5 times as fast; and there are four speed builds (`FAST = 1`) in `B8Script-interpreters/fast/`, `B8SZ80F.COM`, `B8SZ80FC.COM` and two generic ROMs, of 4,352 to 4,864 bytes, about twice as fast. See [Speed](#speed) and the interpreters README.
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), IY is the return-stack pointer. A and DE are scratch. In the CP/M builds and the speed builds IX holds the inner loop's address, so a handler ends with `JP (IX)`. The alternate registers are not used, so an interrupt routine may use them.
 
@@ -1091,12 +1091,12 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 | -n? line buffer (127 characters and CR) | 8280h | 33408 | −32128 |
 | Program text (`PROG`) | 8300h | 33536 | −32000 |
 | Heap limit (default `HEAPLIM`) | F000h | 61440 | −4096 |
-| Skip cache (builds with the speed-ups): the page at the heap limit | F000h | 61440 | −4096 |
+| Skip cache (`QUICK` and speed builds): the page at the heap limit | F000h | 61440 | −4096 |
 | Heap pointer cell | 827Ch | 33404 | −32132 |
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 827Ah | 33402 | −32134 |
 
-Under CP/M the pages sit after the image and the heap limit is the BDOS. The builds with the speed-ups have the skip cache's page first, before the return stack. The break-off cell is still at offset 7Bh of the letter page, which is the page below the program text: 097Bh (2427) in `B8SZ80.COM`, 0B7Bh (2939) in `B8SZ80C.COM`, 0C7Bh (3195) in `B8SZ80E.COM`, 0B7Bh (2939) in `B8SZ80EC.COM`, and 167Bh (5755) and 177Bh (6011) in the speed builds `B8SZ80F.COM` and `B8SZ80FC.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
+Under CP/M the pages sit after the image and the heap limit is the BDOS. The `QUICK` and speed builds have the skip cache's page first, before the return stack. The break-off cell is at offset 7Bh of the letter page, which is the page below the program text: 077Bh (1915) in `B8SZ80.COM`, 097Bh (2427) in `B8SZ80C.COM`, 0A7Bh (2683) in `B8SZ80E.COM` and 0B7Bh (2939) in `B8SZ80EC.COM`; 097Bh, 0B7Bh, 0C7Bh and 0D7Bh in their `QUICK` versions (`B8SZ80Q.COM` and so on); 167Bh (5755) and 177Bh (6011) in the speed builds `B8SZ80F.COM` and `B8SZ80FC.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
 
 **The break key.** The keyboard is looked at on every word call, block entry, true `)` and `{`, one time in 256. A program that stores a non-zero byte in the break-off cell gets Ctrl-C as key 3; two within about 250 ms still stop it. An unchecked build prints nothing when it is stopped.
 

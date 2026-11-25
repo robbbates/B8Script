@@ -2,7 +2,7 @@
 ;  B8Script interpreter for the Z80
 ;  Spec: docs/b8script.md (2026-11-24).
 ;
-;  Four switches, set in the EQU lines below:
+;  The switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
 ;    EDITOR   1 = with the line editor built in (see the end of this file):
@@ -13,6 +13,11 @@
 ;                 and stops on every error in the spec's table (and Ctrl-C)
 ;                 with a four-line report: the letter and the place as line
 ;                 and column, the text there, and both stacks. See `error`.
+;    QUICK    1 = the speed-ups that cost bytes: a skip cache, a faster skip,
+;                 '*' and '/' quicker for small and power-of-two operands, and
+;                 more (see "Speed-ups"). 0, the default, is the smallest build.
+;    FAST     1 = the speed build: QUICK and a dispatch table besides, with
+;                 no size limit (see "The speed build"). Not with EDITOR.
 ;    ANSI     what the console escapes of '$' (/{ /} /| /` /~) do:
 ;             1 = send ANSI (VT100) sequences through CONOUT
 ;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
@@ -29,6 +34,7 @@ CPM     EQU     0               ; 1 = CP/M .COM build
 CHECKED EQU     0               ; 1 = checked build
 EDITOR  EQU     0               ; 1 = with the line editor
 ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
+QUICK   EQU     0               ; 1 = the speed-ups that cost bytes (see "Speed-ups")
 FAST    EQU     0               ; 1 = the speed build (not with EDITOR): see "The speed build"
 ANS     EQU     ANSI+CPM-ANSI*CPM ; (CP/M: always ANSI)
 EDGEN   EQU     EDITOR*(1-CPM)  ; (the generic build with the editor)
@@ -38,12 +44,8 @@ TABP0   EQU     EDGEN*(1-CHECKED) ; (the build with its table in page zero)
 PTLATE  EQU     1-(1-CPM)*(1-EDITOR)*(1-CHECKED)*(1-ANS) ; (1: the table goes after psgn and pdec,
                                 ;   not before them: wherever it doesn't cross a
                                 ;   page. chktab.py says if it does)
-QUICK   EQU     1-(1-FAST)*(CHECKED*CPM*EDITOR+CHECKED*(1-CPM)*(1-EDITOR))
-                                ; (1: the speed-ups that cost bytes: every build
-                                ;  but the two that are full, the checked
-                                ;  generic one and the checked CP/M editor.
-                                ;  See "Speed-ups" below)
-QUICKU  EQU     QUICK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
+QK      EQU     QUICK+FAST-QUICK*FAST ; (the speed-ups: QUICK, or the speed build)
+QUICKU  EQU     QK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
                                 ;  builds take; the speed build has its own)
 
 ; -----------------------------------------------------------------------------
@@ -130,7 +132,7 @@ DSPAGE  EQU     81h             ; 8100h data stack
 LETPAGE EQU     82h             ; 8200h letter cells and line buffer
 PROG    EQU     8300h           ; where the loader puts the program text
 HEAPLIM EQU     0F0h            ; the heap must stay below F000h (a page)
-CPAGE   EQU     HEAPLIM         ; the skip cache's page (QUICK builds): the page
+CPAGE   EQU     HEAPLIM         ; the skip cache's page (QK builds): the page
                                 ;   at the heap limit, which the heap never reaches
 BASE    EQU     0000h           ; where the image starts
         ENDIF
@@ -297,13 +299,21 @@ DTPG    EQU     0
         IF      1-EDGEN
         LD      SP,DSTOP        ; 00  reset, or the start of the .COM file
         ENDIF
-        IF      (1-CPM)*(1-EDITOR)*(1-CHECKED)
+        IF      (1-CPM)*(1-EDITOR)*(1-CHECKED)*(1-QK)
+        LD      BC,PROG         ; 03  the IP
+        JR      st0             ; 06  (the rest of the startup is close by)
+        ENDIF
+        IF      (1-CPM)*(1-EDITOR)*(1-CHECKED)*QK
         JP      qstart          ; 03  (the skip cache is emptied first)
         DW      0               ; 06  spare
         ENDIF
-        IF      (1-CPM)*(1-EDITOR)*CHECKED
+        IF      (1-CPM)*(1-EDITOR)*CHECKED*(1-QK)
         JR      init            ; 04  (the rest of the startup is close by)
         DW      0               ; 06  spare
+        ENDIF
+        IF      (1-CPM)*(1-EDITOR)*CHECKED*QK
+        JP      qinit           ; 04  (the skip cache is emptied first)
+        DB      0               ; 07  spare
         ENDIF
         IF      EDGEN
         XOR     A               ; 00  reset: no program yet. (This byte, AFh,
@@ -760,19 +770,19 @@ h_close:LD      A,H
         OR      L
         POP     HL
         JR      Z,rdrop
-        IF      QUICK
+        IF      QK
         JP      closeq          ; (out of the handlers' pages: see Speed-ups)
         ENDIF
-        IF      1-QUICK
+        IF      1-QK
         POPR                    ; pop the block start ...
         LD      B,D
         LD      C,E
         PUSH    BC
         ENDIF
-        IF      (1-QUICK)*(1-CPM)
+        IF      (1-QK)*(1-CPM)
         JR      rpushn          ; ... and push it back
         ENDIF
-        IF      (1-QUICK)*CPM
+        IF      (1-QK)*CPM
         JP      rpushn
         ENDIF
 
@@ -828,7 +838,7 @@ h_eq:   POP     DE
 
 ; '*': shift-and-add, 16 rounds; only the low 16 bits are kept. The
 ; multiplier shifts up through A:C.
-        IF      1-QUICK
+        IF      1-QK
 h_mul:  POP     DE              ; DE = multiplicand
         PUSH    BC
         LD      A,H
@@ -844,7 +854,7 @@ mul2:   DJNZ    mul1
         POP     BC
         NEXT       
         ENDIF
-        IF      QUICK
+        IF      QK
 h_mul:  POP     DE              ; DE = multiplicand
         JP      mulq            ; (out of the handlers' pages: see Speed-ups)
         ENDIF
@@ -1186,7 +1196,7 @@ csi:    PUSH    AF
 ; Uses A; keeps BC (the IP) itself. The dividend shifts up through A:C while
 ; the quotient bits arrive at the bottom of C.
 ; Dividing by 2 is one shift (the spec wants that fast).
-        IF      1-QUICK
+        IF      1-QK
 udiv:   LD      A,E
         XOR     2
         OR      D
@@ -1197,7 +1207,7 @@ udiv:   LD      A,E
         LD      E,A             ; the remainder: the bit that fell out (D is 0)
         RET
         ENDIF
-        IF      QUICK
+        IF      QK
 ; (The builds with room divide by any power of two with shifts: 2, and 32,
 ; 64, 256 and the like, which fixed point and byte work use all the time.)
 udiv:   LD      A,D
@@ -1466,19 +1476,33 @@ skipstr:LD      A,(BC)
 ; '[' at ']', and neither may run into the NUL (N); a string with no closing
 ; quote counts as running into it. '\' takes either closer. SKPL keeps the
 ; place where the skip started, for the report.
-        IF      1-QUICK
-; (The two full builds, both checked, have no skip cache: this is their skip.)
-skip:   LD      (SKPL),BC
+        IF      1-QK
+; (Without QUICK: no skip cache.)
+skip:
+        ENDIF
+        IF      CHECKED*(1-QK)
+        LD      (SKPL),BC
         DEC     BC
         LD      A,(BC)
         INC     BC
         LD      E,A             ; E = the opener: ( [ or \
+        ENDIF
+        IF      1-QK
         LD      D,0
 sk3:    INC     D               ; an opener: one deeper
 sk1:    LD      A,(BC)
+        ENDIF
+        IF      (1-CHECKED)*(1-QK)
+        INC     BC
+        OR      A
+        JP      Z,SKEND         ; (the end of the program)
+        ENDIF
+        IF      CHECKED*(1-QK)
         OR      A
         JR      Z,sk6           ; (the IP stays on the NUL)
         INC     BC
+        ENDIF
+        IF      1-QK
         CP      22h
         CALL    Z,skipstr       ; leaves A = 22h, which matches nothing below
         SUB     '('             ;   (or 0, and then the NUL is read next)
@@ -1490,6 +1514,12 @@ sk1:    LD      A,(BC)
         CP      ']'-'['
         JR      NZ,sk1
 sk4:    DEC     D
+        ENDIF
+        IF      (1-CHECKED)*(1-QK)
+        RET     Z               ; the closer at this level
+        JR      sk1
+        ENDIF
+        IF      CHECKED*(1-QK)
         JR      NZ,sk1
         LD      D,A             ; the closer at this level: 0 or 2. Bit 1 of the
         XOR     E               ;   opener is 0 for '(' and 1 for '[', and only
@@ -1504,7 +1534,7 @@ sk7:    LD      BC,(SKPL)       ; N. The place is the opener
         LD      A,'N'
         JP      errp            ; (errp drops skip's return address)
         ENDIF
-        IF      QUICK
+        IF      QK
 ; The skip cache. Nearly every skip is one that has happened before (a loop
 ; skips the same false block on every pass), so the first scan from each
 ; place is remembered: 64 entries of {start, end}, at CPAGE, found by the
@@ -1540,13 +1570,13 @@ skip:   LD      (SKPL),BC       ; where it starts: the cache's key (and the
         RET
 sks:
         ENDIF
-        IF      QUICK*CHECKED
+        IF      QK*CHECKED
         DEC     BC
         LD      A,(BC)
         INC     BC
         LD      E,A             ; E = the opener: ( [ or \
         ENDIF
-        IF      QUICK
+        IF      QK
 ; The scan. Most characters are nothing to it, and two range tests rule
 ; them out: * to Z, and ^ and up. Only NUL " ( ) [ ] count.
         LD      D,0
@@ -1567,10 +1597,10 @@ sq1:    LD      A,(BC)
         OR      A
         JR      NZ,sq1          ; the rest below '(': nothing
         ENDIF
-        IF      QUICK*(1-CHECKED)
+        IF      QK*(1-CHECKED)
         JP      SKEND           ; NUL: the end of the program
         ENDIF
-        IF      QUICK*CHECKED
+        IF      QK*CHECKED
         DEC     BC              ; NUL: the IP stays on it
         BIT     2,E             ; the text ran out:
         JP      NZ,SKEND        ;   '\' with no closer ends the program
@@ -1578,7 +1608,7 @@ sq7:    LD      BC,(SKPL)       ; N. The place is the opener
         LD      A,'N'
         JP      errp            ; (errp drops skip's return address)
         ENDIF
-        IF      QUICK
+        IF      QK
 sqq:    CALL    skipstr         ; step over the string
         JR      sq1
 sqb:    SUB     5Ch             ; [ -1, \ 0, ] 1
@@ -1590,7 +1620,7 @@ sqc:    XOR     A               ; )
 sq4:    DEC     D
         JR      NZ,sq1
         ENDIF
-        IF      QUICK*CHECKED
+        IF      QK*CHECKED
         LD      D,A             ; the closer at this level (as above): 2 here
         XOR     E               ;   means the wrong closer
         AND     6
@@ -1598,7 +1628,7 @@ sq4:    DEC     D
         LD      A,D
         JR      Z,sq7
         ENDIF
-        IF      QUICK
+        IF      QK
 ; The closer at this level: remember the skip (if it started in the program
 ; text), and return A = 0 for ')' or 2 for ']'.
         PUSH    AF
@@ -1638,7 +1668,7 @@ skc1:   LD      (HL),0
 ;  ---- Speed-ups (QUICK builds) -------------------------------------------
 ;  The skip cache is above. These are the handlers' tails that the builds with
 ;  room take, kept here, out of the handlers' first two pages.
-        IF      QUICK
+        IF      QK
 ; '*' with an operand below 256 takes 8 rounds, not 16: that one becomes the
 ; multiplier (most multiplications have one, a count or a small constant).
 mulq:   LD      A,H
@@ -1649,7 +1679,7 @@ mulq:   LD      A,H
         JR      NZ,mq16
         EX      DE,HL           ; the multiplicand is: it becomes the multiplier
         ENDIF
-        IF      QUICK*(1-FAST)
+        IF      QK*(1-FAST)
 mq8:    LD      A,L
         LD      HL,0
         PUSH    BC
@@ -1823,7 +1853,7 @@ mus15:
         POP     BC
         NEXT       
         ENDIF
-        IF      QUICK
+        IF      QK
 ; A true ')' reads the block start where it is, on top of the return stack,
 ; instead of popping it and pushing it back; the break key is looked at as
 ; rpushn would.
@@ -1867,10 +1897,14 @@ lws:    INC     BC              ; x!: the cell = TOS, and NOS comes up
         POP     HL
         NEXT       
         ENDIF
-        IF      (1-CPM)*(1-EDITOR)*(1-CHECKED)
+        IF      (1-CPM)*(1-EDITOR)*(1-CHECKED)*QK
 qstart: LD      BC,PROG         ; the generic reset goes on here: the IP,
         CALL    skclr           ;   an empty skip cache, and the rest of the
         JP      st0             ;   startup
+        ENDIF
+        IF      (1-CPM)*(1-EDITOR)*CHECKED*QK
+qinit:  CALL    skclr           ; (keeps A, which init wants 0)
+        JP      init
         ENDIF
 
 ; =============================================================================
@@ -2677,7 +2711,7 @@ st1:    CP      (HL)
         JR      NZ,st1
         LD      (HEAP),HL
         ENDIF
-        IF      EDITOR*QUICK
+        IF      EDITOR*QK
         CALL    skclr           ; every run starts with an empty skip cache
         ENDIF
         IF      EDITOR*CHECKED
@@ -2975,7 +3009,11 @@ ld1:    PUSH    DE
 ld2:    LD      (HL),0          ; the end of the file counts as NUL
         INC     HL              ; the heap starts after it
         LD      BC,PROG         ; the IP
+        ENDIF
+        IF      CPM*(1-EDITOR)*QK
         CALL    skclr           ; an empty skip cache
+        ENDIF
+        IF      CPM*(1-EDITOR)
         JP      st2
         ENDIF
 
@@ -4005,8 +4043,8 @@ DTAB:
 
         IF      CPM
 ; RAM pages, after the image
-CPAGE   EQU     (imgend + 255) / 256 ; the skip cache (QUICK builds), first, so
-RSPAGE  EQU     CPAGE + QUICK   ;   that the letter page is still the one
+CPAGE   EQU     (imgend + 255) / 256 ; the skip cache (QK builds), first, so
+RSPAGE  EQU     CPAGE + QK   ;   that the letter page is still the one
 DSPAGE  EQU     RSPAGE + 1      ;   just below the program text
 LETPAGE EQU     RSPAGE + 2
 PROG    EQU     LETPAGE*256 + 256

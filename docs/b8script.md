@@ -757,6 +757,24 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 - Make the number reader step back onto the digit and read the whole number at once; no number state survives between characters.
 - Poll the break key every 256 loop-backs and calls rather than every time, especially where a key check is an OS call (BDOS 6 under CP/M is slow).
 
+### Ideas for speed
+
+The existing interpreters are tuned for size, and none of these ideas is used in them yet. They are kept here for a build that has bytes to spare, or for a speed option. The figures are for the Z80: how often each pattern occurs was counted on real runs of SIEVE, PI, MANDEL and Tetris, and the clock cycles each idea saves were read from the code, so they are estimates, and they overlap rather than add up.
+
+**Where the time goes.** On the Z80, `+` takes about 160 clock cycles, but its own work is three instructions, about 21. The rest is the inner loop: getting back to it, sorting the character by range, and the jump through the table. `*` and `/` take about 900 and 1,500 cycles, as each always runs 16 rounds. So a faster interpreter makes each dispatch cheaper, does fewer dispatches, or makes the slow commands faster.
+
+| Idea | What changes | Time saved | Cost on the Z80 |
+|---|---|---|---|
+| **Dispatch through a full table** | A 256-byte table in RAM, built at startup from the existing 32-byte one, takes each character straight to its handler, instead of the chain of range tests. Every handler's entry point must then lie in one 256-byte page. | 15–25% | About the same ROM (the startup loop replaces the range tests), 256 bytes of RAM, and a new layout |
+| **A variable then `@` or `!` in one step** | When the character after a lowercase letter is `@` or `!`, do the fetch or the store at once, without a second dispatch. `x@` is the commonest pair in most programs. | 7–17% | About 15 bytes |
+| **"Next" as `JP (IX)` in the generic builds too** | They use `RST 30h` for "next", one byte, and its routine throws away the return address: 13 cycles a character more than `JP (IX)`. | 4–6% | One byte at each of the 25 places, and 4 to set IX |
+| **`*` in 8 rounds when an operand is below 256** | Most multiplications have one small operand, such as 10, a loop counter or a coordinate. | Up to 9% (PI) | About 10 bytes |
+| **`/` by a power of two as a shift** | Dividing by 2 already is. Extend it to any power of two, with the same sign fix-up: `256/` for a high byte and the 32 or 64 of fixed point are common. | Up to 8% (fixed-point code) | About 20 bytes |
+| **Skip plain characters faster** | The skipper tests each character against six (NUL, `"`, `(`, `)`, `[`, `]`). Two range tests rule out most characters first (only below 2Ah or from 5Bh to 5Dh can matter). | 1–4% | About 8 bytes |
+| **Read the loop's address in place at a true `)`** | `)` pops the block start and pushes it back; it can read it where it is, as long as the break-key count still runs. | Under 2% | About 8 bytes |
+
+A build that takes these ideas still has to stay within its size limit. Where one doesn't fit, an assembly switch can keep the size-tuned code for the builds that are full.
+
 ### Build options
 
 An implementation may offer its variants as assembly switches. The existing sources use `CPM` (a CP/M .COM file or a generic ROM image), `CHECKED`, `EDITOR` and `ANSI` (how the console escapes reach the screen; see [The console](#the-console)). Which environments a build offers is up to the implementation; the smallest builds for vintage and homebrew machines are typically unchecked runners, with the loader left to the machine.

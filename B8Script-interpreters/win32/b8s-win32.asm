@@ -1,5 +1,8 @@
 ; =============================================================================
 ;  B8Script interpreter for 32-bit Windows (x86, console subsystem)
+;  Required Notice: Copyright 2026 Robb Bates (https://github.com/robbbates)
+;  Licence: PolyForm Noncommercial License 1.0.0 (LICENSE.md at the top of
+;  the repository, or https://polyformproject.org/licenses/noncommercial/1.0.0)
 ;  Spec: docs/b8script.md (2026-11-24).
 ;
 ;  Assembler: NASM 2.16, flat binary output: the PE header is laid out by

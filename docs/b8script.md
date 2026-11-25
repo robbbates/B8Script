@@ -59,7 +59,7 @@ Operands follow written order: `a b -` is a − b. Effects are written `( before
 
 **Characters** have no literal; push the code (`65` for A).
 
-**Hex** has no literal either. See *Bits and hex* under [Idioms](#idioms) for three ways to write hex constants.
+**Hex** has no literal either. See *Bits, bytes and hex* in [idioms.md](idioms.md#bits-bytes-and-hex) for three ways to write hex constants.
 
 **Strings.** `"` pushes the address of the text after it and skips to the closing `"`. The text stays inline and nothing is copied. `$` prints it: `"Hi"$`.
 
@@ -149,7 +149,7 @@ Characters marked **†** have a catch, explained under *Marked characters* belo
 **Marked characters**
 
 - `-` **Two jobs.** Directly before a digit it starts a negative number; anywhere else it subtracts. To subtract a number, put a space after the `-`: `5- 3`, not `5-3`.
-- `/` **Truncates toward zero and leaves the remainder.** `-7 2/` leaves −3 and −1: the quotient (not −4), then the remainder on top with the dividend's sign. Use `/;` for the quotient alone and `/%;` for the remainder alone. Dividing by 0 is unsafe: an unchecked build leaves two cells of no meaning (the stack stays balanced), a checked build stops with `Z`. Dividing by 2 or −2 is a shift inside the interpreter, so `2/` is fast halving; it is still division, not a shift right (see *Bits and hex* under Idioms).
+- `/` **Truncates toward zero and leaves the remainder.** `-7 2/` leaves −3 and −1: the quotient (not −4), then the remainder on top with the dividend's sign. Use `/;` for the quotient alone and `/%;` for the remainder alone. Dividing by 0 is unsafe: an unchecked build leaves two cells of no meaning (the stack stays balanced), a checked build stops with `Z`. Dividing by 2 or −2 is a shift inside the interpreter, so `2/` is fast halving; it is still division, not a shift right (see *Bits, bytes and hex* in [idioms.md](idioms.md#bits-bytes-and-hex)).
 - `{` `}` **Share the return stack with blocks.** Inside a block, the top entry is the block's start, so keep them paired unless you mean a trick.
 - `a`–`z` **Start undefined.** Store before you read.
 - `_` **Signed, and it does not negate.** A positive count allocates, a negative count releases, and `0_` just reads the heap top. One call moves the top by at most 32767 bytes; allocate more with two calls. Negate with `-1*`. See *Heap* below.
@@ -193,7 +193,7 @@ One pair of round brackets gives every structure. The closing flag decides wheth
 
 **Definitions.** `[X body]` stores the address after `X` in word X's cell, then skips to the matching `]`. `X` pushes the address after the letter onto the return stack and jumps to the body; executing `]` pops an address and jumps to it. A definition must run before its word is called, and running it again redefines the word. Recursion works.
 
-`[x body]` does the same, but stores the address in variable x: call it with `x@X`, using the eval word `[X{]` (see Idioms). `[ body]` pushes the address instead, so code can be handed to a word on the stack: `[ 7#]X`.
+`[x body]` does the same, but stores the address in variable x: call it with `x@X`, using the eval word `[X{]` (see [Idioms](#idioms)). `[ body]` pushes the address instead, so code can be handed to a word on the stack: `[ 7#]X`.
 
 ### How skipping works
 
@@ -264,7 +264,7 @@ Then `3#` runs and prints 3. Nothing else printed, and word A was never defined,
 
 **A skip may be remembered.** The text of a running program doesn't change, so an implementation may remember where a skip from each place ended, and the next time skip there at once (the Z80's `QUICK` and speed builds do: see [Speed](#speed)). A program that changes its own text while it runs may then be skipped by the old text: that is unsafe.
 
-**The return stack is exposed.** It holds plain 16-bit addresses and values. `{` and `}` need not be balanced: `)` and `]` act on whatever is on top. That makes goto, eval and tail calls possible (see Idioms).
+**The return stack is exposed.** It holds plain 16-bit addresses and values. `{` and `}` need not be balanced: `)` and `]` act on whatever is on top. That makes goto, eval and tail calls possible (see [Words and code as data](idioms.md#words-and-code-as-data) in idioms.md).
 
 [↑ Back to top](#b8script-spec)
 
@@ -357,7 +357,7 @@ R:1
 
 **After an error or a break,** a one-shot build returns to the OS or monitor. A build with a prompt or editor returns there, with both stacks cleared and words and variables kept.
 
-**No report at a normal end.** A program that ends normally prints nothing extra, so its output can be piped. To catch values leaked on the stack, use the sentinel idiom under *Debugging* in [Idioms](#idioms).
+**No report at a normal end.** A program that ends normally prints nothing extra, so its output can be piped. To catch values leaked on the stack, use the sentinel idiom under *Debugging* in [idioms.md](idioms.md#debugging).
 
 [↑ Back to top](#b8script-spec)
 
@@ -365,7 +365,7 @@ R:1
 
 Every build, checked or not, stops a running program on Ctrl-C (03h).
 
-- The key is polled at the true `)` loop-back and at every word call, which catches every endless loop, including the goto idiom (a word call). Endless recursion overflows the return stack anyway. An implementation may poll only every so often, for speed, as long as it polls at least once every 256 of those points.
+- The key is polled at the true `)` loop-back and at every word call, which catches every endless loop, including [the goto idiom](idioms.md#words-and-code-as-data) (a word call). Endless recursion overflows the return stack anyway. An implementation may poll only every so often, for speed, as long as it polls at least once every 256 of those points.
 - A poll that reads a key other than Ctrl-C holds it for the next `?`, and a newer key replaces the held one. A program never sees Ctrl-C.
 - A checked build reports `B` with the place, which shows where an endless loop was spinning. What an unchecked build prints is implementation-defined.
 - An implementation may let a program turn the break key off, through a system address given in its appendix, so that the program reads Ctrl-C as an ordinary key (03h). Even then, Ctrl-C pressed twice in quick succession always breaks, so a runaway program can always be stopped.
@@ -420,91 +420,23 @@ Because a program's screen control is in the escapes and not in a terminal's cod
 
 Every idiom here runs as shown in the reference interpreter. A word in this section is free for you to rename; the letters are only what the examples use.
 
-**Stack**
+An idiom is a short, well-worn piece of B8Script for a job the language has no command for, such as a stack shuffle, a shift or a switch. A few are shown here for the flavour; [idioms.md](idioms.md) is the full collection.
+
+**Stack.** There are only dup, drop and swap, so other shuffles park a value on the return stack:
 
 | Name | Code | Effect |
 |---|---|---|
 | over | `{:}%` | `( a b -- a b a )` |
 | rot | `{%}%` | `( a b c -- b c a )` |
-| -rot | `%{%}` | `( a b c -- c a b )` |
 | nip | `%;` | `( a b -- b )` |
-| tuck | `:{%}` | `( a b -- b a b )` |
-| 2dup | `{:}%{:}%` | `( a b -- a b a b )` |
-| 2drop | `;;` | `( a b -- )` |
-| Copy parked value | `}:{` | Like Forth's R@ |
 
-**Arithmetic**
-
-| Name | Code | Effect |
-|---|---|---|
-| Negate | `-1*` |  |
-| Absolute value | `:0<(-1*0)` |  |
-| Sign | `:0<%0>-` | −1, 0 or 1 |
-| Min | `{:}%{:}%>(%0);` | `( a b -- min )` |
-| Max | `{:}%{:}%<(%0);` | `( a b -- max )` |
-| Quotient | `/;` | `( a b -- q )` |
-| Remainder | `/%;` | `( a b -- r )`; takes a's sign |
-| Modulo word | `[M/%;]` | `( n d -- n mod d )` |
-| Double | `:+` | Faster than `2*` everywhere |
-| Halve (toward zero) | `2/;` | Fast everywhere |
-| Increment variable | `[I:@1+%!]` | `xI` adds 1 to x |
-| Flag to 1/0 | `0=1+` |  |
-| Branchless select | `flag n&` | n if true, else 0 |
-| Logical not of a flag | `0=` | Same as `~` on a flag; also right on any value |
-
-**Bits and hex**
-
-| Name | Code | Effect |
-|---|---|---|
-| Bitwise NOT | `~` or `-1^` |  |
-| Set, clear, test bits | `m\|`, `m~&`, `m&` |  |
-| Shift left | `:+` | Repeat for more places |
-| Arithmetic shift right | `2/:0<&+` | Rounds down: −7 gives −4 |
-| Logical shift right | `2/:0<&+32767&` | FFFFh gives 7FFFh, 8000h gives 4000h |
-| Low byte, high byte | `255&`, `256/;255&` |  |
-| Hex digit (0–15) | `[D:9>7&+48+']` | Prints one digit |
-| Print a cell in hex | `[H:-4096&4096/;15&D:3840&256/;D:240&16/;D15&D]` | Uses D; always four digits |
-| Hex constant, from text | `[P0%1(:,32\|48-:9>(39- 0):-16&\{%}%:+:+:+:++%1+1);;]` | `"F000"P` pushes F000h; stops at the first non-hex character |
-| Hex from the keyboard | `-8?P` | Uses P |
-| Hex constant, by bytes | `3_h!` once, then `` h@:`3412;@ `` | Pushes 1234h, with no text to parse |
-
-The shift-right idioms work because `/` leaves the remainder with the dividend's sign: adding a negative remainder turns truncation into rounding down. In D the flag `9>` is all ones, so `7&` adds 7 for A–F with no branch. H masks each nibble in place and divides it down. For the top nibble the division gives −8 to −1 on negative cells, which is why it is masked again with `15&`. P folds case with `32|`, turns `a`–`f` into 10–15 by subtracting 39 more, and stops when the value has any bit outside 0–15 (`-16&`). Parsing costs time, so in a loop keep the value in a variable. In the by-bytes form, bytes are written little-endian and the third byte absorbs the RET; it reaches any bit pattern, such as 8000h (`` `0080 ``).
-
-**Control**
-
-Countdown, with the counter on the stack:
+**Loop.** Countdown, with the counter on the stack:
 
 ```text
 10 1( :# 1-: );
 ```
 
-Continue: `skip\` ends this pass early when skip is true, and the loop goes on.
-
-```text
-1(
-  1( part  skip\  rest 0)
-cond)
-```
-
-Return from inside a loop: record the flag as you break, then test it after the closer.
-
-```text
-[W 0q!
-   1( ...  cond:q!\  ... 1)
-   q@\
-   ...after the loop...
-]
-```
-
-Quit on q:
-
-```text
-1( 1?113=\
-   ...frame...
-1)
-```
-
-Switch, short. Every case is tested, so bodies must leave the stack alone:
+**Conditional.** Switch, short. Every case is tested, so bodies must leave the stack alone:
 
 ```text
 v :1=( one   0)
@@ -513,19 +445,6 @@ v :1=( one   0)
 ;
 ```
 
-Switch, fast, with a default:
-
-```text
-v 1(
-  :1=:( %; one   0)\
-  :2=:( %; two   0)\
-  :3=:( %; three 0)\
-  ;        other
-0)
-```
-
-In the fast switch, a match drops the value, runs its body, then breaks past the remaining cases without testing them.
-
 **Words as values.** Executing `]` pops an address and jumps to it, so these small words work:
 
 | Word | Code | Use |
@@ -533,59 +452,17 @@ In the fast switch, a match drops the value, runs its body, then breaks past the
 | Eval | `[X{]` | `"1 2+#]"X` runs the string; it ends with `]` to return |
 | Function in a variable | `[f 7#]` then `f@X` | Defines the body straight into f |
 | Anonymous block | `[ 7#]X` | Pushes code to hand to a word |
-| Function from a string | `"7#]"f!` then `f@X` | Code built or chosen at run time |
-| Here | `[L}:{]` | Pushes the address just after `L` |
-| Goto | `[G};{]` | `L x! ... x@:G` loops back to the `x!` |
-| Tail call | `f@G` | Jumps to f without returning here |
-| Continue | `}:{G` | Restarts the current block |
-| Exit caller | `[E};]` | Returns from the word that called E |
 
-These assume you know your nesting depth: inside a block, the top of the return stack is the block start, not a return address. Brackets inside an eval string are invisible to the skipper, because they are inside a string. A string run with X may therefore hold brackets that look unbalanced, as long as it ends with `]` and leaves the return stack as its caller expects.
-
-**Memory**
-
-| Name | Code |
-|---|---|
-| Allocate | `n_a!` |
-| Mark the heap | `0_m!` |
-| Release to the mark | `m@0_-_;` |
-| Clear n bytes at a | `0i! 1( 0a@i@+. i@1+:i! n@<)` |
-| Array cell i | `a@i@:++` (cell address), then `@` or `!` |
-
-**Input and output**
-
-| Name | Code |
-|---|---|
-| Comment | `"any text";` |
-| New line | `13'10'`, or `/M/J` inside a string |
-| Print a variable in the text | `"You have /g gold and /h hit points./M/J"$` (the values as `#` prints them) |
-| Wait for a key | `0?` |
-| Random seed from key timing | `0r! [K0 1(;r@1+r!1?:0=)]` |
-| Read a number | `[N0v!1(0?:48<\48-:#v@10*+v!1);v@]` |
-| Read a line | `-72?a!` (the text at a ends with CR, 13) |
-| Run a typed line | `[X{] -72?:{1(:,13=\1+1)93%.}X` (writes `]` over the CR, then runs it) |
-
-**Screen** (the console escapes; see [The console](#the-console))
+**Bits and hex.** There are no hex literals, so a program prints hex itself:
 
 | Name | Code | Effect |
 |---|---|---|
-| Clear the screen | `"/{"$` | Clears it and puts the cursor at the top left |
-| Clear to the end of the line | `"/}"$` | The cursor stays put |
-| Cursor to row, column | `r c"/~"$` | Both from 0: `0 0"/~"$` is the top left |
-| Print at a place | `5 10"/~Hello"$` | The text starts at row 5, column 10 |
-| A status line | `0 0"/~Score /s  Lives /l/}"$` | Writes over the last one: `/}` clears what is left of it |
-| Hide the cursor, show it again | ``"/`"$`` first, `"/\|"$` before the program ends | A game that redraws looks steadier with the cursor hidden |
-| Cursor word | `[Y"/~"$]` | `( row col -- )`: `5 10Y`, for a program that places the cursor from the stack often |
+| Hex digit (0–15) | `[D:9>7&+48+']` | Prints one digit |
+| Print a cell in hex | `[H:-4096&4096/;15&D:3840&256/;D:240&16/;D15&D]` | Uses D; always four digits |
 
-**Debugging**
+In D the flag `9>` is all ones, so `7&` adds 7 for A–F with no branch. H masks each nibble in place and divides it down.
 
-| Name | Code |
-|---|---|
-| Stack-leak sentinel | `12345` first, then `12345=0=("Stack leak"$0)` last |
-| Trace a value | `:#" "$` |
-| Mark a place | `"@3"$` |
-
-If anything leaked, the top of the stack at the end isn't the sentinel. Add it while debugging and take it out before the program goes into a pipe.
+Also in [idioms.md](idioms.md): [arithmetic and flags](idioms.md#arithmetic-comparisons-and-flags), [shifts and hex input](idioms.md#bits-bytes-and-hex), [goto, tail calls and other code as data](idioms.md#words-and-code-as-data), [the heap](idioms.md#memory-and-data-layout), [strings, input and the screen](idioms.md#strings-and-output), and [debugging](idioms.md#debugging).
 
 [↑ Back to top](#b8script-spec)
 
@@ -763,7 +640,7 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 
 **Where the time goes.** On the Z80, `+` takes about 160 clock cycles, but its own work is three instructions, about 21. The rest is the inner loop: getting back to it, sorting the character by range, and the jump through the table. `*` and `/` take about 900 and 1,500 cycles, as each always runs 16 rounds, and a skip reads every character it passes, about 100 cycles each. So a faster interpreter makes each dispatch cheaper, does fewer dispatches, makes the slow commands faster, or skips less.
 
-**What the Z80 does.** Its builds are tuned for size, and two switches, both off by default, add speed:
+**What the Z80 does.** Its builds are tuned for size, and two switches, both off by default, add speed (the other CPUs have them too, below):
 
 - **`QUICK`** adds the speed-ups that cost 180 to 230 bytes, to any of the eight builds:
   - **A skip cache.** Nearly every skip has happened before: a loop skips the same false block on every pass. So the end of each skip is remembered, in a 256-byte page of 64 entries found by the start's low byte, and the next skip from there is one lookup. Only skips that start in the program text are kept (the line buffer changes), and the cache is emptied whenever a run starts.
@@ -794,7 +671,7 @@ Measured in Z80 clock cycles on the generic builds, against the regular build (s
 
 Tetris gains least because much of its time is spent in `n?` waits, which are timed and rightly don't get shorter.
 
-**Ideas for the other CPUs.** None of the other interpreters has these yet. On the Z80, counting how often each pattern occurs on the runs above gave these estimates before any were built, and the measurements bore them out:
+**What each idea is worth.** On the Z80, counting how often each pattern occurs on the runs above gave these estimates before any were built, and the measurements bore them out:
 
 | Idea | Time saved on the Z80 | Cost on the Z80 |
 |---|---|---|
@@ -805,9 +682,29 @@ Tetris gains least because much of its time is spent in `n?` waits, which are ti
 | Reading the loop's address in place at a true `)` | Under 2% | About 20 bytes |
 | Dispatch through a full table, with the dispatcher inline | 15–25% more | 512 bytes of table, and the dispatcher's 12 to 15 bytes at every entry |
 
+**The other CPUs** have the same two switches, with each idea fitted to the CPU, or left out where it doesn't apply:
+- the 8080 multiplies a small operand as a byte;
+- the 6809 already multiplies with MUL;
+- x86 has IMUL;
+- the 6809's and x86's regular `)` already reads its block start in place;
+- each CPU has a table of its own form: two pages of low and high bytes on the Z80, 8080 and 6502, and whole addresses on the 6809 and x86.
+
+Against the regular build of the same CPU, on the same eight runs (in clock cycles; on Windows, in instructions):
+
+| CPU | `QUICK` costs | `QUICK` | Speed build | Speed build size |
+|---|---|---|---|---|
+| Z80 | 180–230 bytes | 1.09–1.47× | 1.69–2.56× | 4,352–4,864 bytes |
+| 8080 | 180–212 bytes | 1.09–1.49× | 1.76–2.69× | 4,352–4,864 bytes |
+| 6502, stack in pages 2–3 | 269–326 bytes | 1.10–1.49× | 1.78–2.66× | 5,506–7,448 bytes |
+| 6502, stack in zero page | 273–328 bytes | 1.11–1.51× | 1.76–2.72× | 5,069–6,949 bytes |
+| 6809 | 116–153 bytes | 1.10–1.52× | 1.94–2.95× | 4,257–4,654 bytes |
+| Windows (x86) | 144–190 bytes of code | 1.10–1.50× | 2.68–4.31× | 7,680–8,704-byte files |
+
+The interpreters README has every run on every CPU.
+
 ### Build options
 
-An implementation may offer its variants as assembly switches. The existing sources use `CPM` (a CP/M .COM file or a generic ROM image), `CHECKED`, `EDITOR` and `ANSI` (how the console escapes reach the screen; see [The console](#the-console)). Which environments a build offers is up to the implementation; the smallest builds for vintage and homebrew machines are typically unchecked runners, with the loader left to the machine.
+An implementation may offer its variants as assembly switches. The existing sources use `CPM` (a CP/M .COM file or a generic ROM image), `CHECKED`, `EDITOR`, `ANSI` (how the console escapes reach the screen; see [The console](#the-console)), and `QUICK` and `FAST` (speed; see [Speed](#speed)). Which environments a build offers is up to the implementation; the smallest builds for vintage and homebrew machines are typically unchecked runners, with the loader left to the machine.
 
 [↑ Back to top](#b8script-spec)
 
@@ -1129,17 +1026,20 @@ The memory map, the break key, the console interface, the console escapes (switc
 
 ## Appendix C: 6502
 
-Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-6502-zp.asm` is smaller and keeps it in zero page. Switches: `CHECKED`, `ANSI`. The image starts at E000h; point the reset vector at label `start`.
+Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-6502-zp.asm` is smaller and keeps it in zero page. Switches: `CHECKED`, `ANSI`, and for speed `QUICK` and `FAST`, as on the Z80 (both off by default; see [Speed](#speed)). The image starts at E000h; point the reset vector at label `start`. In the speed builds the dispatch table fills E000h–E1FFh, and `start` is at E200h. The `QUICK` builds are in `B8Script-interpreters/quick/` (`b8s-6502-quick-rom-E000.bin` and so on), and the speed builds in `B8Script-interpreters/fast/`.
 
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
 | Bytes (unchecked, checked), `ANSI = 0` | 1,208 and 1,707 | 1,155 and 1,673 |
 | The same, `ANSI = 1` | 1,265 and 1,750 | 1,217 and 1,721 |
+| With `QUICK = 1`, `ANSI = 0` | 1,534 and 1,976 | 1,483 and 1,946 |
+| Speed builds, `ANSI = 0` | 7,448 and 5,506 | 6,949 and 5,069 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
 | Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |
 | Program text | $0500 | $0500 |
-| Heap limit (default) | E000h (57344, −8192) | Same |
+| Heap limit (default) | E000h (57344, −8192); DF00h (57088, −8448) in the `QUICK` and speed builds | E000h (57344, −8192) in every build |
+| Skip cache (`QUICK` and speed builds) | DF00h, the page at the heap limit | $0200, page 2, which this interpreter doesn't otherwise use |
 | Heap pointer cell | $047C | $047C |
 | Break-off cell | $047B (1147, the same signed) | Same |
 | Held key | $07 in zero page (unchecked), $047A (1146) (checked) | $047A (1146) |

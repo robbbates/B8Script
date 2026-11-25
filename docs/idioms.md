@@ -127,7 +127,7 @@ There are no shift commands and no hex literals; these idioms make them from `:+
 | Set, clear, test bits | `m\|`, `m~&`, `m&` |  |
 | Shift left | `:+` | Repeat for more places |
 | Arithmetic shift right | `2/:0<&+` | Rounds down: −7 gives −4 |
-| Logical shift right | `2/:0<&+32767&` | FFFFh gives 7FFFh |
+| Logical shift right | `2/:0<&+32767&` | FFFFh gives 7FFFh, 8000h gives 4000h |
 | Low byte, high byte | `255&`, `256/;255&` |  |
 | Hex digit | `[D:9>7&+48+']` | Prints a value of 0–15 as one digit |
 | Print a cell in hex | `[H:-4096&4096/;15&D:3840&256/;D:240&16/;D15&D]` | Uses D; always four digits |
@@ -416,6 +416,7 @@ B8Script's screen commands are five escapes inside the strings that `$` prints. 
 | Cursor to row, column | `r c"/~"$` | `( row col -- )`, both counted from 0 |
 | Home the cursor | `0 0"/~"$` | Draw over the old picture without clearing it |
 | Print at a place | `5 10"/~Hello"$` | The escape and the text in one string |
+| A status line | `0 0"/~Score /s  Lives /l/}"$` | Writes over the last one: `/}` clears what is left of it |
 | Several places in one string | `3 0 1 0"/~Top/~Next"$` | Each `/~` takes the next pair, the first nearest the string |
 | Hide the cursor | ``"/`"$`` | At the start of a game that redraws |
 | Show the cursor | `"/\|"$` | Before the program ends |

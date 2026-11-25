@@ -38,9 +38,9 @@ Every game in [`games/`](../games/) and every program in [`programs/`](../progra
 
     | Program | Here | On the Z80 build |
     |---|---|---|
-    | MANDEL | 42 s | 42 s |
-    | PI, 250 digits | 289 s | 294 s |
-    | SIEVE, 10 passes | 154 s | 117 s |
+    | MANDEL | 27 s | 22 s |
+    | PI, 250 digits | 216 s | 252 s |
+    | SIEVE, 10 passes | 106 s | 77 s |
   - Off, a program runs as fast as the browser can run it.
   - Like the line speed, it takes effect at once and is remembered.
 - **Timing:** `n?` waits n milliseconds by the clock.

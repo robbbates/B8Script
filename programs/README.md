@@ -14,16 +14,16 @@ Every `.B8S` file is a complete program. Run it with any B8Script runner, the sa
 
 ## The benchmarks
 
-SIEVE, PI and MANDEL are written for speed, with their algorithms unchanged; each `.TXT` says how. Times on a Z80 at 7.3728 MHz (an RC2014), with the generic Z80 build, measured in an emulator with the output not counted:
+SIEVE, PI and MANDEL are written for speed, each step measured on the Z80 build. SIEVE and PI keep their published algorithms unchanged, so their times compare with other languages'; MANDEL's arithmetic gives the same result as the plain way for every point, with its squares from a table. Each `.TXT` says how. Times on a Z80 at 7.3728 MHz (an RC2014), with the generic Z80 build, measured in an emulator with the output not counted:
 
 | Run | Time |
 |---|---|
-| SIEVE, 10 passes | 116.5 s |
-| PI, 100 digits | 49.8 s |
-| PI, 250 digits | 294.3 s |
-| MANDEL | 42.2 s |
+| SIEVE, 10 passes | 77.0 s |
+| PI, 100 digits | 42.9 s |
+| PI, 250 digits | 251.8 s |
+| MANDEL | 22.1 s |
 
-The time printing takes depends on the terminal: MANDEL prints 1,760 bytes, 1.8 s at 9600 baud, though on a serial line most of that overlaps the computing.
+The time printing takes depends on the terminal: MANDEL prints 1,760 bytes, 1.8 s at 9600 baud, though on a serial line most of that overlaps the computing. MANDEL also needs 2 KB of heap for its table.
 
 ## MON
 

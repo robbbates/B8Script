@@ -65,7 +65,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `chkbr6502.py` | Checks every 6502 branch against its target |
 | `test_tweets.py` | Plays the tiny games in `games/b8sms/`, `games/tweet140/`, `games/tweet280/` and `games/longer/` the same way, and checks each against its folder's limit: 160, 140, 280 or 390 characters (see `docs/b8sms.md`). `test_tweets.py NAME` runs one game's tests; `--all` adds the slow check that Tic-tac-toe never loses |
 | `../../games/` | The games, at the root of the repository (its README says how to play each one). The programs are each in two files: `NAME.TXT`, with comments that explain how it works, and `NAME.B8S`, the same code stripped of comments and white space. `TINYBAS.B8S` is part of the suite. `games/b8sms/`, `games/tweet140/`, `games/tweet280/` and `games/longer/` hold the tiny games, which are already stripped and have no `.TXT` |
-| `b8strip.py` | Strips a program of comments and white space, keeping a space only where B8Script needs one (`b8strip.py ../../games/NAME.TXT ../../games/NAME.B8S` after editing a game). `--same A B` checks that two files hold the same code |
+| `b8strip.py` | Strips a program of comments and white space (but keeps a comment that starts with `!`), keeping a space only where B8Script needs one (`b8strip.py ../../games/NAME.TXT ../../games/NAME.B8S` after editing a game). `--same A B` checks that two files hold the same code |
 | `esc2slash.py` | Converts older programs to the `/` escape |
 | `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files next to each source |
 | `patchinfo.py` | Where n?'s timing count sits in each CP/M .COM, to patch it for a machine whose BDOS is faster or slower (see `../TIMING.B8S`) |

@@ -32,7 +32,13 @@ cp -r editors/vscode-b8script ~/.vscode/extensions/b8script
 Copy-Item -Recurse editors\vscode-b8script "$env:USERPROFILE\.vscode\extensions\b8script"
 ```
 
-Or build a `.vsix` and install it with **Extensions: Install from VSIX...**:
+Or install the ready-made `b8script-0.1.0.vsix` in this folder (on GitHub, open it and use **Download raw file**):
+
+```
+code --install-extension b8script-0.1.0.vsix
+```
+
+or with **Extensions: Install from VSIX...** in VS Code. To build the `.vsix` yourself (after changing the grammar, say):
 
 ```
 cd editors/vscode-b8script

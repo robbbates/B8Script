@@ -103,7 +103,7 @@ CP/M has no clock a program can count on, so the CP/M builds time `n?` by counti
      A>SAVE 4 B8SZ80.COM
      ```
      `S` shows the byte and takes the new one; `.` ends; `G0` leaves DDT; `SAVE` takes the page count from the table.
-   - **CP/M 3 or ZPM3**, where SAVE is a program run first, then the debugger:
+   - **CP/M 3 or ZPM3**, where SAVE is a program run first, then the debugger (SAVE waits, and when the debugger exits it asks where to save memory, before anything is cleared):
      ```
      A>SAVE
      A>SID B8SZ80.COM
@@ -116,7 +116,7 @@ CP/M has no clock a program can count on, so the CP/M builds time `n?` by counti
      Beginning hex address 100
      Ending hex address 4F8
      ```
-     (ZSID works the same way.)
+     ZSID, DDTZ (which RomWBW ships) and DDT work the same way: any debugger that loads the file at 0100h and leaves with `G0`, which is the exit SAVE waits for. Its prompt may differ; `?` lists a debugger's commands.
 4. **Check.** Run `TIMING.B8S` again: step 1 should now take about 10 seconds.
 
 Two other waits are built from the same count: Ctrl-C's 250 ms wait for a second Ctrl-C, and the editor's 5 ms wait after Esc. The patch doesn't change them, and they don't need it: a little off either way does no harm.

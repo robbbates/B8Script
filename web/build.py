@@ -1,5 +1,5 @@
 """Builds b8script.html, the web player: template.html with b8s.js and every program
-in games/ and programs/ put inside it, so that the one file works on its own,
+in games/ (with tweet140/ and tweet280/) and programs/ put inside it, so that the one file works on its own,
 opened from disk or from any web server.
 
 usage: build.py            write b8script.html

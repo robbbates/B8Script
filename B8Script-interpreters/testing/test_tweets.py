@@ -1,5 +1,5 @@
 """Scripted play tests for the tiny games, games/tweet140/ and games/tweet280/
-(a tweet, old and new), on ref.py.
+(140 and 280 characters), on ref.py.
 
 usage: test_tweets.py [--all] [NAME...]
 

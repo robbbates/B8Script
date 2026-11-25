@@ -11,8 +11,8 @@
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
 ;             1 = starts with every variable at 0 and every word undefined,
 ;                 and stops on every error in the spec's table (and Ctrl-C)
-;                 with a four-line report: the letter and the place as line
-;                 and column, the text there, and both stacks. See `error`.
+;                 with a three-line report: the letter and the place as line
+;                 and column, and both stacks. See `error`.
 ;    SPEED    0 = small: the smallest build
 ;             1 = base, the default: the speed-ups that cost bytes: a skip
 ;                 cache, a faster skip, '*' and '/' quicker for small and

@@ -17,7 +17,7 @@
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
 ;             1 = starts with every variable at 0 and every word undefined,
 ;                 and stops on every error in the spec's table (and Ctrl-C)
-;                 with the four-line report, on the standard error handle.
+;                 with the three-line report, on the standard error handle.
 ;    EDITOR   0 = a runner: B8S PROG.B8S loads the file, runs it, exits
 ;             1 = the line editor of the spec's suggested standard (the same
 ;                 editor as the Z80's, key for key); the file named on the

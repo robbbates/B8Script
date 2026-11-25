@@ -278,7 +278,7 @@ Executing `]` pops whatever address is on the return stack and jumps there, so c
 | Save a variable around recursion | `v@{TN;0v@-T}v!` | The caller's value waits on the return stack (TICTAC) |
 | Save the random state | `[Q r@{ ... }r!]` | A deterministic draw inside leaves the game's sequence untouched (IDOL) |
 | Neighbour chain | `[T:F:1-F:1+F:6-F6+F]` | Copy the base before each call; the last call consumes it (LIGHTS14) |
-| One mover for two players | `[S{D+1023&:P}':g@+:,%1%.]` | Both players share every line but the steering (DUEL) |
+| One mover for two players | `[S{D+1023&:64/"/~"$}':g@+:,%1%.]` | Both players share every line but the steering (DUEL) |
 
 [↑ Back to top](#b8script-idioms-tips-and-tricks)
 

@@ -7,11 +7,10 @@ run_tests.check(): the whole suite, the machine-code tests below, LOOSE or
 CHK, Tiny BASIC, ERRS and the break-key tests with the count of looks. The
 editor builds (B8SE, B8SEU and theirs) are typed at by test_editor.py's
 sessions, plus a session of their own for the arrow keys as Windows sends
-them. Then a few things only
-Windows has: the report goes to the standard error handle and the program's
-output to standard output, the console's input mode is put back at the
-end, input that is not a console is read with ReadFile, and a program on
-the command line in quotes, or no program at all.
+them. Then a few things only Windows has: the report goes to the standard
+error handle and the program's output to standard output, the console's
+input mode is put back at the end, input that is not a console is read with
+ReadFile, and a program on the command line in quotes, or no program at all.
 """
 import sys, os, glob, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

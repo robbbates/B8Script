@@ -10,9 +10,9 @@ before the RET runs. The functions modelled are the ones the builds import
 GetCommandLineA, CreateFileA, ReadFile, WriteFile, CloseHandle,
 WaitForSingleObject, WaitForMultipleObjects, CreateWaitableTimerExW,
 SetWaitableTimer, ReadConsoleInputA, GetTickCount, ExitProcess. Anything
-else the program calls, or a fault, ends the run. (The builds no longer
-import GetTickCount or WaitForSingleObject; they are kept here for a build
-that may.) Each call returns its result in EAX and spoils ECX and EDX, which
+else the program calls, or a fault, ends the run. (The builds import neither
+GetTickCount nor WaitForSingleObject; they are modelled here for a build
+that might.) Each call returns its result in EAX and spoils ECX and EDX, which
 the Windows API need not keep, so a build that counts on them fails here.
 
 Run(exe, prog, inp, timed=(), mode='runner', files=None, cmdline=None)

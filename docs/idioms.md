@@ -1,5 +1,25 @@
 # B8Script Idioms, Tips and Tricks
 
+**Contents**
+
+- [How to read this](#how-to-read-this)
+- [Stack](#stack)
+- [Arithmetic, comparisons and flags](#arithmetic-comparisons-and-flags)
+- [Bits, bytes and hex](#bits-bytes-and-hex)
+- [Control flow](#control-flow)
+- [Words and code as data](#words-and-code-as-data)
+- [Memory and data layout](#memory-and-data-layout)
+- [Strings and output](#strings-and-output)
+- [Input](#input)
+- [Screen](#screen)
+- [Random numbers](#random-numbers)
+- [Game and real-time patterns](#game-and-real-time-patterns)
+- [Machine code and the hex loader](#machine-code-and-the-hex-loader)
+- [Making programs small and fast](#making-programs-small-and-fast)
+- [Gotchas](#gotchas)
+- [Debugging](#debugging)
+- [Sources](#sources)
+
 ## How to read this
 
 This is a working collection of B8Script idioms, tips and tricks. It gathers the spec's Idioms and Tips with the tricks found in the tutorial, the size-contest games and the commented game sources. The source file is named for each idea that came from a program. The language itself is defined in [b8script.md](b8script.md).
@@ -8,6 +28,8 @@ This is a working collection of B8Script idioms, tips and tricks. It gathers the
 - **Letters are examples.** Word and variable letters in an idiom are only what its source used; rename freely.
 - **Flags** are −1 for true and 0 for false from comparisons, but `(`, `)` and `\` treat any nonzero value as true.
 - **Hex** is written with an h (F000h); B8Script itself reads only decimal, so programs write 61440 or −4096.
+
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
 
 ## Stack
 
@@ -41,6 +63,8 @@ B8Script has only dup, drop and swap, so every other shuffle is built from those
 | Park a copy across a call | `:{ ... S }` | One copy is used now, the parked one after S (G2048) |
 | Fill a table from the stack | `27i! 1( i@2*t@+! i@1-:i! -1>)` | Push all the constants, then store them counting down (TETRIS) |
 | Accumulate under an index | `6 1(:G@{%}%+%1+:14<);` | The sum rides under the index; `{%}%` (rot) brings it up to add (IDOL) |
+
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
 
 ## Arithmetic, comparisons and flags
 
@@ -91,6 +115,8 @@ Min and max work by copying both values, comparing, swapping when needed, and dr
 | Percentage in 16 bits | `s@5*7/;` | s×1000/1400 reduced so it never overflows (GREED) |
 | Random pick that skips the current one | `63R:5G@<0=-` | Adds 1 to any roll at or above the current value (IDOL) |
 
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
+
 ## Bits, bytes and hex
 
 There are no shift commands and no hex literals; these idioms make them from `:+`, `/` and masks.
@@ -136,6 +162,8 @@ There are no shift commands and no hex literals; these idioms make them from `:+
 | All bits of a mask set? | `[V:w@&=\|]` | `( flag mask -- flag' )` ORs in "every bit of mask is in w" (TICTAC) |
 | Self-inverse scramble | XOR each byte with a seeded random stream | Running it again restores the data (IDOL save codes) |
 | Rolling checksum | `0 0i! 1( 3* h@1032+i@+,+63& i@1+:i! 47<)` | c = 3c + byte, mod 64; any changed byte shows (IDOL) |
+
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
 
 ## Control flow
 
@@ -214,6 +242,8 @@ v 1(
 | Look for a key every 16 passes | `k@1+:k!15&0=(K(4x!0)0)`, with `[K1?2=]` | A masked counter makes a one-in-16 test; K is "is Ctrl-B down?". Use a key of your own for a program's own break: Ctrl-C belongs to the interpreter (TINYBAS) |
 | Neighbourhood scan | `y@1-j! 1( x@1-i! 1( ... i@1+:i! x@2+<) j@1+:j! y@2+<)` | The 3×3 around x, y with no offset table (SUPERTRK) |
 
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
+
 ## Words and code as data
 
 Executing `]` pops whatever address is on the return stack and jumps there, so code addresses can be stored, passed and run like any other value.
@@ -249,6 +279,8 @@ Executing `]` pops whatever address is on the return stack and jumps there, so c
 | Save the random state | `[Q r@{ ... }r!]` | A deterministic draw inside leaves the game's sequence untouched (IDOL) |
 | Neighbour chain | `[T:F:1-F:1+F:6-F6+F]` | Copy the base before each call; the last call consumes it (LIGHTS) |
 | One mover for two players | `[S{D+1023&:P}':g@+:,%1%.]` | Both players share every line but the steering (DUEL) |
+
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
 
 ## Memory and data layout
 
@@ -289,6 +321,8 @@ The 26 variables hold one cell each; anything bigger lives on the heap, reached 
 | Records with a length byte | `[Q h!p@ :@h@<( :2+,+ :@h@<)]` | Hop from record to record; a last line numbered 32767 ends every search (TINYBAS) |
 | Overlap-safe move | Copy up when the destination is below the source, down otherwise | (TINYBAS U) |
 | −1 means gone | `a@0<\` | Dead entries are skipped without a separate flag (ROBOTS, DUNGEON) |
+
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
 
 ## Strings and output
 
@@ -332,6 +366,8 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Rub out the last character | `8'32'8'` | BS, space, BS (TINYBAS) |
 | Grid lines by parity | `j@2M( cell line 0) j@2M0=( border line 0)` | One modulo picks the line (FIFTEEN, G2048) |
 
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
+
 ## Input
 
 `?` does every kind of input, chosen by its argument: 0 waits for a key, a positive n waits up to about n ms, and a negative n reads a line.
@@ -366,6 +402,8 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Letter, then digit | Remember a letter key in l; a digit after it fires | Two-key commands like B7 (BATTLE) |
 | A pause | `999?;` | About a second, cut short by a key (SIMON) |
 | A random pause that spots a jumped start | `t@2047&999+?` | A key back means too early (REFLEX) |
+
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
 
 ## Screen
 
@@ -414,6 +452,8 @@ B8Script's screen commands are five escapes inside the strings that `$` prints. 
 | Zero a counter and home the cursor | `0:c!:"/~"$` | `0:` makes two zeros: one is stored in c, and `:` doubles the other into row 0, column 0 (MINE390) |
 | Mark the map and draw from one index | `96 1(1-:32+:g@+1%.32/1+"/~#"$:);` | The bricks lie one map row down, so the same index marks the map byte and, through `32/`, gives the screen row and column (BREAKOUT in tweet280) |
 
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
+
 ## Random numbers
 
 B8Script has no random command; the games carry a two-word kit: K seeds from how long the player takes to press a key, and R draws numbers from a linear congruential generator.
@@ -428,6 +468,8 @@ B8Script has no random command; the games carry a two-word kit: K seeds from how
 - **Use the high byte.** The low bits of a 16-bit LCG repeat quickly, so R takes `256/;255&` before the modulo.
 - **Call K before the first R.** A title screen's "press a key" is the natural place; without a key wait the numbers come out the same every run.
 - **Good enough for games only:** there are just 65,536 states.
+
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
 
 ## Game and real-time patterns
 
@@ -473,6 +515,8 @@ The games share a few shapes: a frame is one timed key wait, end conditions fold
 | A world from a seed | `[H 0G@+ 25173*13849+ r! 1R;]` | Names, prices and maps are drawn again from seed and place, not stored (IDOL) |
 | Cheap sizes | `7&`, `31&`, `3&` on R's byte | Masks for power-of-two ranges skip the modulo (SIMON, BLACKJCK) |
 
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
+
 ## Machine code and the hex loader
 
 The grave does two jobs: followed by a hex digit it loads bytes, followed by anything else it calls the code at the address on top.
@@ -488,6 +532,8 @@ The grave does two jobs: followed by a hex digit it loads bytes, followed by any
 - **Save the start first** with `:` or `{` before the first load, and drop the final address with `;`.
 - **Space after a load** when a digit or A–F, a–f comes next, or the load swallows it; likewise a grave that should call must not be followed by a hex character (``x@` b@``).
 - **Never checked.** The loader and the code it runs are the programmer's responsibility, even on checked builds; each CPU's appendix gives the calling contract.
+
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
 
 ## Making programs small and fast
 
@@ -512,6 +558,8 @@ Every character costs a byte of memory and a dispatch each time it runs, so the 
 | Fast path first | Print to the screen with one `$`; copy a byte at a time only into a buffer (IDOL) |
 | Spend letters on the hot words | Rarely used routines go in a numbered table (IDOL) |
 | Push the identity before a fold | Start at 0 for OR or −1 for AND under the loop, so no result variable is needed (G2048, LIGHTS) |
+
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
 
 ## Gotchas
 
@@ -539,6 +587,8 @@ The minus before a digit is the one that bites most, especially in the small gam
 | A digit at the start of an editor line | It's taken as a line number; start the line with a space (tutorial) |
 | Stray keys as indexes | Mask them into range, or they write outside a table (LIGHTS) |
 
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
+
 ## Debugging
 
 Develop on a checked build, which stops with an error code, the line and column, and both stacks; then test once on an unchecked build too.
@@ -553,6 +603,8 @@ Develop on a checked build, which stops with an error code, the line and column,
 - **A checked run is not proof.** Checked builds zero the variables, so a program that reads before it stores can work there and fail unchecked.
 - **Ctrl-C breaks every build,** and a checked build reports `B` with the place, which shows where an endless loop was spinning.
 
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
+
 ## Sources
 
 - [b8script.md](b8script.md): the spec's Idioms, Tips and Don't rely on
@@ -561,3 +613,5 @@ Develop on a checked build, which stops with an error code, the line and column,
 - [design/trading-game.md](design/trading-game.md)
 
 Code quoted from a program was checked against its source; rows that describe a pattern in words have no code to check.
+
+[↑ Back to top](#b8script-idioms-tips-and-tricks)

@@ -1066,11 +1066,15 @@ All four must keep BC and IY, and all but `CONAT` also HL. The flags may change.
 
 **Machine-code contract.** Entered by CALL, with the return address on top of the stack and the data cells above it. The code must keep BC. A, DE, HL, IX, IY and the alternate registers may change; the interpreter restores IX and IY itself. It returns with RET (C9h), which the loader writes. On return, the cell on top of the stack becomes the new TOS. A generic build owns page zero: the code must leave it intact, and `RST 28h` prints the character in A, keeping BC, DE, HL and IY. A CP/M build doesn't use page zero, which is the system's: there, print through the BDOS.
 
+[↑ Back to top](#b8script-spec)
+
 ## Appendix B: 8080
 
 Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (926 bytes; 980 with `ANSI = 1`), `b8s-8080-rom-checked-0000.bin` (1,348; 1,402), `B8S8080.COM` (1,129), `B8S8080C.COM` (1,583).
 
 The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers, without IY) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 0A7Bh in `B8S8080C.COM`), with these differences: the routines keep BC (and HL where the Z80's do); the return-stack pointer is a RAM cell; and the generic image's one-byte calls are `RST 1` to `RST 6` (08h, 18h, 20h, 28h and 30h), where `RST 5` (28h) prints A and keeps BC, DE and HL. The CP/M builds don't use page zero: there the same routines are CALLs and JMPs. The RET byte is C9h.
+
+[↑ Back to top](#b8script-spec)
 
 ## Appendix C: 6502
 
@@ -1107,6 +1111,8 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 - **`b8s-6502.asm`:** X is the data-stack index; NOS is $0200,X (low) and $0300,X (high). To push: DEX, store TOS there, then set TOS. To drop: load TOS from there, then INX. The code may change A, X (consistently), Y, $04–$06 and $08–$09; $0A–$0F are free for its own use.
 - **`b8s-6502-zp.asm`:** X is the data-stack pointer. TOS is at 0,X (low) and 1,X (high), NOS at 2,X and 3,X. To push: DEX, DEX, then store. To drop: INX, INX. The code may change A, Y and X (consistently); $02, $03, $07 and $0A–$0D are free for its own use. $0C–$0D keep their values only while the code runs: a `$` that prints a variable escape with the data stack full writes there.
 
+[↑ Back to top](#b8script-spec)
+
 ## Appendix D: 6809
 
 Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. Builds: `b8s-6809-rom-F000.bin` (873 bytes; 934 with `ANSI = 1`), `b8s-6809-rom-checked-F000.bin` (1,264; 1,313). The image starts at F000h, with label `start`: point the reset vector at it.
@@ -1139,13 +1145,19 @@ Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. 
 
 **Machine-code contract.** Entered by a jump, with the dispatcher's return address on S, so the code ends in RTS (39h, written by the loader). U points at the top data cell, which becomes TOS on return. Cells on the data stack are big-endian (6809 order); cells in memory stay little-endian, as the spec says. The code may change A, B, X, CC and U (consistently). It must keep Y (the reading position) and DP, and leave S balanced.
 
+[↑ Back to top](#b8script-spec)
+
 ## Appendix E: B8SIC
 
 B8SIC was built with B8Script in mind: its microcode reads, sorts and dispatches B8Script characters itself. This appendix is to come.
 
+[↑ Back to top](#b8script-spec)
+
 ## Appendix F: the B8Script TTL computer
 
 Also built with B8Script in mind. On this machine the hex loader's RET byte is `]`. This appendix is to come.
+
+[↑ Back to top](#b8script-spec)
 
 ## Appendix G: Windows (32-bit x86)
 

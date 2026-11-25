@@ -4,6 +4,16 @@ Working title, to be named. Nov 22, 2026: every part decided. Numbers marked "to
 
 A single-player space trading game in B8Script, in the style of Elite and Trade Wars but not a copy of either. You start in debt with a small ship. You trade between generated star systems, smuggle when it pays, fight or flee, take contracts, upgrade your ship, and track down the six parts of an ancient idol, which can only be bartered for. Turn-based throughout.
 
+**Contents**
+
+- [Keeping it small](#keeping-it-small)
+- [Decisions](#decisions)
+- [The loop](#the-loop)
+- [The parts](#the-parts)
+- [Version 1](#version-1)
+- [Later](#later)
+- [Data budget (estimate)](#data-budget-estimate)
+
 ## Keeping it small
 
 The game has to stay easy to write, read and test. These rules are part of the design:
@@ -14,6 +24,8 @@ The game has to stay easy to write, read and test. These rules are part of the d
 - **Generate, don't store.** The galaxy, its names and its prices come from the seed and the day. Only the player's own state is kept and saved.
 - **Budgets.** The stripped `.B8S` at most 14 KB, and heap data at most 4 KB. If a feature doesn't fit, something else goes, or it waits. (changed: 12 KB; version 1 came to about 14 KB with every feature in it, and the smallest build has about 28 KB for program and heap.)
 - **Version 1 is the list under [Version 1](#version-1).** Everything under [Later](#later) stays out until version 1 plays well.
+
+[↑ Back to top](#trading-game-design)
 
 ## Decisions
 
@@ -31,6 +43,8 @@ The game has to stay easy to write, read and test. These rules are part of the d
 | 10 | Saving | A save code: the seed and the player's state, bit-packed into base-64 characters with a checksum |
 | 11 | Names | System names generated from a syllable table |
 
+[↑ Back to top](#trading-game-design)
+
 ## The loop
 
 1. **Dock** at a system: see its market, its contracts and any rumours.
@@ -40,6 +54,8 @@ The game has to stay easy to write, read and test. These rules are part of the d
 5. **Arrive** and go back to 1.
 
 The day count drives everything that changes over time: interest, stock recovery, contract deadlines.
+
+[↑ Back to top](#trading-game-design)
 
 ## The parts
 
@@ -225,13 +241,19 @@ Decided (Nov 22).
 - **Goods and ship classes:** as in their tables above.
 - **The idol** is named from the same syllables (*the Idol of Xeroon*, say), so every galaxy has its own. The parts: the Head, the Eye, the Heart, the Left Hand, the Right Hand and the Base (one word each in tables: Head, Eye, Heart, LHand, RHand, Base). Holding all six makes the idol whole; with the loan repaid, that wins.
 
+[↑ Back to top](#trading-game-design)
+
 ## Version 1
 
 The map, the economy, the loan, idol parts, the duel, law and contraband, ship upgrades and classes, contracts and rumours, the panels, the save code, generated names.
 
+[↑ Back to top](#trading-game-design)
+
 ## Later
 
 Events (shortages, booms); colonies and outposts; perks for the idol parts; ranks with titles; more opponent kinds; a second galaxy.
+
+[↑ Back to top](#trading-game-design)
 
 ## Data budget (estimate)
 
@@ -241,3 +263,5 @@ Events (shortages, booms); colonies and outposts; perks for the idol parts; rank
 | Visited systems, one bit each | 8 bytes |
 | Goods, ships, upgrades, names: fixed tables | under 1 KB |
 | The player's state | under 100 bytes |
+
+[↑ Back to top](#trading-game-design)

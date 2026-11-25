@@ -2,6 +2,21 @@
 
 Nov 22, 2026 · @ROB8S
 
+**Contents**
+
+- [Welcome](#welcome)
+- [Lesson 1: The stack, or how to think backwards](#lesson-1-the-stack-or-how-to-think-backwards)
+- [Lesson 2: Making it talk](#lesson-2-making-it-talk)
+- [Lesson 3: Juggling the stack](#lesson-3-juggling-the-stack)
+- [Lesson 4: Variables, or boxes with names](#lesson-4-variables-or-boxes-with-names)
+- [Lesson 5: Making decisions](#lesson-5-making-decisions)
+- [Lesson 6: Going round in circles (on purpose)](#lesson-6-going-round-in-circles-on-purpose)
+- [Lesson 7: Teaching B8Script new words](#lesson-7-teaching-b8script-new-words)
+- [Lesson 8: Listening to the keyboard](#lesson-8-listening-to-the-keyboard)
+- [Final project: Guess the number](#final-project-guess-the-number)
+- [Cheat sheet](#cheat-sheet)
+- [Answers to the challenges](#answers-to-the-challenges)
+
 ## Welcome
 
 B8Script is a tiny programming language where every command is a single character, and you can learn its basics in an afternoon. It was made for little 8-bit computers with 64 KB of memory, so the whole interpreter fits in under a kilobyte on a Z80. It's also great fun on a modern PC.
@@ -24,6 +39,8 @@ Open a command window in that folder and type `B8SWINEC`. Now you can type B8Scr
 You can also write a program in any text editor, save it as `HELLO.B8S`, and run it with `B8SWINC HELLO.B8S`. On other machines (CP/M, a 6502 or Z80 homebrew), see the appendices in the [spec](b8script.md).
 
 If a program runs away and won't stop, press **Ctrl-C**. That works in every version.
+
+[↑ Back to top](#b8script-for-beginners-a-stack-of-fun)
 
 ## Lesson 1: The stack, or how to think backwards
 
@@ -62,6 +79,8 @@ In the second line, `2 3 4` piles up three numbers. `*` multiplies the top two (
 Note that `10 4-` means 10 − 4, not 4 − 10. The numbers keep the order you wrote them in. The four maths operators are `+` `-` `*` and `/`, and we'll meet `/` properly in Lesson 3.
 
 **Challenge 1.** Write B8Script that prints the answer to (7 + 5) × (10 − 6). Hint: work out each bracket, leaving both answers on the stack, then multiply.
+
+[↑ Back to top](#b8script-for-beginners-a-stack-of-fun)
 
 ## Lesson 2: Making it talk
 
@@ -108,6 +127,8 @@ B8Script has no special comment character. Instead, write a string and throw it 
 ```
 
 **Challenge 2.** Print `3 + 4 = 7`, letting B8Script work out the 7. Then try it on two lines, with the sum on the first line and `Easy!` on the second.
+
+[↑ Back to top](#b8script-for-beginners-a-stack-of-fun)
 
 ## Lesson 3: Juggling the stack
 
@@ -156,6 +177,8 @@ All B8Script numbers are whole numbers from −32768 to 32767; there are no frac
 
 **Challenge 3.** Using `:` and no variables, print the cube of 6 (6 × 6 × 6). Bonus: is 100 divisible by 7? Print the remainder to find out.
 
+[↑ Back to top](#b8script-for-beginners-a-stack-of-fun)
+
 ## Lesson 4: Variables, or boxes with names
 
 The stack is great for quick sums, but sometimes you want to keep a number for later. B8Script gives you 26 **variables**, named by the lowercase letters `a` to `z`. Think of them as 26 labelled boxes.
@@ -200,6 +223,8 @@ Adding one to a counter is so common that you'll see `i@1+i!` everywhere. Rememb
 **Store before you read.** A variable starts out holding whatever junk was in memory, so always give it a value before you use it. The checked builds set them all to 0, but the small fast builds don't.
 
 **Challenge 4.** A rectangle is 12 wide and 7 high. Store those in `w` and `h`, then print `Area: 84` by working it out from the variables. Then print `12 by 7` using the shortcut.
+
+[↑ Back to top](#b8script-for-beginners-a-stack-of-fun)
 
 ## Lesson 5: Making decisions
 
@@ -247,6 +272,8 @@ This prints `Small`. Step by step:
 The hidden stack is called the **return stack**. B8Script uses it to remember where blocks start, so always pair `{` with `}` in the same block, and don't jump out of the block between them.
 
 **Challenge 5.** Store a temperature in `t`. Print `Freezing!` if it's below 0, and `Not freezing` otherwise. Test it with 10 and with −5 (that's `-5t!`).
+
+[↑ Back to top](#b8script-for-beginners-a-stack-of-fun)
 
 ## Lesson 6: Going round in circles (on purpose)
 
@@ -298,6 +325,8 @@ A program that loops forever by mistake is no disaster: press **Ctrl-C**.
 
 **Challenge 6.** Print the five times table: `5 10 15` and so on, up to `50`. Then, for a harder one, print only the even numbers from 2 to 20. Hint: the remainder of an even number divided by 2 is 0.
 
+[↑ Back to top](#b8script-for-beginners-a-stack-of-fun)
+
 ## Lesson 7: Teaching B8Script new words
 
 The uppercase letters `A` to `Z` are yours to define. Each one can become a new command, called a **word**. Square brackets define it:
@@ -342,6 +371,8 @@ This prints `5040`. In words: if the number is more than 1, multiply it by the f
 - Words that use only the stack are the safest. If a word stores into a variable, it can wreck a variable that the code calling it was using.
 
 **Challenge 7.** Define a word `C` that cubes a number, using your word `S` inside it. Then define `L` to print a new line, and use both to print the cubes of 2 and 3 on separate lines.
+
+[↑ Back to top](#b8script-for-beginners-a-stack-of-fun)
 
 ## Lesson 8: Listening to the keyboard
 
@@ -393,6 +424,8 @@ Type 21 and press Enter, and it prints `Double that is 42`. (`:+` doubles: copy,
 
 **Challenge 8.** Ask for two numbers with N and print their total. Then make it friendlier: if the total is over 100, also print `Wow, that's a lot!`
 
+[↑ Back to top](#b8script-for-beginners-a-stack-of-fun)
+
 ## Final project: Guess the number
 
 You now know enough to read a real game. This one is from the B8Script spec: the computer picks a number from 1 to 99, and you guess it with hints of "higher" and "lower". Save it in a text editor as `GUESS.B8S` and run it with `B8SWINC GUESS.B8S`.
@@ -431,6 +464,8 @@ Ten lines, and every piece is something you've met. Here's how it works.
 - Make it 1 to 999. You'll need to change three numbers. (Which three?)
 - Give it a limit: after 7 wrong guesses, print `Out of guesses! It was` and the number. Hint: the guess-checking loop can end on a test made with `|`, which is true if either side is true.
 - Add `"/{"$` at the start to clear the screen first. A slash and `{` inside a string clears the screen and puts the cursor at the top left; the spec's *Console* chapter has the others, such as `/~` to put the cursor anywhere.
+
+[↑ Back to top](#b8script-for-beginners-a-stack-of-fun)
 
 ## Cheat sheet
 
@@ -472,6 +507,8 @@ Every character this tutorial used. In the *Stack* column, the left side is what
 | Comment | `"any text";` |
 
 There's much more in the full [spec](b8script.md): the heap, machine code with the grave character, screen control and a large Idioms section. The spec's Programs chapter, with Conway's Life and Star Trek, makes great reading once these lessons feel easy.
+
+[↑ Back to top](#b8script-for-beginners-a-stack-of-fun)
 
 ## Answers to the challenges
 
@@ -531,3 +568,5 @@ g@s@=:{( "/M/JGot it in /t tries!/M/J"$ 0)}
 ```
 
 The loop now ends when the guess is right *or* the seventh guess is used up. Afterwards an if-else decides which message you've earned.
+
+[↑ Back to top](#b8script-for-beginners-a-stack-of-fun)

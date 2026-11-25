@@ -34,6 +34,8 @@ python3 chkbr6502.py out/6502/*.lst                # asm80 misses some bad 6502 
 python3 gamecheck.py out                           # every game on every build, briefly
 python3 test_games.py                              # scripted games played to an end on ref.py
 python3 test_programs.py out                       # SIEVE, PI, MANDEL and MON on ref.py and every build
+python3 test_web.py                                # the web player's interpreter against ref.py
+node test_page.js                                  # the web player's page, in Chromium
 python3 b8strip.py ../../games/NAME.TXT ../../games/NAME.B8S    # after editing a game's commented version
 python3 sizes.py out/z80                           # bytes per variant
 python3 mkrel.py                                   # copy out/ to the .bin, .COM and .lst files
@@ -61,6 +63,8 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `run_win32.py` | Runs every Windows build through `check()`, the editor builds through `test_editor.py`, and all of them through a few Windows-only tests |
 | `chkpe.py` | Checks a Windows .EXE's header against the rules: alignments, sizes, the section, the entry point, the import table |
 | `gamecheck.py` | Runs every game, and every program in `programs/` but MON, both `.B8S` and `.TXT`, on every build for a short while and compares the output with `ref.py` |
+| `test_web.py` | Runs the suite, Tiny BASIC, the programs and the scripted games on the web player's interpreter (`../../web/b8s.js`) under Node, through `web_run.js`, and checks every run against `ref.py`, byte for byte. It also checks that `../../web/b8script.html` is up to date |
+| `test_page.js` | Drives the web player in Chromium (Playwright), as a computer and as phones: the screen, typing, a phone's keyboard, the pad, `n?`'s clock, the break key and checked reports. `node test_page.js DIR` also saves screenshots in DIR |
 | `test_programs.py` | Checks SIEVE, PI, MANDEL and MON on `ref.py` against models written in Python (PI's digits are themselves checked against Machin's formula), then, given `out`, runs each on every build and compares the output with `ref.py`'s. MON's R runs one return instruction of the build's CPU |
 | `test_games.py` | Types a fixed key sequence at a game on a checked `ref.py` and checks for the messages it should reach: a win, a loss or another known message. It runs both versions, which must print the same, and checks that every `.B8S` in `games/` and `programs/` holds the code of its `.TXT`. `test_games.py NAME` runs one game's tests |
 | `chktab.py`, `chktab09.py`, `chktab6502.py` | Check the dispatch-table layout rules on Z80/8080, 6809 and zero-page 6502 listings |

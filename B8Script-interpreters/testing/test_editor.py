@@ -383,7 +383,7 @@ TIMED = {
 
 
 def win32_target(exe):
-    """The Windows editor builds (B8SWINE.EXE, B8SWINEC.EXE): files on a
+    """The Windows editor builds (B8SE.EXE, B8SUE.EXE and the like): files on a
     disk, named as typed (and found whatever their case, as Windows does),
     not padded; ^X ends the process."""
     from harness_win32 import Run as WRun, symbols as wsymbols
@@ -392,7 +392,7 @@ def win32_target(exe):
     def fname(files, name):
         return next((k for k in files if k.lower() == name.lower()), name)
     return dict(sy=sy, cpm=False, disk=True, pad=False,
-                checked=exe[:-4].endswith('C'), default=b'PROG.B8S', fname=fname,
+                checked=not os.path.basename(exe).startswith('B8SU'), default=b'PROG.B8S', fname=fname,
                 heaplim=sy['HEAPLIM'] << 8, prog=lambda f: {b'PROG.B8S': f},
                 run=lambda steps, timed, files: WRun(exe, b'', steps, mode='editor', timed=timed, files=files))
 

@@ -17,7 +17,7 @@ def check(lst):
     sym = {m.group(1): int(m.group(2), 16)
            for m in re.finditer(r'^([A-Z_0-9.]+):\s+([0-9A-F]{4}) DEFINED', text, re.M)}
     base = sym['BASE']
-    if sym.get('FAST') == 1:        # the speed build dispatches through a full table: no rules
+    if sym.get('FAST') == 1:        # the fast build dispatches through a full table: no rules
         print(f'{lst.split("/")[-1]:28} ok   (speed build: a full table, no layout rules)')
         return 0
     bad = []

@@ -10,9 +10,9 @@ before the RET runs. The functions modelled are the ones the builds import
 GetCommandLineA, CreateFileA, ReadFile, WriteFile, CloseHandle,
 WaitForSingleObject, WaitForMultipleObjects, CreateWaitableTimerExW,
 SetWaitableTimer, ReadConsoleInputA, GetTickCount, ExitProcess. Anything
-else the program calls, or a fault, ends the run. (The builds no longer
-import GetTickCount or WaitForSingleObject; they are kept here for a build
-that may.) Each call returns its result in EAX and spoils ECX and EDX, which
+else the program calls, or a fault, ends the run. (The builds import neither
+GetTickCount nor WaitForSingleObject; they are modelled here for a build
+that might.) Each call returns its result in EAX and spoils ECX and EDX, which
 the Windows API need not keep, so a build that counts on them fails here.
 
 Run(exe, prog, inp, timed=(), mode='runner', files=None, cmdline=None)
@@ -47,8 +47,10 @@ Bytes 91h and 93h in the input stand for the left and right arrow keys:
 key events with no character and the virtual keys 25h and 27h.
 
 Time: the clock counts emulated work (IPMS instructions are a millisecond,
-measured CHUNK instructions at a time), plus the time that the waits
-spend: a wait with no key to give takes all of its time at once. A timed
+measured CHUNK instructions at a time) from the moment the B8Script
+program starts (run0, after the command line is read and the file
+loaded, so that the .EXE's own name doesn't shift it), plus the time that
+the waits spend: a wait with no key to give takes all of its time at once. A timed
 wait that finds a key (or a key-up event) returns at once, so n?, the
 250 ms window for a second Ctrl-C and the editor's 5 ms Esc wait behave as
 on the Z80 harness. With `console=False` the input is not a
@@ -108,6 +110,9 @@ class Run:
     def __init__(self, exe, prog=b'', inp=b'', timed=(), mode='runner', files=None, cmdline=None,
                  maxinstr=3_000_000_000, console=True, brk_at=None, outcon=True, hires=True):
         self.pe = chkpe.parse(exe)
+        mapf = exe[:-4] + '.map'           # the clock starts where the program does (run0): see run()
+        m = os.path.exists(mapf) and re.search(r'^\s*[0-9A-F]+\s+([0-9A-F]+)\s+run0\s*$', open(mapf).read(), re.M)
+        self.run0 = int(m.group(1), 16) if m else None
         self.mode = mode
         self.stages = []
         if mode == 'editor':
@@ -201,8 +206,11 @@ class Run:
         return None
 
     # ---- the keyboard ----
-    def look(self, t):
-        """A wait on the input handle for t ms: True if an event is there."""
+    def look(self, t, keywait=False):
+        """A wait on the input handle for t ms: True if an event is there. A
+        look with t = 0 is the break check, which is given only keys already
+        pressed; but a key wait (keywait) whose time is already up still
+        gets the next key typed, as Windows gives a waiting key first."""
         self.looks += 1
         if self.brk_at is not None and len(self.out) >= self.brk_at:
             self.pressed.append(3)
@@ -215,7 +223,7 @@ class Run:
         if self.pressed:
             self.press(self.pressed.pop(0))
             return True
-        if t == 0:
+        if t == 0 and not keywait:
             return False
         if not self.inp and t == INFINITE and self.stages:
             self.inp = list(self.stages.pop(0))
@@ -366,7 +374,7 @@ class Run:
         self.timerwaits += 1
         # the input first, as Windows gives the lowest signalled index; the
         # timer ends the wait when its time is up
-        return 0 if self.look(max(0, self.tdue - self.now())) else 1
+        return 0 if self.look(max(0, self.tdue - self.now()), keywait=True) else 1
 
     def k_ReadConsoleInputA(self, h, buf, n, pcnt):
         if not self.events:                 # (never: only after a wait said so)
@@ -385,6 +393,14 @@ class Run:
     # ---- running ----
     def run(self):
         u = self.u
+        if self.run0 is not None and not self.icount:
+            # the startup, to run0, is not counted: run it to there an instruction
+            # at a time is too slow, so stop at run0 and start the clock at 0
+            try:
+                u.emu_start(self.eip, self.run0, count=10_000_000)
+            except UcError as e:
+                self.ended = f'fault {e} at {u.reg_read(UC_X86_REG_EIP):#x}'
+            self.eip = u.reg_read(UC_X86_REG_EIP)
         while self.ended is None:
             try:
                 u.emu_start(self.eip, 0xFFFFFFFF, count=CHUNK)

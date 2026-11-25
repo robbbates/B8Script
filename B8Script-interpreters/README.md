@@ -7,7 +7,16 @@ CPM     EQU     0               ; 1 = CP/M .COM build        (Z80, 8080)
 CHECKED EQU     0               ; 1 = checked build          (all)
 EDITOR  EQU     0               ; 1 = with the line editor   (Z80, Windows)
 ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences (Z80, 8080, 6502, 6809)
+SPEED   EQU     1               ; 0 = small, 1 = base, 2 = fast (all)
 ```
+
+The Windows source takes its switches (`CHECKED`, `EDITOR`, `SPEED`) as NASM defines, such as `-DSPEED=0`.
+
+`SPEED` picks one of three tiers, which every CPU has (see [Speed](#speed)):
+
+- **small** (`SPEED = 0`) is tuned for size: the smallest build of each CPU.
+- **base** (`SPEED = 1`, the default) adds the speed-ups that cost least: about 120 to 330 bytes more than small, for 1.1 to 1.6 times its speed.
+- **fast** (`SPEED = 2`) is base and everything else, size no object: 4 to 9 KB, and 1.7 to 4.6 times the speed of small. It is built for running benchmarks. It goes with every build except the Z80's line editor.
 
 `ANSI` decides what the console escapes of `$` (`/{` `/}` `/|` `` /` `` `/~`) do. With `ANSI = 1` they send ANSI (VT100) sequences through `CONOUT`. With `ANSI = 0` they call four routines of the machine's own (see the machine interface below). The generic builds default to `ANSI = 0`; the CP/M builds always send ANSI, whatever the switch says; the Windows builds always send ANSI, in the console mode they set.
 
@@ -35,57 +44,83 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 **Generic ROM images.** `ANSI = 0` is the default (the console escapes call the machine's routines); `ANSI = 1` sends ANSI sequences.
 
-| CPU | `ANSI = 0` | `ANSI = 1` | Checked, `ANSI = 0` | Checked, `ANSI = 1` |
-|---|---|---|---|---|
-| Z80 | 835 | 886 | 1,219 | 1,266 |
-| Z80 with the line editor | 1,355 | 1,405 | 1,742 | 1,788 |
-| Z80, `QUICK = 1` | 1,054 | 1,118 | 1,402 | 1,449 |
-| Z80 with the line editor, `QUICK = 1` | 1,568 | 1,618 | 1,951 | 1,968 |
-| Z80 speed build (`FAST = 1`) | 4,352 | 4,352 | 4,608 | 4,608 |
-| 8080 | 926 | 980 | 1,348 | 1,402 |
-| 6502, stack in pages 2-3 | 1,208 | 1,265 | 1,707 | 1,750 |
-| 6502, stack in zero page | 1,155 | 1,217 | 1,673 | 1,721 |
-| 6809 | 873 | 934 | 1,264 | 1,313 |
+| CPU | Tier | Unchecked, `ANSI = 0` | Unchecked, `ANSI = 1` | Checked, `ANSI = 0` | Checked, `ANSI = 1` |
+|---|---|---|---|---|---|
+| Z80 | small | 835 | 886 | 1,219 | 1,266 |
+| Z80 | base | 1,054 | 1,118 | 1,402 | 1,449 |
+| Z80 | fast | 4,352 | 4,352 | 4,608 | 4,608 |
+| Z80 with the line editor | small | 1,355 | 1,405 | 1,742 | 1,788 |
+| Z80 with the line editor | base | 1,568 | 1,618 | 1,951 | 1,968 |
+| 8080 | small | 926 | 980 | 1,348 | 1,402 |
+| 8080 | base | 1,134 | 1,188 | 1,528 | 1,582 |
+| 8080 | fast | 4,352 | 4,352 | 4,864 | 4,864 |
+| 6502, stack in pages 2-3 | small | 1,208 | 1,265 | 1,707 | 1,750 |
+| 6502, stack in pages 2-3 | base | 1,534 | 1,591 | 1,976 | 2,019 |
+| 6502, stack in pages 2-3 | fast | 7,448 | 7,505 | 5,506 | 5,549 |
+| 6502, stack in zero page | small | 1,155 | 1,217 | 1,673 | 1,721 |
+| 6502, stack in zero page | base | 1,483 | 1,545 | 1,946 | 1,994 |
+| 6502, stack in zero page | fast | 6,949 | 7,011 | 5,069 | 5,117 |
+| 6809 | small | 873 | 934 | 1,264 | 1,313 |
+| 6809 | base | 1,026 | 1,087 | 1,380 | 1,429 |
+| 6809 | fast | 4,654 | 4,715 | 4,257 | 4,306 |
 
 **CP/M .COM files** (always ANSI):
 
-| CPU | Unchecked | Checked |
-|---|---|---|
-| Z80 | 1,017 | 1,414 |
-| Z80 with the line editor | 1,646 | 2,048 |
-| Z80, `QUICK = 1` | 1,231 | 1,593 |
-| Z80 with the line editor, `QUICK = 1` | 1,860 | 2,227 |
-| Z80 speed build (`FAST = 1`) | 4,608 | 4,864 |
-| 8080 | 1,129 | 1,583 |
+| CPU | Tier | Unchecked | Checked |
+|---|---|---|---|
+| Z80 | small | 1,017 | 1,414 |
+| Z80 | base | 1,231 | 1,593 |
+| Z80 | fast | 4,608 | 4,864 |
+| Z80 with the line editor | small | 1,646 | 2,048 |
+| Z80 with the line editor | base | 1,860 | 2,227 |
+| 8080 | small | 1,129 | 1,583 |
+| 8080 | base | 1,341 | 1,763 |
+| 8080 | fast | 4,608 | 4,864 |
 
 **Windows .EXE files** (always ANSI):
 
-| | Unchecked | Checked | With the editor | Editor, checked |
-|---|---|---|---|---|
-| The file | 2,560 | 3,072 | 3,072 | 3,584 |
-| Code and table | 1,319 | 1,829 | 2,021 | 2,543 |
+| Tier | | Unchecked | Checked | With the editor, unchecked | With the editor, checked |
+|---|---|---|---|---|---|
+| small | The file | 2,560 | 3,072 | 3,072 | 3,584 |
+| small | Code and table | 1,319 | 1,829 | 2,021 | 2,543 |
+| base | The file | 2,560 | 3,072 | 3,584 | 4,096 |
+| base | Code and table | 1,509 | 1,973 | 2,207 | 2,687 |
+| fast | The file | 8,192 | 7,680 | 8,704 | 8,704 |
+| fast | Code and tables | 6,963 | 6,575 | 7,663 | 7,291 |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
-- A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 357, 359, 143 and 133 bytes to spare before their next step up.
+- A checked fast build can be smaller than its unchecked one (6502, 6809, Windows): the unchecked one's 26 variable entries each also do `@` and `!`.
+- The 8080 fast builds include up to 255 bytes of padding, which puts their 512-byte table on a page boundary.
+- A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four small ones have 357, 359, 143 and 133 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
-- Where the bytes go, on the Z80: the console escapes take about 60 bytes with `ANSI = 0` and 110 with `ANSI = 1`; the break key 60 to 80 (about 30 of them the break-off cell and its wait for a second Ctrl-C); a checked build's checks and report about 380 more; the line editor about 520 (generic) or 630 (CP/M, with its file commands). The CP/M builds reach their five most-used routines with CALL and jumps instead of one-byte RSTs (page zero is the system's), which costs them about 60 bytes on the Z80 and 80 to 100 on the 8080.
+- Where the bytes go, in the Z80's small builds: the console escapes take about 60 bytes with `ANSI = 0` and 110 with `ANSI = 1`; the break key 60 to 80 (about 30 of them the break-off cell and its wait for a second Ctrl-C); a checked build's checks and report about 380 more; the line editor about 520 (generic) or 630 (CP/M, with its file commands). The CP/M builds reach their five most-used routines with CALL and jumps instead of one-byte RSTs (page zero is the system's), which costs them about 60 bytes on the Z80 and 80 to 100 on the 8080.
 
 [↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
 ## Files
 
+Each CPU has a folder, `z80/`, `8080/`, `6502/`, `6809/` and `win32/`, which holds its source and three subfolders, `small/`, `base/` and `fast/`, with that tier's builds.
+
 | File | What it is |
 |---|---|
-| `*/b8s-*.asm` | The source, with comments |
-| `*-rom-XXXX.bin` | Generic ROM image, to load at XXXXh (`-zp-` = the zero-page 6502 interpreter, `-editor-` = Z80 with the line editor) |
-| `B8SZ80.COM`, `B8SZ80C.COM`, `B8S8080.COM`, `B8S8080C.COM` | CP/M builds; the C means checked. Run as `B8SZ80 PROG.B8S` |
-| `B8SZ80E.COM`, `B8SZ80EC.COM` | CP/M builds with the line editor; the C means checked. Run as `B8SZ80E PROG.B8S`, or with no file |
-| `quick/` | The Z80 builds with `QUICK = 1`: every regular Z80 build with its speed-ups, 1.1 to 1.5 times as fast (`B8SZ80Q.COM` and so on; see [Speed](#speed)) |
-| `fast/` | The Z80 speed builds: `B8SZ80F.COM`, `B8SZ80FC.COM` and two generic ROMs, about twice as fast (see [Speed](#speed)) |
-| `win32/B8SWIN.EXE`, `B8SWINC.EXE`, `B8SWINE.EXE`, `B8SWINEC.EXE` | Windows command-shell builds: C means checked, E with the line editor. Run as `B8SWIN PROG.B8S` |
-| `*.lst` | The assembler's listings |
+| `CPU/b8s-*.asm` | The source, with comments |
+| `CPU/TIER/b8s-CPU-TIER-rom-ORG.bin` | Generic ROM image, to load at ORG: 0000h on the Z80 and 8080, E000h on the 6502, F000h on the 6809 (E000h in its fast tier). After `rom`, `-zp` marks the zero-page 6502 interpreter, `-editor` the Z80 with the line editor, and `-unchecked` an unchecked build: `z80/base/b8s-z80-base-rom-0000.bin` is checked, `z80/base/b8s-z80-base-rom-unchecked-0000.bin` unchecked, `6502/small/b8s-6502-small-rom-zp-unchecked-E000.bin` the small zero-page 6502, unchecked |
+| `z80/TIER/B8S*.COM`, `8080/TIER/B8S*.COM` | CP/M builds, named as below. Run as `B8S PROG.B8S` |
+| `win32/TIER/B8S*.EXE` | Windows command-shell builds, named as below. Run as `B8S PROG.B8S` |
+| `*.lst` | The assembler's listings, each named as its build, next to it |
 | `TIMING.B8S` | Times `n?` on your machine, to tune the CP/M builds' count (see The language) |
+
+The CP/M and Windows files are named `B8S`, then `U` if unchecked, then `S` (small) or `F` (fast), then `E` with the line editor. The CPU is in the folder, not the name:
+
+| Build | `small/` | `base/` | `fast/` |
+|---|---|---|---|
+| Runner, checked | `B8SS` | `B8S` | `B8SF` |
+| Runner, unchecked | `B8SUS` | `B8SU` | `B8SUF` |
+| With the line editor, checked | `B8SSE` | `B8SE` | `B8SFE` (Windows only) |
+| With the line editor, unchecked | `B8SUSE` | `B8SUE` | `B8SUFE` (Windows only) |
+
+The Z80 has all ten as `.COM` files, the 8080 the six runners, and Windows all twelve as `.EXE` files. `B8S.COM` (or `B8S.EXE`) is the one to start with: the base runner, checked.
 
 [↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
@@ -106,54 +141,58 @@ The builds follow [`docs/b8script.md`](../docs/b8script.md) (2026-11-24). What t
 
 CP/M has no clock a program can count on, so the CP/M builds time `n?` by counting keyboard checks: BDOS 6 calls, 4 to a millisecond. How long a call takes depends on the BIOS. On an RC2014 with RomWBW and ZPM3 one takes about 280 µs, and 4 of them make `n?` about 13% slow, which is the closest a whole number gets. A machine with a faster or slower BIOS can be tuned once:
 
-1. **Measure.** Run `B8SZ80 TIMING.B8S` (or whichever build you use) and time its step 1 with a watch. It should take 10 seconds. If it takes T seconds, the count your machine wants is 40 / T, rounded: 11.3 seconds gives 3.5, so 4; 5 seconds gives 8; 20 seconds gives 2. It must be 1 to 255. (Step 3 should take the same as step 1; step 4 just shows the machine's speed.)
+1. **Measure.** Run `B8S TIMING.B8S` (or whichever build you use) and time its step 1 with a watch. It should take 10 seconds. If it takes T seconds, the count your machine wants is 40 / T, rounded: 11.3 seconds gives 3.5, so 4; 5 seconds gives 8; 20 seconds gives 2. It must be 1 to 255. (Step 3 should take the same as step 1; step 4 just shows the machine's speed.)
 2. **Find the byte.** The count is one byte in the .COM file:
 
    | File | File offset | Address once loaded | Pages (CP/M 2.2 SAVE) | Last address (CP/M 3 SAVE) |
    |---|---|---|---|---|
-   | `B8SZ80.COM` | 1E8h | 2E8h | 4 | 4F8h |
-   | `B8SZ80C.COM` | 1E5h | 2E5h | 6 | 685h |
-   | `B8SZ80E.COM` | 1D8h | 2D8h | 7 | 76Dh |
-   | `B8SZ80EC.COM` | 1DEh | 2DEh | 8 | 8FFh |
-   | `B8S8080.COM` | 1D7h | 2D7h | 5 | 568h |
-   | `B8S8080C.COM` | 202h | 302h | 7 | 72Eh |
-   | `quick/B8SZ80Q.COM` | 1CDh | 2CDh | 5 | 5CEh |
-   | `quick/B8SZ80QC.COM` | 1CEh | 2CEh | 7 | 738h |
-   | `quick/B8SZ80QE.COM` | 1BDh | 2BDh | 8 | 843h |
-   | `quick/B8SZ80QEC.COM` | 1C7h | 2C7h | 9 | 9B2h |
-   | `fast/B8SZ80F.COM` | 1A0h | 2A0h | 18 | 12FFh |
-   | `fast/B8SZ80FC.COM` | 19Ah | 29Ah | 19 | 13FFh |
+   | `z80/small/B8SS.COM` | 1E5h | 2E5h | 6 | 685h |
+   | `z80/small/B8SUS.COM` | 1E8h | 2E8h | 4 | 4F8h |
+   | `z80/small/B8SSE.COM` | 1DEh | 2DEh | 8 | 8FFh |
+   | `z80/small/B8SUSE.COM` | 1D8h | 2D8h | 7 | 76Dh |
+   | `z80/base/B8S.COM` | 1CEh | 2CEh | 7 | 738h |
+   | `z80/base/B8SU.COM` | 1CDh | 2CDh | 5 | 5CEh |
+   | `z80/base/B8SE.COM` | 1C7h | 2C7h | 9 | 9B2h |
+   | `z80/base/B8SUE.COM` | 1BDh | 2BDh | 8 | 843h |
+   | `z80/fast/B8SF.COM` | 19Ah | 29Ah | 19 | 13FFh |
+   | `z80/fast/B8SUF.COM` | 1A0h | 2A0h | 18 | 12FFh |
+   | `8080/small/B8SS.COM` | 202h | 302h | 7 | 72Eh |
+   | `8080/small/B8SUS.COM` | 1D7h | 2D7h | 5 | 568h |
+   | `8080/base/B8S.COM` | 1E2h | 2E2h | 7 | 7E2h |
+   | `8080/base/B8SU.COM` | 1B7h | 2B7h | 6 | 63Ch |
+   | `8080/fast/B8SF.COM` | 1A7h | 2A7h | 19 | 13FFh |
+   | `8080/fast/B8SUF.COM` | 17Eh | 27Eh | 18 | 12FFh |
 
    These move when the code changes: `testing/patchinfo.py` prints the table for the current builds.
-3. **Patch it**, in hex (8 is `08`, 12 is `0C`). Any one of these:
-   - **On a PC**, with a hex editor: the byte at the file offset (`04` as built).
-   - **CP/M 2.2**, with DDT, for `B8SZ80.COM`:
+3. **Patch it**, in hex (8 is `08`, 12 is `0C`). Use **either** a hex editor on a PC **or** the CP/M tools on the machine itself; you need only one of the three ways below.
+   - **On a PC, with a hex editor:** change the byte at the file offset (`04` as built), then copy the file to the machine.
+   - **Or on CP/M 2.2, with DDT**, for the Z80's `B8S.COM`:
      ```
-     A>DDT B8SZ80.COM
-     -S2E8
-     02E8 04 08
-     02E9 xx .
+     A>DDT B8S.COM
+     -S2CE
+     02CE 04 08
+     02CF xx .
      -G0
-     A>SAVE 4 B8SZ80.COM
+     A>SAVE 7 B8S.COM
      ```
      `S` shows the byte and takes the new one; `.` ends; `G0` leaves DDT; `SAVE` takes the page count from the table.
-   - **CP/M 3 or ZPM3**, where SAVE is a program run first, then the debugger (SAVE waits, and when the debugger exits it asks where to save memory, before anything is cleared):
+   - **Or on CP/M 3 or ZPM3**, where SAVE is a program run first, then the debugger (SAVE waits, and when the debugger exits it asks where to save memory, before anything is cleared):
      ```
      A>SAVE
-     A>SID B8SZ80.COM
-     #S2E8
-     02E8 04 08
-     02E9 xx .
+     A>SID B8S.COM
+     #S2CE
+     02CE 04 08
+     02CF xx .
      #G0
-     Enter file (type RETURN to exit): B8SZ80.COM
-     Delete B8SZ80.COM? Y
+     Enter file (type RETURN to exit): B8S.COM
+     Delete B8S.COM? Y
      Beginning hex address 100
-     Ending hex address 4F8
+     Ending hex address 738
      ```
      ZSID, DDTZ (which RomWBW ships) and DDT work the same way: any debugger that loads the file at 0100h and leaves with `G0`, which is the exit SAVE waits for. Its prompt may differ; `?` lists a debugger's commands.
 4. **Check.** Run `TIMING.B8S` again: step 1 should now take about 10 seconds.
 
-Two other waits are built from the same count: Ctrl-C's 250 ms wait for a second Ctrl-C, and the editor's 5 ms wait after Esc. The patch doesn't change them, and they don't need it: a little off either way does no harm.
+Two other waits are built from the same count: Ctrl-C's 250 ms wait for a second Ctrl-C, and the editor's 5 ms wait after Esc, which is how it tells an arrow key (Esc `[` and a letter, sent together) from a lone Esc. The patch doesn't change them, and they don't need it: a little off either way does no harm.
 
 [↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
@@ -165,15 +204,32 @@ The sources use asm80 1.11.14, from npm (`npm install -g asm80@1.11.14`):
 node asm80.js -m Z80 -t hex -o b8s-z80.hex b8s-z80.asm
 ```
 
-The machine name is `Z80`, `I8080`, `C6502` or `M6809`. To build a variant, edit the EQU lines first, or use `testing/build.sh`, which builds every variant.
+The machine name is `Z80`, `I8080`, `C6502` or `M6809`. That builds the source as its EQU lines stand: the base generic ROM, unchecked. To build a variant, edit the EQU lines first, or use `testing/build.sh`, which builds every variant of a source in one tier: `SPEED=0`, `1` (the default) or `2` picks small, base or fast, and the tier goes in the name.
+
+```
+cd testing
+./build.sh Z80 ../z80/b8s-z80.asm out/z80              # base: b8s-z80-base-gen, -gen-chk, -cpm, -cpm-chk
+VARIANTS=$'0 0 1\n0 1 1\n1 0 1\n1 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80   # base with the editor: -ed, -cpm-ed
+SPEED=0 ./build.sh Z80 ../z80/b8s-z80.asm out/z80      # small: b8s-z80-small-gen and so on
+SPEED=0 VARIANTS=$'0 0 1\n0 1 1\n1 0 1\n1 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80
+SPEED=2 ./build.sh Z80 ../z80/b8s-z80.asm out/z80      # fast: b8s-z80-fast-gen and so on (no editor)
+for sp in 0 1 2; do SPEED=$sp ./build.sh I8080 ../8080/b8s-8080.asm out/8080; done
+for sp in 0 1 2; do SPEED=$sp VARIANTS=$'0 0\n0 1' ./build.sh C6502 ../6502/b8s-6502.asm out/6502; done
+for sp in 0 1 2; do SPEED=$sp VARIANTS=$'0 0\n0 1' ./build.sh C6502 ../6502/b8s-6502-zp.asm out/6502; done
+for sp in 0 1 2; do SPEED=$sp VARIANTS=$'0 0\n0 1' ./build.sh M6809 ../6809/b8s-6809.asm out/6809; done
+ANSI=1 VARIANTS=$'0 0\n0 1\n0 0 1\n0 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80a   # the generic ones with ANSI = 1
+./build_win32.sh                                        # all twelve Windows files, into out/win32
+python3 run_z80.py z80 out/z80                          # each CPU's tests take every tier in the folder
+python3 mkrel.py                                        # copies them to each CPU's small/, base/ and fast/
+```
 
 The Windows source is for NASM (2.16), which writes the .EXE directly, with no linker: the source lays the file's header out itself.
 
 ```
-nasm -f bin -DCHECKED=1 -DEDITOR=1 -o B8SWINEC.EXE b8s-win32.asm
+nasm -f bin -DCHECKED=1 -DEDITOR=1 -o B8SE.EXE b8s-win32.asm
 ```
 
-`testing/build_win32.sh` builds all four.
+That is the base build with the editor, checked; `-DSPEED=0` makes it small (`B8SSE.EXE`) and `-DSPEED=2` fast (`B8SFE.EXE`). `testing/build_win32.sh` builds all twelve.
 
 asm80 has some quirks the sources work around:
 - `IF`/`IFN`/`ENDIF` must not be nested, and there is no `ELSE`. Combined conditions are written as arithmetic, like `IF (1-CPM)*CHECKED`.
@@ -196,7 +252,7 @@ To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6
 - **6502, zero page:** three pages. The handlers of `! " # $ % & ' (` start in the image's first 256 bytes, those of `) * + , - . / : ; < = > ?` in its second, and the rest in its third. The split is fixed (`N1`, `N2`), so code that grows may have to move; the source marks the stretches where no handler starts, which are the places to move it to. The image must be assembled at a multiple of 512.
 - **Z80, 8080:** the RST routines must sit at their vectors.
 
-`testing/chktab.py` (Z80, 8080), `testing/chktab09.py` (6809) and `testing/chktab6502.py` check all of this on the listings. Run them after any change; each says how many bytes are to spare. `b8s-6502.asm` has a table of whole addresses and no such rules.
+`testing/chktab.py` (Z80, 8080), `testing/chktab09.py` (6809) and `testing/chktab6502.py` check all of this on the listings. Run them after any change; each says how many bytes are to spare. `b8s-6502.asm` has a table of whole addresses and no such rules, and the fast builds of every CPU dispatch through a full table and have none either.
 
 [↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
@@ -208,9 +264,9 @@ To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6
 | CONOUT | print A | same | same |
 | EXIT | jumped to when the program ends | same | same |
 | KEY and CONOUT must keep | BC, DE, HL (and IY on the Z80) | X, Y | B, X, Y, U, DP |
-| Where to start | reset at 0000h | label `start`, E000h (point the reset vector at it) | label `start`, F000h (point the reset vector at it) |
-| RAM | RS 8000h, DS 8100h, letters 8200h, PROG 8300h; the skip cache (Z80 `QUICK` and speed builds) the page at the heap limit, F000h | RS = page 1, DS 0200h/0300h (or zero page 10h-EFh), letters 0400h, PROG 0500h | RS 8000h (S), DS 8100h (U), letters 8200h (DP), PROG 8300h |
-| Heap limit | `HEAPLIM` (page), default F0h | default E0h | default F0h |
+| Where to start | reset at 0000h | label `start`, E000h (point the reset vector at it); E200h in the fast builds, whose table fills E000h-E1FFh | label `start`, F000h (point the reset vector at it); E000h in the fast builds |
+| RAM | RS 8000h, DS 8100h, letters 8200h, PROG 8300h; the skip cache (base and fast builds) the page at the heap limit, F000h | RS = page 1, DS 0200h/0300h (or zero page 10h-EFh), letters 0400h, PROG 0500h; the skip cache (base and fast builds) the page at the heap limit, DF00h, or 0200h in the zero-page interpreter | RS 8000h (S), DS 8100h (U), letters 8200h (DP), PROG 8300h; the skip cache (base and fast builds) the page at the heap limit |
+| Heap limit | `HEAPLIM` (page), F0h as built | E0h as built; DFh in the base and fast builds of the pages 2-3 interpreter | F0h in the small build, EFh in base, DFh in fast |
 | Timing | `MSLOOP` = loop passes per millisecond for `n?` (1-255); tune it to your clock and KEY | same | same |
 | With `ANSI = 0`: CONCLS (FF0Ch), CONEOL (FF0Fh) | clear the screen and home the cursor; clear to the end of the line | same | same |
 | CONCUR (FF12h) | show the cursor if A is not 0, hide it if A = 0 | show if the carry is set, hide if clear | as the Z80 |
@@ -239,6 +295,8 @@ Every build stops a running program on Ctrl-C. An unchecked build prints nothing
 [↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
 ## The Z80 line editor (EDITOR = 1)
+
+The line editor is built into the Z80 builds (small and base) and the Windows builds (every tier). The 8080, 6502 and 6809 builds are runners only, and the Z80's fast build has no editor. An editor can be added to any of them if there's enough interest.
 
 The interpreter starts in the editor, and a program that ends comes back to it. There is no prompt. It follows the suggested standard in the spec's Environments chapter. Type a line and press Return:
 
@@ -279,33 +337,33 @@ A command key ends the line too, and takes what was typed before it as its argum
 - ^R ends at ^Z only. The spec also names ^@, but KEY returns 0 for "no key", so a NUL can't be seen.
 - Nothing checks that the text fits in memory.
 
-**With CP/M** (`B8SZ80E`, `B8SZ80EC`):
+**With CP/M** (`B8SE`, `B8SUE`, `B8SSE`, `B8SUSE`):
 - The file named on the command line is the program to start with, and the name that ^R and ^W use until another is typed. With no file, or no such file, there is no program.
 - A name is up to 8 characters, a dot and up to 3 more, on the current drive. It is put in capitals.
 - The text ends at the file's first ^Z, and a last line with no CR LF is given one. ^W pads the last record with ^Z.
 - ^W deletes the old file first. It does not notice a full disk or directory: the file is then short, or missing.
 - The editor reads its keys with BDOS 6, so BDOS 10's editing keys don't apply to it, and Ctrl-C at the editor does nothing: ^X leaves.
 
-**Checked** (`-editor-checked-`, `B8SZ80EC`):
+**Checked** (`B8SE`, `B8SSE`, and the `-rom-editor-` images without `-unchecked`):
 - A program that is stopped, by an error or by Ctrl-C, prints its report and comes back to the editor, with both stacks empty.
 - A line typed at the editor is line 0 in the report; the column is the place in the line.
 
-The editor adds 520 bytes to the unchecked generic build and 629 to the CP/M one (523 and 634 to the checked ones).
+In the small builds the editor adds 520 bytes to the unchecked generic build and 629 to the CP/M one (523 and 634 to the checked ones); in base it adds 514 and 629 (549 and 634).
 
 [↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
 ## The Windows builds (`win32/`)
 
-Four programs for the Windows command shell, in 32-bit x86 assembly: `B8SWIN.EXE`, `B8SWINC.EXE` (checked), `B8SWINE.EXE` (with the line editor) and `B8SWINEC.EXE` (editor, checked). A 32-bit program runs on every Windows, the 64-bit and ARM ones included.
+Twelve programs for the Windows command shell, in 32-bit x86 assembly, four in each tier. In `win32/base/`: `B8S.EXE` (the runner, checked), `B8SU.EXE` (unchecked), `B8SE.EXE` (with the line editor, checked) and `B8SUE.EXE` (editor, unchecked); in `win32/small/` the same with an S after `B8S` (`B8SS.EXE` and so on), and in `win32/fast/` with an F (`B8SF.EXE` and so on). A 32-bit program runs on every Windows, the 64-bit and ARM ones included.
 
 ```
-B8SWIN PROG.B8S
-B8SWIN PROG.B8S > out.txt
-B8SWINE PROG.B8S
+B8S PROG.B8S
+B8S PROG.B8S > out.txt
+B8SE PROG.B8S
 ```
 
-- **They have not been run on Windows yet.** They are tested in an emulator, with the Windows calls they make modelled by hand, and their headers are checked against the documented rules (see How they were tested). Wine would not start in the container they were written in. The first run on a real machine is still to do.
-- **The machine is the spec's:** 64 KB of memory, 16-bit cells and addresses. The memory map is in the spec's Appendix G. The language, the break key, the checked builds' errors and report, and the editor are the Z80's, key for key.
+- **They have not been run on Windows yet.** They are tested in an emulator, with the Windows calls they make modelled by hand, and their headers are checked against the documented rules (see How they were tested). The first run on a real machine is still to do.
+- **The machine is the spec's:** 64 KB of memory, 16-bit cells and addresses. The memory map is in the spec's Appendix E. The language, the break key, the checked builds' errors and report, and the editor are the Z80's, key for key.
 - **The file.** A runner loads the file named on the command line, runs it and exits. With no file, or one that can't be opened, it exits without a word. An editor build starts with that file as its program, or empty. A file can hold up to 64,765 bytes.
 - **Output** goes to standard output, so it can be redirected. A checked build's report goes to standard error.
 - **Keys** are read from the console raw: no echo, and Ctrl-C arrives as a key, so the interpreter's own break rules apply. The console's mode is put back on every way out. The left and right arrow keys work in the editor: they are read as the codes 1Ch and 1Eh, which a program reading keys with `?` sees too. The Delete key does nothing; Backspace deletes.
@@ -313,7 +371,7 @@ B8SWINE PROG.B8S
 - **Time.** A plain timed wait on Windows ends only on the system's tick, every 15.6 ms, so `1?` would take about 16 ms and a game timed by it would crawl. So `n?`, the break-off cell's 250 ms and the editor's Esc wait use a high-resolution waitable timer (Windows 10 1803 and later), set once for the whole wait: the wait ends on a key or when the timer is due, to about a millisecond. On older Windows the timer can't be made, and the waits are plain ones, to the tick. The builds import `CreateWaitableTimerExW`, so they start on Windows Vista and later.
 - **The editor's files.** A name typed before ^R or ^W is a Windows path, as typed, and stays the name until another is typed. Nothing is said if a file can't be read or written: a read then gives no program.
 - **The header** is laid out by hand in the source, by the documented rules and nothing clever: one section, 512-byte file alignment, imports from `kernel32.dll` only (`GetStdHandle`, `GetConsoleMode`, `SetConsoleMode`, `GetCommandLineA`, `CreateFileA`, `ReadFile`, `WriteFile`, `WaitForMultipleObjects`, `CreateWaitableTimerExW`, `SetWaitableTimer`, `ReadConsoleInputA`, `ExitProcess`, and `CloseHandle` in the editor builds). `testing/chkpe.py` checks every file.
-- **Dispatch.** One byte per punctuation character, as on the Z80, but with a single range: every handler starts within 255 bytes of one address, and the assembler stops if one doesn't.
+- **Dispatch.** In small and base, one byte per punctuation character, as on the Z80, but with a single range: every handler starts within 255 bytes of one address, and the assembler stops if one doesn't.
 
 [↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
@@ -380,8 +438,8 @@ R:0
 |---|---|---|
 | Data stack | pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS in zero page | zero page $10-$EF, 112 cells, each cell two bytes side by side |
 | Zero page used | $00-$09 ($07 is the held key in the unchecked build, and with $06 the place of the character being run in the checked one) | $00, $01, $04-$06, $08, $09, and the stack ($0E-$0F are scratch when it is full). A checked build's report also uses $02, $03, $0A and $0B, after the program has stopped |
-| Dispatch table | whole addresses (64 bytes) | one byte each (32 bytes), with the layout rules above |
-| Size (`ANSI = 0`) | 1,208 / 1,707 checked | 1,155 / 1,673 checked |
+| Dispatch table (small and base) | whole addresses (64 bytes) | one byte each (32 bytes), with the layout rules above |
+| Size, small (`ANSI = 0`) | 1,208 / 1,707 checked | 1,155 / 1,673 checked |
 
 The zero-page one is smaller because a cell that holds an address is used as the pointer where it lies (`(0,X)`), a drop is two `INX`, and the 16-bit operators work a byte at a time through one short routine called twice. Machine code written for one needs changing for the other: see the contracts below.
 
@@ -389,38 +447,80 @@ The zero-page one is smaller because a cell that holds an address is used as the
 
 ## Speed
 
-The Z80 builds are tuned for size. Two switches, both off by default, add speed; the spec's [Speed](../docs/b8script.md#speed) section says what each does and why.
+Every source builds in three tiers, set by `SPEED`. They come from the same source, pass the same tests and run any program the same way, with the same machine interface but for the differences named below; the spec's [Speed](../docs/b8script.md#speed) section says what each idea does and why.
 
-- **`QUICK = 1`** adds the speed-ups that cost 180 to 230 bytes: a skip cache, a faster skip, `*` in 8 rounds for a small operand, `/` by a power of two as a shift, a true `)` that reads its block start in place, and, unchecked, a variable and its `@` or `!` in one step. It goes with any of the eight builds; the built files are in [`quick/`](quick/), named as the regular ones with a Q after the Z80 (`B8SZ80Q.COM`, `B8SZ80QC.COM`, `B8SZ80QE.COM`, `B8SZ80QEC.COM`, `b8s-z80-quick-rom-0000.bin` and so on). Two of them are past a size limit the regular ones keep to: the checked generic ROM with `ANSI = 1` (1,449 bytes, past 1,280) and `B8SZ80QEC.COM` (2,227, past 2,048).
-- **`FAST = 1`** is the speed build: `QUICK` and everything else, size no object: a dispatch table of whole addresses, the dispatcher inline, one entry for each letter and digit, the common punctuation written for the table, and `*` and `/` unrolled. It has no editor. The built files are in [`fast/`](fast/), with their own README.
+- **small** (`SPEED = 0`) is tuned for size. Its files are in each CPU's `small/`.
+- **base** (`SPEED = 1`, the default) adds the speed-ups that cost least, about 120 to 330 bytes, and is 1.1 to 1.6 times as fast as small. It goes with every build. Its files are in each CPU's `base/`.
+- **fast** (`SPEED = 2`) is base and everything else, size no object: 4 to 9 KB, 1.7 to 3 times as fast as small on the 8-bit CPUs and 2.7 to 4.6 times on Windows. It is built for running benchmarks. It goes with every build except the Z80's line editor; Windows has fast editor builds. Its files are in each CPU's `fast/`.
 
-Measured in Z80 clock cycles on the generic builds, against the regular build, with the same output every time:
+**What base adds:**
 
-| Program | Regular | `QUICK` | Speed build |
+- **A skip cache.** Nearly every skip has happened before (a loop skips the same false block on every pass), so the end of each is remembered: 64 entries in a page of RAM, and the next skip from the same place is one lookup. Only skips that start in the program text are kept, and the cache is emptied whenever a run starts (in the editor builds, at every line too). A program that changes its own text while it runs is unsafe in the base and fast builds (the spec says so).
+- **A faster skip.** Two range tests rule out most characters before the few that matter are tested.
+- **`*` faster for a small operand** on the 8-bit CPUs.
+- **`/` by a power of two** as a shift: `256/` for a high byte, the 32 and 64 of fixed point.
+- **A true `)`** reads its block start in place.
+- **A variable then `@` or `!`** in one step (unchecked builds).
+
+**How each CPU does it:**
+
+| CPU | Skip cache | `*` | True `)` |
 |---|---|---|---|
-| SIEVE, 1 pass | 56.8 M | 1.09× | 2.24× |
-| PI, 100 digits | 316.2 M | 1.21× | 2.05× |
-| MANDEL | 163.2 M | 1.36× | 2.53× |
-| Tiny BASIC, a short program | 115.4 M | 1.38× | 2.40× |
-| Robots, scripted play | 8.3 M | 1.18× | 2.11× |
-| Reversi, scripted play | 43.9 M | 1.47× | 2.56× |
-| Qubic, scripted play | 61.4 M | 1.26× | 2.35× |
-| Tetris, scripted play | 10.9 M | 1.13× | 1.69× |
+| Z80 | The page at the heap limit, F000h with the default `HEAPLIM`, which the heap never reaches; under CP/M the page after the image, before the return stack | 8 rounds when either operand is below 256 | Added |
+| 8080 | The same as the Z80 | The small operand becomes a byte multiplier, with a shorter round; otherwise 8 rounds for the low byte, then the high byte as a small multiplier | Added |
+| 6502, pages 2-3 | DF00h, with the heap limit moved down a page to it | 8 rounds when either operand is below 256 | Added |
+| 6502, zero page | 0200h, page 2, which this interpreter doesn't otherwise use | The same | Added |
+| 6809 | The page below the ROM, EF00h (DF00h in the fast build), with the heap limit moved down to it | It already uses MUL: a cross term is skipped when a high byte is 0 | Already in the small build |
+| Windows | Outside the 64 KB of B8Script memory | Not needed: x86 has IMUL | Already in the small build |
 
-**The skip cache** takes a page of RAM: in the generic builds the page at the heap limit (F000h with the default `HEAPLIM`), which the heap never reaches; in the CP/M builds the page after the image, before the return stack, so that the letter page is still the one just below the program text. It remembers skips that start in the program text only, and is emptied whenever a run starts (in the editor builds, at every line too). A program that changes its own text while it runs is unsafe in these builds (the spec says so).
+Under CP/M the skip cache's page comes before the return stack, so the letter page is still the one just below the program text, and the break-off cell is at offset 7Bh of it; the spec's appendices give its address in every .COM file.
 
-**Building them:**
+**What fast adds**, besides all of base:
 
-```
-cd testing
-QUICK=1 ./build.sh Z80 ../z80/b8s-z80.asm out/z80                      # b8s-z80-quick-gen and so on
-QUICK=1 VARIANTS=$'0 0 1\n0 1 1\n1 0 1\n1 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80
-FAST=1 ./build.sh Z80 ../z80/b8s-z80.asm out/z80                       # b8s-z80-fast-gen, -gen-chk, -cpm, -cpm-chk
-QUICK=1 ANSI=1 VARIANTS=$'0 0\n0 1\n0 0 1\n0 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80a
-FAST=1 ANSI=1 VARIANTS=$'0 0\n0 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80a
-python3 run_z80.py z80 out/z80                                         # tests them with the rest
-python3 mkrel.py                                                       # copies them to quick/ and fast/
-```
+- **The inner loop is a table:** 256 entries, so a character goes straight to its handler, instead of through the chain of range tests and table of low bytes that small and base use.
+- **That dispatcher is inline** at the end of the fast build's own entries, so there is no jump back to the loop.
+- **One entry for each letter and digit.** A variable loads its own cell's address, and is fetched or stored in the same step when `@` or `!` follows (unchecked builds). A word call reads its own cell. A one-digit number needs no loop.
+- **The commonest punctuation is written for the table:** `+ - : ; % @ , < = > & | ^ ~ * ( ) ]`, and `!` and `.` in the unchecked builds (Windows adds more). The rest reach the shared handlers through a short thunk.
+- **`*` and `/` unrolled** where the CPU has no instruction for them.
+
+A checked fast build can be smaller than its unchecked one: the unchecked one's 26 variable entries each also do `@` and `!`.
+
+**Each CPU's table and dispatcher, in the fast build:**
+
+| CPU | Table | Dispatch | Notes |
+|---|---|---|---|
+| Z80 | Low bytes in one page, high bytes in the next (512 bytes) | `LD A,(BC) / INC BC / EX DE,HL / LD L,A / LD H,page / LD A,(HL) / INC H / LD H,(HL) / LD L,A / JP (HL)` | Every entry starts with TOS in DE. Other handlers end with `JP (IX)` |
+| 8080 | The same, padded onto a page boundary | `LDAX B / INX B / XCHG / MOV L,A / MVI H,page / MOV A,M / INR H / MOV H,M / MOV L,A / PCHL` | A second entry, for results already in DE, saves two XCHGs. `*` isn't unrolled (a jump takes 10 cycles either way, so it gains nothing); `/` is |
+| 6502 | Low bytes in one page, high bytes in the next, at E000h-E1FFh | `LDA (IP),Y`, step IP, then the two bytes into a zero-page vector and `JMP (vector)`, a cycle faster than RTS | The code starts at E200h: point the reset vector there. No self-modifying code, so it runs from ROM |
+| 6809 | 256 whole addresses | `LDB ,Y+ / LDX #table / ABX / ABX / JMP [,X]`, 21 cycles | The image starts at E000h, and the heap limit and skip cache are at DF00h |
+| Windows | 256 whole addresses, plus one for the character after a digit | `movzx eax,byte [esi] / inc esi / jmp [table+eax*4]` | Its own copy of the indirect jump at the end of every hot handler, which also suits a modern CPU's branch prediction |
+
+**How much faster**, against the small build of the same CPU, on the generic builds (Windows: the runner), with the same output every time. Measured in clock cycles, except on Windows, where the count is instructions:
+
+| Program | Z80 | 8080 | 6502 | 6502, zero page | 6809 | Windows |
+|---|---|---|---|---|---|---|
+| **base** | | | | | | |
+| SIEVE, 1 pass | 1.09× | 1.09× | 1.10× | 1.11× | 1.10× | 1.11× |
+| PI, 100 digits | 1.21× | 1.16× | 1.20× | 1.21× | 1.14× | 1.12× |
+| MANDEL | 1.36× | 1.40× | 1.37× | 1.38× | 1.40× | 1.22× |
+| Tiny BASIC, a short program | 1.42× | 1.44× | 1.49× | 1.51× | 1.42× | 1.57× |
+| Robots, scripted play | 1.18× | 1.18× | 1.17× | 1.18× | 1.16× | 1.19× |
+| Reversi, scripted play | 1.47× | 1.49× | 1.49× | 1.51× | 1.52× | 1.49× |
+| Qubic, scripted play | 1.26× | 1.28× | 1.28× | 1.29× | 1.28× | 1.28× |
+| Tetris, scripted play | 1.13× | 1.12× | 1.16× | 1.16× | 1.16× | 1.10× |
+| **fast** | | | | | | |
+| SIEVE, 1 pass | 2.24× | 2.30× | 2.18× | 2.23× | 2.26× | 3.32× |
+| PI, 100 digits | 2.05× | 1.98× | 1.90× | 1.87× | 1.94× | 3.12× |
+| MANDEL | 2.53× | 2.69× | 2.45× | 2.52× | 2.50× | 3.47× |
+| Tiny BASIC, a short program | 2.56× | 2.59× | 2.71× | 2.74× | 2.81× | 4.61× |
+| Robots, scripted play | 2.10× | 2.24× | 1.96× | 1.96× | 2.18× | 2.81× |
+| Reversi, scripted play | 2.56× | 2.65× | 2.66× | 2.72× | 2.95× | 3.92× |
+| Qubic, scripted play | 2.35× | 2.48× | 2.48× | 2.55× | 2.64× | 3.70× |
+| Tetris, scripted play | 1.69× | 1.76× | 1.78× | 1.76× | 2.05× | 2.68× |
+
+The small builds' own counts, for SIEVE's pass: 56.8 M cycles on the Z80, 58.1 M on the 8080, 38.5 M and 37.7 M on the two 6502s, 24.0 M on the 6809 and 4.8 M x86 instructions. Tetris gains least everywhere because much of its time is spent in `n?` waits, which are timed and rightly don't get shorter.
+
+To build the tiers, see [Building](#building).
 
 [↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
@@ -429,17 +529,17 @@ python3 mkrel.py                                                       # copies 
 Every build runs, in an emulator, against a reference interpreter written from the spec (`testing/ref.py`):
 - every example program in the spec;
 - edge cases for `/`, compares, number wrap, string escapes, skips over strings, `\`, `[x`, `[ `, `{]` jumps, heap mark and release with a signed `_`, the hex loader, `0?`, `n?`, `-n?` with editing, and deep stacks;
-- your Tiny BASIC, driven with a typed program (entering, LIST, RUN, GOSUB, FOR, expressions);
+- Tiny BASIC (`programs/TINYBAS.B8S`), driven with a typed program (entering, LIST, RUN, GOSUB, FOR, expressions);
 - a machine-code test per CPU (and per interpreter on the 6502);
 - the break key, on unchecked and checked builds alike: Ctrl-C in a loop, in a chain of word calls and in `?`; the held key, the newest key winning, `?` taking the held key first; the break-off cell, with one Ctrl-C, two quick ones and two slow ones; and a count of how often KEY is called;
 - for checked builds, every error in the table, several ways each, with the whole report compared byte for byte against the reference (run with that build's own addresses); the stack overruns are compared against patterns, since stack sizes differ.
 
-The four editor builds are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the arrow keys, Esc, editing a line in place, new, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
+The Z80's eight editor builds (four in small, four in base) are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the arrow keys, Esc, editing a line in place, new, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
 
-The six CP/M .COM files have also run under real CP/M 2.2, Digital Research's own BDOS and CCP, in z80pack's `cpmsim` (`testing/cpmsim.py`). There the suite's programs (all but two that need a clock or Z80 machine code) gave the reference's output on every build, on a Z80 that traps undocumented opcodes, and the 8080 builds also on an 8080. The one difference, everywhere, was the byte FEh in a string, which that BDOS doesn't print (see The language). Both editor builds were also driven by hand there: listing, running, a typed line, `/~`, an error, Ctrl-C, writing a file and reading it back. The Z80 builds don't run on an 8080 or 8085 (they use Z80 instructions throughout); use the 8080 builds there.
+The six small CP/M .COM files have also run under real CP/M 2.2, Digital Research's own BDOS and CCP, in z80pack's `cpmsim` (`testing/cpmsim.py`). There the suite's programs (all but two that need a clock or Z80 machine code) gave the reference's output on every build, on a Z80 that traps undocumented opcodes, and the 8080 builds also on an 8080. The one difference, everywhere, was the byte FEh in a string, which that BDOS doesn't print (see The language). Both editor builds were also driven by hand there: listing, running, a typed line, `/~`, an error, Ctrl-C, writing a file and reading it back. The Z80 builds don't run on an 8080 or 8085 (they use Z80 instructions throughout); use the 8080 builds there.
 
 The Windows builds run in the Unicorn emulator (`testing/harness_win32.py`): the .EXE is mapped as Windows would map it, and the dozen `kernel32` calls it makes are modelled. They go through the same suite as the others, the break-key tests and the editor sessions included, plus a few tests of their own (the report on standard error, redirected input, the arrow keys, the command line). That tests the interpreter, and the header against the rules; it can't show that Windows itself accepts the file, or that the model of each call is right.
 
-Every game, and every program in `programs/` but MON, is also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`); SIEVE, PI, MANDEL and MON are run in full, and MON's R with each CPU's own return instruction (`testing/test_programs.py`). Each game is in two files, `NAME.TXT` with comments that explain it and `NAME.B8S` stripped from it (`testing/b8strip.py`), and both are run, and the reference plays scripted games of the newest twelve (Wumpus, Robots, 2048, Minesweeper, Breakout, Qubic, Klondike, Lights Out, Fifteen, Greed, Reversi and Battleship) to a win, a loss or a known message (`testing/test_games.py`). The test setup is in `testing/` (see its README).
+Every full-size game, and every program in `programs/` but MON, is also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`); SIEVE, PI, MANDEL and MON are run in full, and MON's R with each CPU's own return instruction (`testing/test_programs.py`). Each full-size game is in two files, `NAME.TXT` with comments that explain it and `NAME.B8S` stripped from it (`testing/b8strip.py`), and both are run (IDOL's `.TXT` is documentation only, so only its `.B8S` is). The reference plays scripted games of all 21 full-size games to a win, a loss or a known message (`testing/test_games.py`), and of the 21 tiny ones (`testing/test_tweets.py`). The test setup is in `testing/` (see its README).
 
 [↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)

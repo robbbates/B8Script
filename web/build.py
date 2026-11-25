@@ -1,5 +1,5 @@
 """Builds b8script.html, the web player: template.html with b8s.js and every program
-in games/ and programs/ put inside it, so that the one file works on its own,
+in games/ (with tweet140/ and tweet280/) and programs/ put inside it, so that the one file works on its own,
 opened from disk or from any web server.
 
 usage: build.py            write b8script.html
@@ -17,10 +17,8 @@ OUT = os.path.join(HERE, 'b8script.html')
 GROUPS = [
     ('Programs', 'programs', ('programs/README.md', None)),
     ('Games', 'games', ('games/README.md', '## Full-size games')),
-    ('Tiny games: 160 characters', 'games/b8sms', ('games/README.md', '### `b8sms/`')),
-    ('Tiny games: 140 characters', 'games/tweet140', ('games/README.md', '### `b8sms/`')),
+    ('Tiny games: 140 characters', 'games/tweet140', ('games/README.md', '### `tweet140/`')),
     ('Tiny games: 280 characters', 'games/tweet280', ('games/README.md', '### `tweet280/`')),
-    ('Tiny games: longer', 'games/longer', ('games/README.md', '### `longer/`')),
 ]
 # where the README says more than a line can
 HOW = {'programs/MON.B8S': 'XXXX shows 16 bytes, Return the next 16, XXXX.YYYY a range, XXXX: hh hh '
@@ -58,31 +56,30 @@ KEYS = {
     'games/TRADER.B8S': (['b s', 'f t', 'q .'], DIGITS),
     'games/WUMPUS.B8S': (['m', 's'], DIGITS),
 }
-for d in ('games/b8sms', 'games/tweet140'):
-    KEYS.update({
-        d + '/HILO.B8S': ([], DIGITS),
-        d + '/LANDER.B8S': ([], ['7 8 9', '4 5 6', '1 2 3', '. 0 .']),
-        d + '/LIGHTS.B8S': (['a b c d e', 'f g h i j', 'k l m n o', 'p q r s t', 'u v w x y'], []),
-        d + '/NIM.B8S': ([], ['1 2 3']),
-        d + '/PIG.B8S': (['Spc'], ['h']),
-        d + '/REFLEX.B8S': ([], ['Spc']),
-        d + '/RPS.B8S': ([], ['1 2 3']),
-        d + '/SIMON.B8S': ([], ['1 2 3 4', '5 6 7 8']),
-        d + '/SKI.B8S': (['j'], ['l']),
-        d + '/TRON.B8S': ([','], ['.']),
-    })
+d = 'games/tweet140'
+KEYS.update({
+    d + '/HILO.B8S': ([], DIGITS),
+    d + '/LANDER.B8S': ([], ['7 8 9', '4 5 6', '1 2 3', '. 0 .']),
+    d + '/LIGHTS14.B8S': (['a b c d e', 'f g h i j', 'k l m n o', 'p q r s t', 'u v w x y'], []),
+    d + '/NIM.B8S': ([], ['1 2 3']),
+    d + '/PIG.B8S': (['Spc'], ['h']),
+    d + '/REFLEX.B8S': ([], ['Spc']),
+    d + '/RPS.B8S': ([], ['1 2 3']),
+    d + '/SIMON.B8S': ([], ['1 2 3 4', '5 6 7 8']),
+    d + '/SKI.B8S': (['j'], ['l']),
+    d + '/TRON.B8S': ([','], ['.']),
+})
 KEYS.update({
     'games/tweet280/BLACKJCK.B8S': (['h'], ['Spc']),
-    'games/tweet280/BREAKOUT.B8S': (['j'], ['l']),
+    'games/tweet280/BRKOUT28.B8S': (['j'], ['l']),
     'games/tweet280/COPTER.B8S': ([], ['Spc']),
     'games/tweet280/DUEL.B8S': ([','], ['.']),
     'games/tweet280/KINGDOM.B8S': ([], DIGITS),
-    'games/tweet280/MASTER.B8S': ([], ['1 2 3', '4 5 6', 'Bs . Ret']),
+    'games/tweet280/MASTER28.B8S': ([], ['1 2 3', '4 5 6', 'Bs . Ret']),
     'games/tweet280/MAZE.B8S': (['. i .', 'j k l'], []),
     'games/tweet280/NIM357.B8S': ([], ['1 2 3', '4 5 6', '7 . .']),
     'games/tweet280/SNAKE.B8S': ([','], ['.']),
     'games/tweet280/TICTAC.B8S': ([], ['1 2 3', '4 5 6', '7 8 9']),
-    'games/longer/MINE390.B8S': ([], ['1 2 3', '4 5 6', '7 8 .']),
 })
 
 

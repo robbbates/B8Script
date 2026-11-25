@@ -8,7 +8,7 @@ Needs: z80pack built (https://github.com/udo-munk/z80pack: make in
 z80pack/cpmsim/srcsim), with its cpm22 disks in cpmsim/disks/library, and
 cpmtools (apt-get install cpmtools). Set Z80PACK to the z80pack folder.
 
-  python3 cpmsim.py suite [-8] OUTDIR BUILD...   e.g. suite out B8SZ80 B8SZ80C
+  python3 cpmsim.py suite [-8] OUTDIR BUILD...   e.g. suite out B8S B8SU
       every program of the suite (but those that need a clock or another
       CPU's machine code) under the named .COM files, each output compared
       byte for byte with ref.py. Keys are typed as a person types them.
@@ -26,9 +26,20 @@ sys.path.insert(0, HERE)
 ZP = os.path.join(os.environ.get('Z80PACK', os.path.join(HERE, 'z80pack')), 'cpmsim')
 SIM = os.path.join(ZP, 'cpmsim')
 FMT = 'ibm-3740'
-COMS = {'B8SZ80': 'z80/b8s-z80-cpm', 'B8SZ80C': 'z80/b8s-z80-cpm-chk',
-        'B8SZ80E': 'z80/b8s-z80-cpm-ed', 'B8SZ80EC': 'z80/b8s-z80-cpm-ed-chk',
-        'B8S8080': '8080/b8s-8080-cpm', 'B8S8080C': '8080/b8s-8080-cpm-chk'}
+
+
+def coms(cpu8):
+    """One CPU's CP/M builds, by the names they are released under: B8S (base,
+    checked), B8SU (unchecked), B8SE and B8SUE (with the editor), and the
+    same with S for the small builds and F for the fast ones: B8SS, B8SUS,
+    B8SSE, B8SUSE, B8SF, B8SUF."""
+    cpu = '8080' if cpu8 else 'z80'
+    d = {}
+    for t, tier in (('S', 'small'), ('', 'base'), ('F', 'fast')):
+        for e, kind in (('', 'cpm'), ('E', 'cpm-ed')):
+            d[f'B8S{t}{e}'] = f'{cpu}/b8s-{cpu}-{tier}-{kind}-chk'
+            d[f'B8SU{t}{e}'] = f'{cpu}/b8s-{cpu}-{tier}-{kind}'
+    return d
 
 
 def hex2com(hexf):
@@ -58,10 +69,10 @@ def put(disk, name, data):
     os.remove(tmp)
 
 
-def setup(outdir):
+def setup(outdir, cpu8):
     shutil.copy(os.path.join(ZP, 'disks', 'library', 'cpm22-1.dsk'), os.path.join(ZP, 'disks', 'drivea.dsk'))
     b = blank('driveb.dsk')
-    for com, base in COMS.items():
+    for com, base in coms(cpu8).items():
         hexf = os.path.join(outdir, base + '.hex')
         if os.path.exists(hexf):
             put(b, com + '.COM', hex2com(hexf))
@@ -116,14 +127,14 @@ def suite(outdir, builds, cpu8):
     from tests import SUITE, CHK, LOOSE
     skip = {'keyt', 'mcdouble'}      # a clock the emulator runs flat out; Z80 machine code
     progs = [t for t in SUITE + CHK + LOOSE if t[0] not in skip]
-    c = setup(outdir)
+    c = setup(outdir, cpu8)
     names = {}
     for k, (n, p, i) in enumerate(progs):
         names[n] = 'T%02d.B8S' % k
         put(c, names[n], p)
     fails = 0
     for b in builds:
-        checked = b.endswith('C')
+        checked = not b.startswith('B8SU')
         sim, bad, ran = Sim(cpu8), [], 0
         for n, p, i in progs:
             if (n, p, i) in CHK and not checked or (n, p, i) in LOOSE and checked:
@@ -157,7 +168,7 @@ def suite(outdir, builds, cpu8):
 
 
 def type_steps(outdir, steps, cpu8):
-    setup(outdir)
+    setup(outdir, cpu8)
     sim = Sim(cpu8)
     mark = len(sim.out)
     for s in steps:

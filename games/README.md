@@ -1,6 +1,6 @@
 # B8Script games
 
-Fifty-three games for B8Script: twenty-one full-size ones, and thirty-two tiny ones that each fit in a text message or a tweet. Programs that aren't games, such as Tiny BASIC, a memory monitor and benchmarks, are in [`programs/`](../programs/).
+Forty-two games for B8Script: twenty-one full-size ones, and twenty-one tiny ones that each fit in a tweet. Programs that aren't games, such as Tiny BASIC, a memory monitor and benchmarks, are in [`programs/`](../programs/).
 
 ## Running a game
 
@@ -8,9 +8,9 @@ Every `.B8S` file is a complete program. Run it with any B8Script runner:
 
 | On | Command |
 |---|---|
-| Windows (command shell) | `B8SWIN BREAKOUT.B8S` |
-| CP/M, Z80 | `B8SZ80 BREAKOUT.B8S` |
-| CP/M, 8080 | `B8S8080 BREAKOUT.B8S` |
+| Windows (command shell) | `B8S BREAKOUT.B8S` (`B8S.EXE` from `win32/base/`) |
+| CP/M, Z80 | `B8S BREAKOUT.B8S` (`B8S.COM` from `z80/base/`) |
+| CP/M, 8080 | `B8S BREAKOUT.B8S` (`B8S.COM` from `8080/base/`) |
 | A web browser, on a computer or a phone | Open [`web/b8script.html`](../web/b8script.html) and pick the game from its menu |
 
 The interpreters are in [`B8Script-interpreters/`](../B8Script-interpreters/), and its README covers every build, including the 6502 and 6809 ROMs.
@@ -48,49 +48,39 @@ The interpreters are in [`B8Script-interpreters/`](../B8Script-interpreters/), a
 
 ## Tiny games
 
-Thirty-two games, each one complete in a few lines. [`docs/b8sms.md`](../docs/b8sms.md) shows the code of each and explains how it fits.
+Twenty-one games, each one complete in a tweet. [`docs/tweets.md`](../docs/tweets.md) shows the code of each and explains how it fits. Four of them share a name with a full-size game, so their file names carry their size instead: `LIGHTS14.B8S`, `BRKOUT28.B8S`, `MASTER28.B8S` and `HANGMN28.B8S`.
 
-### `b8sms/`: 160 characters, the length of a text message
+### `tweet140/`: 140 characters, the classic tweet
 
 | File | Game | How to play |
 |---|---|---|
-| `HILO.B8S` | **Hi-Lo**: guess a number from 0 to 127 in seven tries. A perfect binary search always wins. | Press a key, then type guesses and press Return. |
+| `HILO.B8S` | **Hi-Lo**: guess a number from 0 to 127 in seven tries. Each guess gets `<` (too low), `>` (too high) or `=`. A perfect binary search always wins. | Press a key, then type guesses and press Return. |
 | `LANDER.B8S` | **Lunar Lander**, turn by turn, with tight fuel. Touch down slower than 5. | 0–9 burns that much fuel each turn. |
 | `NIM.B8S` | **Nim**: take 1–3 sticks, and whoever takes the last loses. The computer plays perfectly. | Press a key, then 1–3 each turn. |
 | `REFLEX.B8S` | **Reflex**: five rounds; hit a key the moment it says GO. Lowest total wins, and pressing early costs 999. | Press a key to start, then any key at GO. |
-| `SKI.B8S` | **Ski**: a slalom course scrolls past; stay between the poles. | j left, l right. |
+| `SKI.B8S` | **Ski**: a slalom course scrolls past; stay between the poles. The score is the number of lines you last. | j left, l right. |
 | `RPS.B8S` | **Rock Paper Scissors** against an AI that learns your habits. First to +5 or −5. | 1 rock, 2 paper, 3 scissors. |
 | `SIMON.B8S` | **Simon**: repeat a growing string of digits after it vanishes. | Press a key, then type the digits. |
 | `PIG.B8S` | **Pig**, the dice game: reach 100 in as few turns as you can. A 1 loses the turn's points. | Any key rolls, h banks the points. |
 | `TRON.B8S` | **Tron**: a light cycle that never stops. Don't hit your own trail. | `,` turns left, `.` turns right. |
-| `LIGHTS.B8S` | **Lights Out**, the classic 5 × 5 puzzle from all lights on. Upper case is on, lower case is off; 15 presses is the best. | a–y press that cell. |
-
-### `tweet140/`: 140 characters, the classic tweet
-
-The same ten games, cut down. They play the same, with shorter titles and messages. Hi-Lo answers `64>` (too high), `4<` (too low) and `4=` (right).
+| `LIGHTS14.B8S` | **Lights Out**, the classic 5 × 5 puzzle from all lights on. Upper case is on, lower case is off; 15 presses is the best. | a–y press that cell. |
 
 ### `tweet280/`: 280 characters, a tweet since 2017
 
 | File | Game | How to play |
 |---|---|---|
 | `SNAKE.B8S` | **Snake**: eat the `*` and grow, and don't bite yourself. The edges wrap round. | `,` turns left, `.` turns right. |
-| `MASTER.B8S` | **Mastermind**, full black and white pegs: four digits 1–6, ten tries. | Press a key, then type four digits and press Return. |
+| `MASTER28.B8S` | **Mastermind**, full black and white pegs: four digits 1–6, ten tries. | Press a key, then type four digits and press Return. |
 | `NIM357.B8S` | **Nim 3-5-7**: three heaps, and whoever takes the last stick wins. The computer plays perfectly; you can win only with perfect play from the first move. | A heap (1–3), then how many to take. |
 | `DUEL.B8S` | **Duel**: Tron against the computer. Last one moving wins. | `,` turns left, `.` turns right. |
 | `KINGDOM.B8S` | **Kingdom** (Hamurabi): rule for ten years. Each person eats 20 bushels and can plant 10, on at most 999 acres. Feed fewer than half and you are overthrown. | Type how much grain to feed each year, then Return. |
 | `TICTAC.B8S` | **Tic-tac-toe** against an unbeatable opponent. A draw is the best you can do. | 1–9, row by row from the top left. |
 | `BLACKJCK.B8S` | **Blackjack**: $100, betting $10 a hand. The dealer draws to 17. | Press a key, then h to hit, any other key to stand. |
 | `COPTER.B8S` | **Copter**: fly down a narrowing cave. Gravity pulls you right; you have inertia. | Any key pushes left. |
-| `BREAKOUT.B8S` | **Breakout**: 96 bricks; keep the ball in play. | j left, l right. |
-| `HANGMAN.B8S` | **Hangman**: eight six-letter computer words, six misses allowed. | Press a key, then guess letters. |
-| `MAZE.B8S` | **Maze**: a new maze every game. Start in the gap at the top right and get out through the gap at the bottom left. | Press a key, then i up, j left, k down, l right. |
-
-### `longer/`
-
-| File | Game | How to play |
-|---|---|---|
-| `MINE390.B8S` | **Minesweeper** with flood fill, in 390 characters: an example of what a little more than a tweet buys. 8 × 8, about one mine in eight. | Press a key, then a row digit and a column digit (1–8 each). |
+| `BRKOUT28.B8S` | **Breakout**: 96 bricks; keep the ball in play. The score is the bricks broken. | j left, l right. |
+| `HANGMN28.B8S` | **Hangman**: eight six-letter computer words, six misses allowed. | Press a key, then guess letters. |
+| `MAZE.B8S` | **Maze**: a new maze every game. Start in the gap at the top right and get out through the gap at the bottom left; the way out is always 54 steps. | Press a key, then i up, j left, k down, l right. |
 
 ### Speed of the real-time tiny games
 
-Ski, Tron, Snake, Duel and Copter move one step per `99?` in their code: a wait of up to 99 ms for a key, so about ten steps a second. Breakout waits `250?`, about four steps a second, which keeps it playable but still a challenge. It is now exactly 280 characters, so it has no room for a longer number. To change the speed, change that number: bigger is slower. Up to `99?` it costs nothing; a three-digit wait costs one character, which still fits every limit. Pressing a key ends a wait early, so a game runs a little faster while you press keys.
+Ski, Tron, Snake, Duel and Copter move one step per `99?` in their code: a wait of up to 99 ms for a key, so about ten steps a second. Breakout waits `250?`, about four steps a second, which keeps it playable but still a challenge. To change the speed, change that number: bigger is slower. Up to `99?` it costs nothing; a three-digit wait costs one character, which still fits every limit. Pressing a key ends a wait early, so a game runs a little faster while you press keys.

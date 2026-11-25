@@ -4,7 +4,7 @@
 ;  Design follows the Z80 interpreter (z80/b8s-z80.asm), with 8080 opcodes
 ;  only.
 ;
-;  Three switches, set in the EQU lines below:
+;  The switches, set in the EQU lines below:
 ;    CPM      0 = generic ROM build (KEY/CONOUT at fixed addresses)
 ;             1 = CP/M 2.2 .COM file: loads the file named on the command line
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
@@ -16,6 +16,12 @@
 ;             1 = send ANSI (VT100) sequences through CONOUT
 ;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
 ;                 CONAT (see the equates). The CP/M builds always send ANSI.
+;    SPEED    0 = small: the smallest build
+;             1 = base, the default: the speed-ups that cost bytes: a skip
+;                 cache, a faster skip, '*' and '/' quicker for small and
+;                 power-of-two operands, and more (see "Speed-ups")
+;             2 = fast: base and a dispatch table besides, with no size
+;                 limit (see "The fast build").
 ;
 ;  In every build Ctrl-C stops a running program (an unchecked build stops
 ;  without a word): see the console layer for the rules, the held key and
@@ -27,7 +33,16 @@
 CPM     EQU     0               ; 1 = CP/M .COM build
 CHECKED EQU     0               ; 1 = checked build
 ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
+SPEED   EQU     1               ; 0 = small, 1 = base, 2 = fast (see "Speed-ups")
+FAST    EQU     SPEED/2         ; (1: the fast build)
+SBASE   EQU     SPEED-FAST*2    ; (1: the base build)
 ANS     EQU     ANSI+CPM-ANSI*CPM ; (CP/M: always ANSI)
+QK      EQU     SBASE+FAST-SBASE*FAST ; (the speed-ups: base, or the fast build)
+SBASEU  EQU     QK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
+                                ;  builds take; the fast build has its own)
+PTLATE  EQU     SBASEU*(1-CPM)  ; (1: the table goes after psgn and pdec, not
+                                ;   before the routines: wherever it doesn't
+                                ;   cross a page. chktab.py says if it does)
 
 ; -----------------------------------------------------------------------------
 ;  Register use, everywhere in the interpreter
@@ -64,6 +79,9 @@ ANS     EQU     ANSI+CPM-ANSI*CPM ; (CP/M: always ANSI)
 ;  image's second page, the rest in its first. The layout below keeps to
 ;  that, and testing/chktab.py checks it in every build.
 ;
+;  The fast build (FAST) dispatches through a full table instead, and there
+;  NEXT and DROP are jumps outside page zero: see "The fast build".
+;
 ;  What the 8080 lacks, and what replaces it: no JR (JMP/Jcc), no DJNZ, no
 ;  SBC HL (byte-wise SUB/SBB, or negate and DAD), no shifts on register pairs
 ;  (DAD H doubles; RAL/RAR through A), no LDIR/CPIR (small loops).
@@ -80,6 +98,11 @@ ANS     EQU     ANSI+CPM-ANSI*CPM ; (CP/M: always ANSI)
 ;             +7Ch, interpreter variables in the gaps, and the -n? line buffer
 ;             at +80h..+FFh
 ;    PROG     the program text, NUL-terminated; the heap starts after the NUL
+;
+;  The base and fast builds have a fifth, CPAGE, for the skip cache: the
+;  page at the heap limit (F000h) in a generic build, and under CP/M the
+;  first page after the image, before the return stack, so that the letter
+;  page is still the one just below the program text.
 ;
 ;  The stacks sit below the letter page, so "the program's own space" (what
 ;  the checked build lets ! and . write) is the single range from the letter
@@ -119,6 +142,8 @@ DSPAGE  EQU     81h             ; 8100h data stack
 LETPAGE EQU     82h             ; 8200h letter cells and line buffer
 PROG    EQU     8300h           ; where the loader puts the program text
 HEAPLIM EQU     0F0h            ; the heap must stay below F000h (a page)
+CPAGE   EQU     HEAPLIM         ; the skip cache's page (QK builds): the page
+                                ;   at the heap limit, which the heap never reaches
 BASE    EQU     0000h           ; where the image starts
         ENDIF
 
@@ -160,6 +185,18 @@ ADRP    EQU     drp
 ANEG    EQU     neg16
 APUT    EQU     putc
 ANXT    EQU     next0
+        IF      CHECKED
+ACHK    EQU     chkstk          ; (for the fast build's dispatcher)
+        ENDIF
+        IF      1-CHECKED
+ACHK    EQU     0
+        ENDIF
+        IF      FAST
+DTPG    EQU     DTAB/256        ; (the fast build's table's first page)
+        ENDIF
+        IF      1-FAST
+DTPG    EQU     0
+        ENDIF
         .macro  POPR            ; pop the return stack into HL
         DS      1-CPM,0CFh      ;   RST 1
         DS      CPM,0CDh        ;   CALL rpop
@@ -167,7 +204,17 @@ ANXT    EQU     next0
         DS      CPM,AROP/256
         .endm
         .macro  DROP            ; drop TOS, then next character
-        DS      1-CPM,0DFh      ;   RST 3
+        DS      (1-CPM)*(1-FAST),0DFh ; RST 3
+        DS      CPM*(1-FAST),0C3h ;   JMP drp
+        DS      CPM*(1-FAST),ADRP&0FFh
+        DS      CPM*(1-FAST),ADRP/256
+        DS      FAST,0E1h       ;   (fast build: POP H / JMP next0)
+        DS      FAST,0C3h
+        DS      FAST,ANXT&0FFh
+        DS      FAST,ANXT/256
+        .endm
+        .macro  DROPZ           ; the same, in the generic page zero: one byte
+        DS      1-CPM,0DFh      ;   there in every build (RST 3)
         DS      CPM,0C3h        ;   JMP drp
         DS      CPM,ADRP&0FFh
         DS      CPM,ADRP/256
@@ -185,10 +232,88 @@ ANXT    EQU     next0
         DS      CPM,APUT/256
         .endm
         .macro  NEXT            ; next character
-        DS      1-CPM,0F7h      ;   RST 6
+        DS      (1-CPM)*(1-FAST),0F7h ; RST 6
+        DS      CPM+FAST-CPM*FAST,0C3h ; JMP next0 (CP/M, and the fast build)
+        DS      CPM+FAST-CPM*FAST,ANXT&0FFh
+        DS      CPM+FAST-CPM*FAST,ANXT/256
+        .endm
+        .macro  NEXTZ           ; next character, in the generic page zero: one
+        DS      1-CPM,0F7h      ;   byte there in every build (RST 6)
         DS      CPM,0C3h        ;   JMP next0
         DS      CPM,ANXT&0FFh
         DS      CPM,ANXT/256
+        .endm
+        .macro  NEXTF           ; (fast build only: the dispatcher itself, inline)
+        DS      FAST*CHECKED,0CDh ; (checked: CALL chkstk)
+        DS      FAST*CHECKED,ACHK&0FFh
+        DS      FAST*CHECKED,ACHK/256
+        DS      FAST,0Ah        ;   LDAX B
+        DS      FAST,03h        ;   INX B
+        DS      FAST,0EBh       ;   XCHG        (TOS to DE)
+        DS      FAST,6Fh        ;   MOV L,A
+        DS      FAST,26h        ;   MVI H,DTAB/256
+        DS      FAST,DTPG
+        DS      FAST,7Eh        ;   MOV A,M     (the low byte)
+        DS      FAST,24h        ;   INR H
+        DS      FAST,66h        ;   MOV H,M     (the high byte)
+        DS      FAST,6Fh        ;   MOV L,A
+        DS      FAST,0E9h       ;   PCHL
+        .endm
+        .macro  NEXTD           ; (fast build only: the dispatcher, with TOS in DE.
+        DS      FAST*CHECKED,0EBh ; A checked build's chkstk wants it in HL)
+        DS      FAST*CHECKED,0CDh
+        DS      FAST*CHECKED,ACHK&0FFh
+        DS      FAST*CHECKED,ACHK/256
+        DS      FAST,0Ah
+        DS      FAST,03h
+        DS      FAST*CHECKED,0EBh
+        DS      FAST,6Fh
+        DS      FAST,26h
+        DS      FAST,DTPG
+        DS      FAST,7Eh
+        DS      FAST,24h
+        DS      FAST,66h
+        DS      FAST,6Fh
+        DS      FAST,0E9h
+        .endm
+        .macro  NEXTX           ; (fast build only: the dispatcher, with TOS in HL
+        DS      FAST*CHECKED,0CDh ; in a checked build and in DE unchecked)
+        DS      FAST*CHECKED,ACHK&0FFh
+        DS      FAST*CHECKED,ACHK/256
+        DS      FAST,0Ah
+        DS      FAST,03h
+        DS      FAST*CHECKED,0EBh
+        DS      FAST,6Fh
+        DS      FAST,26h
+        DS      FAST,DTPG
+        DS      FAST,7Eh
+        DS      FAST,24h
+        DS      FAST,66h
+        DS      FAST,6Fh
+        DS      FAST,0E9h
+        .endm
+        .macro  XCHGC           ; (XCHG in a checked build)
+        DS      CHECKED,0EBh
+        .endm
+        .macro  NEXTQ           ; (the speed-ups' tails: NEXT, or in the fast
+        DS      (1-CPM)*(1-FAST),0F7h ; build the dispatcher inline)
+        DS      CPM*(1-FAST),0C3h
+        DS      CPM*(1-FAST),ANXT&0FFh
+        DS      CPM*(1-FAST),ANXT/256
+        DS      FAST*CHECKED,0CDh
+        DS      FAST*CHECKED,ACHK&0FFh
+        DS      FAST*CHECKED,ACHK/256
+        DS      FAST,0Ah
+        DS      FAST,03h
+        DS      FAST,0EBh
+        DS      FAST,6Fh
+        DS      FAST,26h
+        DS      FAST,DTPG
+        DS      FAST,7Eh
+        DS      FAST,24h
+        DS      FAST,66h
+        DS      FAST,6Fh
+        DS      FAST,0E9h
         .endm
 
 ; =============================================================================
@@ -208,7 +333,7 @@ ANXT    EQU     next0
         DB      0,0,0           ; 03  spare
         ENDIF
 rdrop:  POPR                    ; 06  drop the top of the return stack, then
-        DROP                    ;     drop TOS (a spent flag) and go on
+        DROPZ                   ;     drop TOS (a spent flag) and go on
 ; ---- RST 1: rpop: pop the return stack into HL (DE is lost) -----------------
 rpop:   LHLD    RSP             ; 08
         MOV     E,M
@@ -228,7 +353,7 @@ drp:    POP     H               ;     new TOS = NOS
         JMP     next0
 h_fromr:PUSH    H               ; 1D  '}' return stack to TOS
         POPR     
-        NEXT     
+        NEXTZ    
 ; ---- RST 4: neg16: HL = -HL (keeps BC, DE) ----------------------------------
 neg16:  XRA     A               ; 20
         SUB     L
@@ -247,11 +372,47 @@ putc:   JMP     CONOUT          ; 28
 ; returns here, with its top cell on the stack: that becomes the new TOS.
 exec:   CALL    jphl            ; 2B
         POP     H
-        NEXT     
+        NEXTZ    
 ; ---- RST 6: next character --------------------------------------------------
         IF      1-CPM
 rst30:  POP     D               ; 30  discard the RST's return address
         ENDIF
+
+; The dispatch table (see PTAB, where it is placed)
+.macro  PTABLE
+        DB      h_store & 0FFh  ; !
+        DB      h_str & 0FFh    ; "
+        DB      h_num & 0FFh    ; #
+        DB      h_print & 0FFh  ; $
+        DB      h_swap & 0FFh   ; %
+        DB      h_and & 0FFh    ; &
+        DB      h_emit & 0FFh   ; '
+        DB      h_open & 0FFh   ; (
+        DB      h_close & 0FFh  ; )
+        DB      h_mul & 0FFh    ; *
+        DB      h_add & 0FFh    ; +
+        DB      h_cfetch & 0FFh ; ,
+        DB      h_sub & 0FFh    ; -
+        DB      h_cstore & 0FFh ; .
+        DB      h_div & 0FFh    ; /
+        DB      h_dup & 0FFh    ; :
+        DB      h_drop & 0FFh   ; ;
+        DB      h_lt & 0FFh     ; <
+        DB      h_eq & 0FFh     ; =
+        DB      h_gt & 0FFh     ; >
+        DB      h_key & 0FFh    ; ?
+        DB      h_fetch & 0FFh  ; @
+        DB      h_def & 0FFh    ; [
+        DB      h_break & 0FFh  ; \
+        DB      h_ret & 0FFh    ; ]
+        DB      h_xor & 0FFh    ; ^
+        DB      h_alloc & 0FFh  ; _
+        DB      h_grave & 0FFh  ; `
+        DB      h_tor & 0FFh    ; {
+        DB      h_or & 0FFh     ; |
+        DB      h_fromr & 0FFh  ; }
+        DB      h_not & 0FFh    ; ~
+.endm
 
 ; =============================================================================
 ;  The inner loop: read one character and sort it by range.
@@ -263,10 +424,11 @@ rst30:  POP     D               ; 30  discard the RST's return address
 ;    61h-7Ah      a-z: push the address of that letter's cell
 ;    the rest     punctuation: jump through PTAB, 32 entries, in code order
 ; =============================================================================
-next0:
-        IF      CHECKED
+next0:  NEXTF                   ; (the fast build: the table dispatcher)
+        IF      CHECKED*(1-FAST)
         CALL    chkstk          ; both stacks are checked once per character
         ENDIF
+        IF      1-FAST
         LDAX    B
         INX     B
         SUI     21h             ; A = c - 21h
@@ -286,13 +448,15 @@ next0:
         CPI     3Ah
         JC      lower           ; 61h-7Ah: A = 20h-39h (cell +64 bytes)
         CPI     3Eh
-        IF      CHECKED
+        ENDIF
+        IF      CHECKED*(1-FAST)
         JZ      next0           ; 7Fh, DEL: ignored
         JNC     e_hi            ; 80h-FFh: reserved
         ENDIF
-        IF      1-CHECKED
+        IF      (1-CHECKED)*(1-FAST)
         JNC     next0           ; 7Fh-FFh: ignored
         ENDIF
+        IF      1-FAST
         SUI     1Ah             ; 7Bh-7Eh: -1Eh in all, index 28-31
 p5b:    SUI     9               ; 5Bh-60h: -4 in all, index 22-27
 p3a:    ADI     5               ; 3Ah-40h: index 15-21
@@ -305,14 +469,16 @@ punct:  ADI     PTAB & 0FFh     ; PTAB never crosses a page
         CPI     (PTAB & 0FFh) + NPG1 ; carry: one of the first NPG1
         LDAX    D
         MOV     E,A             ; the handler's low byte
-        IFN     CPM
+        ENDIF
+        IF      (1-CPM)*(1-FAST)
         MVI     A,0
         RAL                     ; its page: 0 + carry
         ENDIF
-        IF      CPM
+        IF      CPM*(1-FAST)
         MVI     A,1
         ACI     0               ; its page: 1 + carry
         ENDIF
+        IF      1-FAST
         MOV     D,A
         PUSH    D               ; jump to it; the stack is balanced again
         RET                     ;   when the handler starts
@@ -320,6 +486,7 @@ punct:  ADI     PTAB & 0FFh     ; PTAB never crosses a page
 ; ctl: characters below 21h. A = c - 21h.
 ctl:    ADI     21h             ; back to c; zero only for NUL
         JNZ     next0           ; the rest are ignored
+        ENDIF
 endprog:JMP     EXIT            ; the program has ended
 
 ; =============================================================================
@@ -365,11 +532,16 @@ h_alloc:XCHG
 ; ---- the letters and digits --------------------------------------------------
 
 ; a-z: push the cell's address (the cell is the variable)
+;  (the unchecked base build does x@ and x! in one step: lowq)
+        ENDIF
+        IF      (1-CPM)*(1-SBASEU)
 lower:  PUSH    H
         ADD     A
         MOV     L,A
         MVI     H,LETPAGE
         NEXT     
+        ENDIF
+        IF      1-CPM
 
 ; A-Z: call the word. The return address (the IP after the letter) goes on
 ; the return stack, and the IP becomes the address in the letter's cell.
@@ -522,11 +694,16 @@ h_open: MOV     A,H
 h_close:MOV     A,H
         ORA     L
         JZ      rdrop
+        IF      QK
+        JMP     closeq          ; (out of the handlers' pages: see Speed-ups)
+        ENDIF
+        IF      1-QK
         POPR                    ; pop the block start ...
         MOV     B,H
         MOV     C,L             ; ... jump to it ...
         XCHG
         JMP     rpushd          ; ... and push it back (which drops the flag)
+        ENDIF
 
 ; ---- arithmetic and logic: ( NOS TOS -- result ) ---------------------------
 
@@ -585,6 +762,11 @@ h_eq:   POP     D
 
 ; '*': shift-and-add on the multiplier's low bit, so it stops as soon as the
 ; multiplier is used up; only the low 16 bits are kept.
+        IF      QK
+h_mul:  POP     D               ; DE = multiplicand
+        JMP     mulq            ; (out of the handlers' pages: see Speed-ups)
+        ENDIF
+        IF      1-QK
 h_mul:  POP     D               ; DE = multiplicand
         PUSH    B
         MOV     B,H
@@ -607,6 +789,7 @@ mul2:   XCHG
         JNZ     mul1
         POP     B
         NEXT     
+        ENDIF
 
 ; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
@@ -791,44 +974,18 @@ ln5:    MOV     M,A             ; the CR
 ; ] \ [ @ sit where the two pages meet, and which side each lands on
 ; differs between the builds, so the count is worked out here.
 ; (One division to a line: asm80 only rounds down when it stores a value.)
+        IF      1-FAST
 PGRET   EQU     (h_ret-BASE)/256        ; 0 = first page, 1 = second
 PGBRK   EQU     (h_break-BASE)/256
 PGDEF   EQU     (h_def-BASE)/256
 PGFET   EQU     (h_fetch-BASE)/256
 NPG1    EQU     21 + PGFET + PGDEF + PGBRK + PGRET
-PTAB:   DB      h_store & 0FFh  ; !
-        DB      h_str & 0FFh    ; "
-        DB      h_num & 0FFh    ; #
-        DB      h_print & 0FFh  ; $
-        DB      h_swap & 0FFh   ; %
-        DB      h_and & 0FFh    ; &
-        DB      h_emit & 0FFh   ; '
-        DB      h_open & 0FFh   ; (
-        DB      h_close & 0FFh  ; )
-        DB      h_mul & 0FFh    ; *
-        DB      h_add & 0FFh    ; +
-        DB      h_cfetch & 0FFh ; ,
-        DB      h_sub & 0FFh    ; -
-        DB      h_cstore & 0FFh ; .
-        DB      h_div & 0FFh    ; /
-        DB      h_dup & 0FFh    ; :
-        DB      h_drop & 0FFh   ; ;
-        DB      h_lt & 0FFh     ; <
-        DB      h_eq & 0FFh     ; =
-        DB      h_gt & 0FFh     ; >
-        DB      h_key & 0FFh    ; ?
-        DB      h_fetch & 0FFh  ; @
-        DB      h_def & 0FFh    ; [
-        DB      h_break & 0FFh  ; \
-        DB      h_ret & 0FFh    ; ]
-        DB      h_xor & 0FFh    ; ^
-        DB      h_alloc & 0FFh  ; _
-        DB      h_grave & 0FFh  ; `
-        DB      h_tor & 0FFh    ; {
-        DB      h_or & 0FFh     ; |
-        DB      h_fromr & 0FFh  ; }
-        DB      h_not & 0FFh    ; ~
+        ENDIF
+        IF      (1-FAST)*(1-PTLATE)
+PTAB:
+        PTABLE
 PTABEND:
+        ENDIF
 
 ; =============================================================================
 ;  Routines (no handler starts past this point)
@@ -871,6 +1028,7 @@ rdn1:   LDAX    B
 ; lives on the stack, since A is busy with the shifts.
 ; Dividing by 2 is one shift (the spec wants that fast).
 udiv:   LXI     B,0
+        IF      1-QK
         MOV     A,E
         XRI     2
         ORA     D
@@ -885,6 +1043,112 @@ udiv:   LXI     B,0
         RAL
         MOV     C,A             ; the remainder: the bit that fell out
         RET
+        ENDIF
+        IF      QK
+; (The builds with room divide by any power of two with shifts: 2, and 32,
+; 64, 256 and the like, which fixed point and byte work use all the time.)
+        MOV     A,D
+        ORA     A
+        JNZ     uq1             ; 256 and up
+        ORA     E
+        JZ      udv0            ; by 0: the long way (it means nothing anyway)
+        DCR     A
+        ANA     E
+        JNZ     udv0            ; not a power of two
+        MOV     A,E             ; by 2^k below 256: q = HL >> k, and
+        DCR     A               ;   r = L & (2^k - 1)
+        ANA     L
+        MOV     C,A
+        ENDIF
+        IF      QK*(1-FAST)
+uq2:    MOV     A,E             ; one shift for each halving of E down to 1
+        ORA     A
+        RAR
+        RC
+        MOV     E,A
+        MOV     A,H             ; (the carry is clear: E's bit 0 was 0)
+        RAR
+        MOV     H,A
+        MOV     A,L
+        RAR
+        MOV     L,A
+        JMP     uq2
+        ENDIF
+        IF      FAST
+; (the fast build: the shifts unrolled. By 16 to 128 it is fewer shifts to
+; go the other way: A:HL up by 8 - k, and A:H is the quotient)
+uq2:    MOV     A,E
+        CPI     16
+        JNC     uqh
+        CPI     2
+        RC                      ; by 1
+        JZ      ur1
+        CPI     4
+        JZ      ur2
+ur3:
+        MOV     A,H
+        ORA     A
+        RAR
+        MOV     H,A
+        MOV     A,L
+        RAR
+        MOV     L,A
+ur2:
+        MOV     A,H
+        ORA     A
+        RAR
+        MOV     H,A
+        MOV     A,L
+        RAR
+        MOV     L,A
+ur1:
+        MOV     A,H
+        ORA     A
+        RAR
+        MOV     H,A
+        MOV     A,L
+        RAR
+        MOV     L,A
+        RET
+uqh:    CPI     64
+        MVI     A,0
+        JZ      ul2
+        JNC     ul1
+        MOV     A,E
+        CPI     32
+        MVI     A,0
+        JZ      ul3
+        DAD     H               ; by 16
+        ADC     A
+ul3:    DAD     H
+        ADC     A
+ul2:    DAD     H
+        ADC     A
+ul1:    DAD     H
+        ADC     A
+        MOV     L,H
+        MOV     H,A
+        RET
+        ENDIF
+        IF      QK
+uq1:    MOV     A,E
+        ORA     A
+        JNZ     udv0
+        MOV     A,D
+        DCR     A
+        ANA     D
+        JNZ     udv0            ; not a power of two
+        MOV     A,D             ; by 2^k, 256 and up: r = HL & (2^k - 1), and
+        DCR     A               ;   q = H >> (k - 8)
+        ANA     H
+        MOV     B,A
+        MOV     C,L
+        MOV     L,H
+        MVI     H,0
+        MOV     E,D
+        JMP     uq2
+        ENDIF
+        IF      1-FAST
 udv0:   MVI     A,16
         PUSH    PSW
 udv1:   DAD     H               ; next dividend bit into the carry
@@ -910,6 +1174,307 @@ udv2:   POP     PSW
         JNZ     udv1
         POP     PSW
         RET
+        ENDIF
+        IF      FAST
+; (the fast build: the same 16 rounds, unrolled; and a dividend below 256
+; starts 8 bits up and takes only the last 8, since its first 8 would only
+; shift zeros)
+udv0:   MOV     A,H
+        ORA     A
+        JZ      uvs
+uv0:    DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw0
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw0:
+uv1:    DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw1
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw1:
+uv2:    DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw2
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw2:
+uv3:    DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw3
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw3:
+uv4:    DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw4
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw4:
+uv5:    DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw5
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw5:
+uv6:    DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw6
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw6:
+uv7:    DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw7
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw7:
+uv8:    DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw8
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw8:
+uv9:    DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw9
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw9:
+uv10:   DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw10
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw10:
+uv11:   DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw11
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw11:
+uv12:   DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw12
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw12:
+uv13:   DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw13
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw13:
+uv14:   DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw14
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw14:
+uv15:   DAD     H
+        MOV     A,C
+        RAL
+        MOV     C,A
+        MOV     A,B
+        RAL
+        MOV     B,A             ; BC = BC*2 + bit
+        MOV     A,C
+        SUB     E
+        MOV     A,B
+        SBB     D               ; carry if BC < DE
+        JC      uw15
+        MOV     B,A
+        MOV     A,C
+        SUB     E
+        MOV     C,A
+        INR     L               ; quotient bit
+uw15:
+        RET
+uvs:    MOV     H,L
+        MVI     L,0
+        JMP     uv8
+        ENDIF
 
 ; psgn: print HL as a signed number. Uses BC.
 psgn:   MOV     A,H
@@ -931,6 +1496,19 @@ pdec:   LXI     D,10
         ADI     '0'
         PUTA     
         RET
+
+; (The table goes here instead in the builds where, before the routines, it
+; would cross a page: PTLATE. If it would cross one here too, it starts on
+; the next page: PTPAD is 0 unless it must.)
+        IF      (1-FAST)*PTLATE
+PTPH    EQU     $ & 0FFh
+PTPX    EQU     (PTPH + 31) / 256
+PTPAD   EQU     PTPX * (256 - PTPH)
+        DS      PTPAD
+PTAB:
+        PTABLE
+PTABEND:
+        ENDIF
 
         IF      1-CHECKED
 ; '$' prints the string at TOS (see h_print).
@@ -1074,27 +1652,33 @@ csi:    MVI     A,27
 ; '[' at ']', and neither may run into the NUL (N); a string with no closing
 ; quote counts as running into it. '\' takes either closer. The place where
 ; the skip started is kept on the stack, for the report.
+        IF      1-QK
+; (Without base: no skip cache.)
 skip:
-        IF      CHECKED
+        ENDIF
+        IF      CHECKED*(1-QK)
         PUSH    B
         DCX     B
         LDAX    B
         INX     B
         MOV     E,A             ; E = the opener: ( [ or \
         ENDIF
+        IF      1-QK
         MVI     D,0
 sk3:    INR     D               ; an opener: one deeper
 sk1:    LDAX    B
-        IF      1-CHECKED
+        ENDIF
+        IF      (1-CHECKED)*(1-QK)
         INX     B
         ORA     A
         JZ      endprog
         ENDIF
-        IF      CHECKED
+        IF      CHECKED*(1-QK)
         ORA     A
         JZ      sk6             ; (the IP stays on the NUL)
         INX     B
         ENDIF
+        IF      1-QK
         CPI     22h
         CZ      skipstr         ; leaves A = 22h, which matches nothing below
         SUI     '('             ;   (or 0, and then the NUL is read next)
@@ -1106,11 +1690,12 @@ sk1:    LDAX    B
         CPI     ']'-'['
         JNZ     sk1
 sk4:    DCR     D
-        IF      1-CHECKED
+        ENDIF
+        IF      (1-CHECKED)*(1-QK)
         RZ                      ; the closer at this level
         JMP     sk1
         ENDIF
-        IF      CHECKED
+        IF      CHECKED*(1-QK)
         JNZ     sk1
         MOV     D,A             ; the closer at this level: 0 or 2. Bit 1 of the
         XRA     E               ;   opener is 0 for '(' and 1 for '[', and only
@@ -1128,6 +1713,136 @@ sk6:    MOV     A,E             ; the text ran out:
         POP     B
 sk7:    MVI     A,'N'
         JMP     errp            ; (errp drops skip's return address)
+        ENDIF
+        IF      QK
+; The skip cache. Nearly every skip is one that has happened before (a loop
+; skips the same false block on every pass), so the first scan from each
+; place is remembered: 64 entries of {start, end}, in the page CPAGE, found
+; by the start's low byte (times 4). Only skips that start in the program
+; text are kept (the line buffer changes); the cache is emptied whenever a
+; run starts (see start). A program that changes its own text while it
+; runs is not looked after.
+skip:   MOV     A,B
+        CPI     PROG/256
+        JC      sks             ; below the program text: no cache
+        MOV     A,C
+        ADD     A
+        ADD     A
+        MOV     E,A
+        MVI     D,CPAGE         ; DE -> the entry
+        LDAX    D
+        CMP     C
+        JNZ     sks
+        INR     E
+        LDAX    D
+        CMP     B
+        JNZ     sks
+        INR     E
+        LDAX    D
+        MOV     C,A
+        INR     E
+        LDAX    D
+        MOV     B,A             ; a hit: the IP is past the closer
+        DCX     B
+        LDAX    B
+        INX     B
+        SUI     ')'             ; 0 for ')', not 0 for ']'
+        RET
+sks:    PUSH    B               ; where it starts: the cache's key (and the
+        ENDIF                   ;   checked report's place)
+        IF      QK*CHECKED
+        DCX     B
+        LDAX    B
+        INX     B
+        MOV     E,A             ; E = the opener: ( [ or \
+        ENDIF
+        IF      QK
+; The scan. Most characters are nothing to it, and two range tests rule
+; them out: * to Z, and ^ and up. Only NUL " ( ) [ ] count.
+        MVI     D,0
+sq3:    INR     D               ; an opener: one deeper
+sq1:    LDAX    B
+        INX     B
+        CPI     5Eh
+        JNC     sq1             ; ^ _ ` a-z { | } ~ and up: nothing
+        CPI     5Bh
+        JNC     sqb             ; [ \ ]
+        CPI     2Ah
+        JNC     sq1             ; * to Z: nothing
+        CPI     28h
+        JZ      sq3             ; (
+        JNC     sqc             ; )
+        CPI     22h
+        JZ      sqq             ; a string
+        ORA     A
+        JNZ     sq1             ; the rest below '(': nothing
+        ENDIF
+        IF      QK*(1-CHECKED)
+        JMP     endprog         ; NUL: the end of the program
+        ENDIF
+        IF      QK*CHECKED
+        DCX     B               ; NUL: the IP stays on it
+        MOV     A,E             ; the text ran out:
+        ANI     4
+        JNZ     endprog         ;   '\' with no closer ends the program
+        POP     B
+sq7:    MVI     A,'N'           ; N. The place is the opener
+        JMP     errp            ; (errp drops skip's return address)
+        ENDIF
+        IF      QK
+sqq:    CALL    skipstr         ; step over the string
+        JMP     sq1
+sqb:    SUI     5Ch             ; [ -1, \ 0, ] 1
+        JZ      sq1             ; '\' is nothing here
+        JC      sq3             ; [
+        MVI     A,2             ; ]
+        DB      0FEh            ; (CPI: steps over the XRA)
+sqc:    XRA     A               ; )
+sq4:    DCR     D
+        JNZ     sq1
+        ENDIF
+        IF      QK*CHECKED
+        MOV     D,A             ; the closer at this level (as above): 2 here
+        XRA     E               ;   means the wrong closer
+        ANI     6
+        CPI     2
+        MOV     A,D
+        POP     D               ; (where the skip started)
+        JNZ     sq8
+        MOV     B,D
+        MOV     C,E
+        JMP     sq7
+sq8:
+        ENDIF
+        IF      QK*(1-CHECKED)
+        POP     D               ; where the skip started
+        ENDIF
+        IF      QK
+; The closer at this level: remember the skip (if it started in the program
+; text), and return A = 0 for ')' or 2 for ']'. DE = the start, BC = the end.
+        PUSH    H
+        MOV     H,A
+        MOV     A,D
+        CPI     PROG/256
+        JC      sq9
+        MOV     A,E
+        ADD     A
+        ADD     A
+        MOV     L,A
+        MOV     A,H
+        MVI     H,CPAGE
+        MOV     M,E
+        INR     L
+        MOV     M,D
+        INR     L
+        MOV     M,C
+        INR     L
+        MOV     M,B
+        POP     H
+        RET
+sq9:    MOV     A,H
+        POP     H
+        RET
         ENDIF
 
 ; skipstr: IP is inside a string; step past its closing quote. '/' escapes
@@ -1174,6 +1889,101 @@ hexc:   LDAX    B
         SUI     0F6h            ; + 10, and sets the carry
 hc1:    INX     B
         RET
+
+;  ---- Speed-ups (base builds) -------------------------------------------
+;  The skip cache and '/' by a power of two are above. These are the
+;  handlers' tails that the builds with room take, kept here, out of the
+;  handlers' first two pages.
+        IF      QK
+; '*' with an operand below 256: that one becomes the multiplier, a byte in
+; A, and the loop stops as soon as its bits are used up (most
+; multiplications have one, a count or a small constant). With both at 256
+; and up, the multiplier's low byte takes exactly 8 rounds (a marker bit
+; shifted in above it says when), and its high byte goes on as a small one.
+; DE = NOS, HL = TOS.
+mulq:   MOV     A,H
+        ORA     A
+        JZ      mq8             ; the multiplier is below 256
+        MOV     A,D
+        ORA     A
+        JNZ     mq16
+        XCHG                    ; the multiplicand is: it becomes the multiplier
+mq8:    MOV     A,L
+        LXI     H,0
+        ORA     A               ; (clears the carry)
+        JZ      mq9
+mq1:    RAR                     ; the next bit
+        JNC     mq2
+        DAD     D
+mq2:    XCHG
+        DAD     H               ; multiplicand << 1
+        XCHG
+        ORA     A               ; bits left? (and clears the carry)
+        JNZ     mq1
+mq9:    NEXTQ    
+mq16:   PUSH    B
+        MOV     B,H             ; the high byte, for later
+        MOV     A,L
+        LXI     H,0
+        STC                     ; the marker
+        RAR
+mq3:    JNC     mq4
+        DAD     D
+mq4:    XCHG
+        DAD     H
+        XCHG
+        CPI     1               ; only the marker left: 8 rounds done (and
+        RAR                     ;   the carry was clear for the shift)
+        JNZ     mq3
+        MOV     A,B
+        POP     B
+        ORA     A
+        JMP     mq1             ; the high byte, as a small multiplier
+; A true ')' reads the block start where it is, on top of the return stack,
+; instead of popping it and pushing it back; the break key is looked at as
+; rpushd would.
+closeq: LHLD    RSP
+        MOV     C,M
+        INX     H
+        MOV     B,M
+        LXI     H,BRKCNT
+        DCR     M
+        POP     H               ; (keeps the flags)
+        CZ      pollk
+        NEXTQ    
+        ENDIF
+        IF      SBASEU
+; a-z, in the unchecked builds: a variable followed by '@' or '!' is fetched
+; or stored in the same step (x@ is the commonest pair in most programs).
+; (A checked build checks the stacks between the two, so it keeps them apart.)
+lower   EQU     lowq
+lowq:   ADD     A
+        MOV     E,A
+        MVI     D,LETPAGE       ; DE -> the cell
+        LDAX    B
+        CPI     '@'
+        JZ      lwf
+        CPI     '!'
+        JZ      lws
+        PUSH    H
+        XCHG                    ; TOS = the cell's address
+        NEXT     
+lwf:    INX     B               ; x@: TOS = the cell's value
+        PUSH    H
+        XCHG
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        XCHG
+        NEXT     
+lws:    INX     B               ; x!: the cell = TOS, and NOS comes up
+        XCHG
+        MOV     M,E
+        INX     H
+        MOV     M,D
+        POP     H
+        NEXT     
+        ENDIF
 
 ; =============================================================================
 ;  Console layer. rawk is the host's key routine: a waiting key in A (zero
@@ -1250,11 +2060,15 @@ brk     EQU     e_break         ;   the checked build reports B
 ; ---- the letters and digits --------------------------------------------------
 
 ; a-z: push the cell's address (the cell is the variable)
+        ENDIF
+        IF      CPM*(1-SBASEU)
 lower:  PUSH    H
         ADD     A
         MOV     L,A
         MVI     H,LETPAGE
         NEXT     
+        ENDIF
+        IF      CPM
 
 ; A-Z: call the word. The return address (the IP after the letter) goes on
 ; the return stack, and the IP becomes the address in the letter's cell.
@@ -1609,6 +2423,13 @@ start:
         IF      (1-CPM)*CHECKED
         LXI     SP,DSTOP
         ENDIF
+        IF      QK
+        LXI     H,CPAGE*256     ; every run starts with an empty skip cache (a
+        XRA     A               ;   start of 0000h matches no skip)
+skc1:   MOV     M,A
+        INR     L
+        JNZ     skc1
+        ENDIF
         IF      CHECKED
         ; Clear the lower half of the letter page: every variable starts at
         ; 0, every word cell holds 0000h, the address an undefined word is
@@ -1668,10 +2489,1063 @@ fnul:   MOV     A,M
         LXI     B,PROG          ; the IP
         NEXT                    ; (its return address is thrown away)
 
+        IF      FAST
+; =============================================================================
+;  The fast build (SPEED = 2)
+;
+;  The inner loop is a table: 256 entries, the low bytes of the handlers'
+;  addresses in one page and the high bytes in the next. The dispatcher (at
+;  next0, and inline, as NEXTF, at the end of the fast build's own entries,
+;  so there is no jump back to it; the ordinary handlers end in JMP next0):
+;
+;      LDAX B / INX B / XCHG / MOV L,A / MVI H,DTAB/256 /
+;      MOV A,M / INR H / MOV H,M / MOV L,A / PCHL
+;
+;  So every entry starts with TOS in DE, not HL. The rest of the punctuation
+;  is reached through thunks into the ordinary handlers (XCHG / JMP handler);
+;  the letters and digits have one entry each, which knows its cell or its
+;  value already.
+; =============================================================================
+ftstore:XCHG                    ; !
+        JMP     h_store
+ftstr:  XCHG                    ; "
+        JMP     h_str
+ftnum:  XCHG                    ; #
+        JMP     h_num
+ftprint:XCHG                    ; $
+        JMP     h_print
+ftemit: XCHG                    ; '
+        JMP     h_emit
+ftcstore:XCHG                   ; .
+        JMP     h_cstore
+ftdiv:  XCHG                    ; /
+        JMP     h_div
+ftkey:  XCHG                    ; ?
+        JMP     h_key
+ftdef:  XCHG                    ; [
+        JMP     h_def
+ftbreak:XCHG                    ; \
+        JMP     h_break
+ftalloc:XCHG                    ; _
+        JMP     h_alloc
+ftgrave:XCHG                    ; `
+        JMP     h_grave
+; The commonest punctuation, written for the fast build: TOS in DE on the
+; way in, and the dispatcher inline on the way out.
+fs_add: POP     H               ; +
+        DAD     D
+        NEXTF
+fs_sub: LDAX    B               ; -
+        SUI     '0'
+        CPI     10
+        JC      fs_neg
+        POP     H
+        MOV     A,L
+        SUB     E
+        MOV     E,A
+        MOV     A,H
+        SBB     D
+        MOV     D,A
+        NEXTD
+fs_neg: XCHG                    ; a digit next: a negative number
+        JMP     negnum
+fs_dup: PUSH    D               ; :
+        NEXTD
+fs_drop:POP     H               ; ;
+        NEXTF
+fs_swap:POP     H               ; %
+        PUSH    D
+        NEXTF
+fs_fet: XCHG                    ; @
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        NEXTD
+fs_cfet:LDAX    D               ; ,
+        MOV     E,A
+        MVI     D,0
+        NEXTD
+fs_lt:  POP     H               ; < (HL = a, DE = b: the borrow of a - b, flipped if the signs differ)
+        MOV     A,L
+        SUB     E
+        MOV     A,H
+        SBB     D
+        SBB     A
+        MOV     L,A
+        MOV     A,H
+        XRA     D
+        RAL
+        SBB     A
+        XRA     L
+        MOV     D,A
+        MOV     E,A
+        NEXTD
+fs_gt:  POP     H               ; > (b < a: the borrow of b - a)
+        MOV     A,E
+        SUB     L
+        MOV     A,D
+        SBB     H
+        SBB     A
+        MOV     L,A
+        MOV     A,H
+        XRA     D
+        RAL
+        SBB     A
+        XRA     L
+        MOV     D,A
+        MOV     E,A
+        NEXTD
+fs_eq:  POP     H               ; =
+        MOV     A,L
+        XRA     E
+        MOV     L,A
+        MOV     A,H
+        XRA     D
+        ORA     L
+        SUI     1
+        SBB     A
+        MOV     D,A
+        MOV     E,A
+        NEXTD
+fs_and: POP     H               ; &
+        MOV     A,H
+        ANA     D
+        MOV     D,A
+        MOV     A,L
+        ANA     E
+        MOV     E,A
+        NEXTD
+fs_or:  POP     H               ; |
+        MOV     A,H
+        ORA     D
+        MOV     D,A
+        MOV     A,L
+        ORA     E
+        MOV     E,A
+        NEXTD
+fs_xor: POP     H               ; ^
+        MOV     A,H
+        XRA     D
+        MOV     D,A
+        MOV     A,L
+        XRA     E
+        MOV     E,A
+        NEXTD
+fs_not: MOV     A,E             ; ~
+        CMA
+        MOV     E,A
+        MOV     A,D
+        CMA
+        MOV     D,A
+        NEXTD
+fs_mul: POP     H               ; * (the two the other way round: the same)
+        JMP     mulq
+fs_open:MOV     A,D             ; (
+        ORA     E
+        JZ      fs_op0
+        LHLD    RSP
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LXI     H,BRKCNT
+        DCR     M
+        POP     H
+        CZ      pollk
+        NEXTF
+fs_op0: POP     H
+        CALL    skip
+        NEXTF
+fs_close:MOV     A,D            ; )
+        ORA     E
+        JZ      fs_cl0
+        LHLD    RSP
+        MOV     C,M
+        INX     H
+        MOV     B,M
+        LXI     H,BRKCNT
+        DCR     M
+        POP     H
+        CZ      pollk
+        NEXTF
+fs_cl0: LHLD    RSP
+        INX     H
+        INX     H
+        SHLD    RSP
+        POP     H
+        NEXTF
+fs_ret: LHLD    RSP             ; ]
+        MOV     C,M
+        INX     H
+        MOV     B,M
+        INX     H
+        SHLD    RSP
+        NEXTD
+fs_fromr:PUSH    D              ; }
+        LHLD    RSP
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        INX     H
+        SHLD    RSP
+        NEXTD
+fd0:    PUSH    D               ; 0
+        LXI     D,0
+        LDAX    B
+        SUI     '0'
+        CPI     10
+        JC      fdm
+        NEXTD
+fd1:    PUSH    D               ; 1
+        LXI     D,1
+        LDAX    B
+        SUI     '0'
+        CPI     10
+        JC      fdm
+        NEXTD
+fd2:    PUSH    D               ; 2
+        LXI     D,2
+        LDAX    B
+        SUI     '0'
+        CPI     10
+        JC      fdm
+        NEXTD
+fd3:    PUSH    D               ; 3
+        LXI     D,3
+        LDAX    B
+        SUI     '0'
+        CPI     10
+        JC      fdm
+        NEXTD
+fd4:    PUSH    D               ; 4
+        LXI     D,4
+        LDAX    B
+        SUI     '0'
+        CPI     10
+        JC      fdm
+        NEXTD
+fd5:    PUSH    D               ; 5
+        LXI     D,5
+        LDAX    B
+        SUI     '0'
+        CPI     10
+        JC      fdm
+        NEXTD
+fd6:    PUSH    D               ; 6
+        LXI     D,6
+        LDAX    B
+        SUI     '0'
+        CPI     10
+        JC      fdm
+        NEXTD
+fd7:    PUSH    D               ; 7
+        LXI     D,7
+        LDAX    B
+        SUI     '0'
+        CPI     10
+        JC      fdm
+        NEXTD
+fd8:    PUSH    D               ; 8
+        LXI     D,8
+        LDAX    B
+        SUI     '0'
+        CPI     10
+        JC      fdm
+        NEXTD
+fd9:    PUSH    D               ; 9
+        LXI     D,9
+        LDAX    B
+        SUI     '0'
+        CPI     10
+        JC      fdm
+        NEXTD
+fdm:    XCHG                    ; more digits: HL = HL * 10 + the digit
+fdm1:   INX     B
+        MOV     D,H
+        MOV     E,L
+        DAD     H
+        DAD     H
+        DAD     D
+        DAD     H
+        MOV     E,A
+        MVI     D,0
+        DAD     D
+        LDAX    B
+        SUI     '0'
+        CPI     10
+        JC      fdm1
+        NEXTF
+; A-Z: call the word. The return address goes on the return stack, the IP
+; becomes the word's body, and the break key is looked at as rpushd would.
+fuA:    LHLD    RSP             ; A
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+0
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuB:    LHLD    RSP             ; B
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+2
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuC:    LHLD    RSP             ; C
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+4
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuD:    LHLD    RSP             ; D
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+6
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuE:    LHLD    RSP             ; E
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+8
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuF:    LHLD    RSP             ; F
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+10
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuG:    LHLD    RSP             ; G
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+12
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuH:    LHLD    RSP             ; H
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+14
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuI:    LHLD    RSP             ; I
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+16
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuJ:    LHLD    RSP             ; J
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+18
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuK:    LHLD    RSP             ; K
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+20
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuL:    LHLD    RSP             ; L
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+22
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuM:    LHLD    RSP             ; M
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+24
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuN:    LHLD    RSP             ; N
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+26
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuO:    LHLD    RSP             ; O
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+28
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuP:    LHLD    RSP             ; P
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+30
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuQ:    LHLD    RSP             ; Q
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+32
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuR:    LHLD    RSP             ; R
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+34
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuS:    LHLD    RSP             ; S
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+36
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuT:    LHLD    RSP             ; T
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+38
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuU:    LHLD    RSP             ; U
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+40
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuV:    LHLD    RSP             ; V
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+42
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuW:    LHLD    RSP             ; W
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+44
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuX:    LHLD    RSP             ; X
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+46
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuY:    LHLD    RSP             ; Y
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+48
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+fuZ:    LHLD    RSP             ; Z
+        DCX     H
+        MOV     M,B
+        DCX     H
+        MOV     M,C
+        SHLD    RSP
+        LHLD    LET+50
+        MOV     B,H
+        MOV     C,L
+        LXI     H,BRKCNT
+        DCR     M
+        XCHGC
+        CZ      pollk
+        NEXTX
+        ENDIF
+        IF      FAST*(1-CHECKED)
+; a-z, unchecked: a variable followed by '@' or '!' is fetched or stored in
+; the same step.
+fva:    LXI     H,LET+40h+0     ; a
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvb:    LXI     H,LET+40h+2     ; b
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvc:    LXI     H,LET+40h+4     ; c
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvd:    LXI     H,LET+40h+6     ; d
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fve:    LXI     H,LET+40h+8     ; e
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvf:    LXI     H,LET+40h+10    ; f
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvg:    LXI     H,LET+40h+12    ; g
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvh:    LXI     H,LET+40h+14    ; h
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvi:    LXI     H,LET+40h+16    ; i
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvj:    LXI     H,LET+40h+18    ; j
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvk:    LXI     H,LET+40h+20    ; k
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvl:    LXI     H,LET+40h+22    ; l
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvm:    LXI     H,LET+40h+24    ; m
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvn:    LXI     H,LET+40h+26    ; n
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvo:    LXI     H,LET+40h+28    ; o
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvp:    LXI     H,LET+40h+30    ; p
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvq:    LXI     H,LET+40h+32    ; q
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvr:    LXI     H,LET+40h+34    ; r
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvs:    LXI     H,LET+40h+36    ; s
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvt:    LXI     H,LET+40h+38    ; t
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvu:    LXI     H,LET+40h+40    ; u
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvv:    LXI     H,LET+40h+42    ; v
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvw:    LXI     H,LET+40h+44    ; w
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvx:    LXI     H,LET+40h+46    ; x
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvy:    LXI     H,LET+40h+48    ; y
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvz:    LXI     H,LET+40h+50    ; z
+        LDAX    B
+        CPI     '@'
+        JZ      fvat
+        CPI     '!'
+        JZ      fvst
+        PUSH    D
+        NEXTF
+fvat:   INX     B               ; x@: TOS = the cell's value
+        PUSH    D
+        MOV     E,M
+        INX     H
+        MOV     D,M
+        NEXTD
+fvst:   INX     B               ; x!: the cell = TOS, and NOS comes up
+        MOV     M,E
+        INX     H
+        MOV     M,D
+        POP     H
+        NEXTF
+FHIGH   EQU     fign            ; (80h-FFh are ignored)
+fs_store:POP     H              ; !
+        XCHG
+        MOV     M,E
+        INX     H
+        MOV     M,D
+        POP     H
+        NEXTF
+fs_cstore:POP     H             ; .
+        XCHG
+        MOV     M,E
+        POP     H
+        NEXTF
+FSTORE  EQU     fs_store
+FCSTORE EQU     fs_cstore
+        ENDIF
+        IF      FAST*CHECKED
+; a-z, checked: push the cell's address (a checked build checks the stacks
+; between the variable and what follows it, so it keeps them apart)
+fva:    LXI     H,LET+40h+0     ; a
+        PUSH    D
+        NEXTF
+fvb:    LXI     H,LET+40h+2     ; b
+        PUSH    D
+        NEXTF
+fvc:    LXI     H,LET+40h+4     ; c
+        PUSH    D
+        NEXTF
+fvd:    LXI     H,LET+40h+6     ; d
+        PUSH    D
+        NEXTF
+fve:    LXI     H,LET+40h+8     ; e
+        PUSH    D
+        NEXTF
+fvf:    LXI     H,LET+40h+10    ; f
+        PUSH    D
+        NEXTF
+fvg:    LXI     H,LET+40h+12    ; g
+        PUSH    D
+        NEXTF
+fvh:    LXI     H,LET+40h+14    ; h
+        PUSH    D
+        NEXTF
+fvi:    LXI     H,LET+40h+16    ; i
+        PUSH    D
+        NEXTF
+fvj:    LXI     H,LET+40h+18    ; j
+        PUSH    D
+        NEXTF
+fvk:    LXI     H,LET+40h+20    ; k
+        PUSH    D
+        NEXTF
+fvl:    LXI     H,LET+40h+22    ; l
+        PUSH    D
+        NEXTF
+fvm:    LXI     H,LET+40h+24    ; m
+        PUSH    D
+        NEXTF
+fvn:    LXI     H,LET+40h+26    ; n
+        PUSH    D
+        NEXTF
+fvo:    LXI     H,LET+40h+28    ; o
+        PUSH    D
+        NEXTF
+fvp:    LXI     H,LET+40h+30    ; p
+        PUSH    D
+        NEXTF
+fvq:    LXI     H,LET+40h+32    ; q
+        PUSH    D
+        NEXTF
+fvr:    LXI     H,LET+40h+34    ; r
+        PUSH    D
+        NEXTF
+fvs:    LXI     H,LET+40h+36    ; s
+        PUSH    D
+        NEXTF
+fvt:    LXI     H,LET+40h+38    ; t
+        PUSH    D
+        NEXTF
+fvu:    LXI     H,LET+40h+40    ; u
+        PUSH    D
+        NEXTF
+fvv:    LXI     H,LET+40h+42    ; v
+        PUSH    D
+        NEXTF
+fvw:    LXI     H,LET+40h+44    ; w
+        PUSH    D
+        NEXTF
+fvx:    LXI     H,LET+40h+46    ; x
+        PUSH    D
+        NEXTF
+fvy:    LXI     H,LET+40h+48    ; y
+        PUSH    D
+        NEXTF
+fvz:    LXI     H,LET+40h+50    ; z
+        PUSH    D
+        NEXTF
+fhi:    XCHG                    ; 80h-FFh: reserved (X), or an undefined word (U)
+        JMP     e_hi
+FHIGH   EQU     fhi
+FSTORE  EQU     ftstore
+FCSTORE EQU     ftcstore
+        ENDIF
+        IF      FAST
+fs_nul: JMP     endprog         ; NUL: the end of the program
+fign:   NEXTD                   ; 01h-20h and DEL (and 80h-FFh unchecked): nothing
+; the table: low bytes, then high bytes, each a page
+        DS      (256 - ($ & 0FFh)) & 0FFh
+DTAB:
+        DB      fs_nul&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh   ; 00h
+        DB      fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh   ; 08h
+        DB      fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh   ; 10h
+        DB      fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh   ; 18h
+        DB      fign&0FFh,FSTORE&0FFh,ftstr&0FFh,ftnum&0FFh,ftprint&0FFh,fs_swap&0FFh,fs_and&0FFh,ftemit&0FFh   ; 20h
+        DB      fs_open&0FFh,fs_close&0FFh,fs_mul&0FFh,fs_add&0FFh,fs_cfet&0FFh,fs_sub&0FFh,FCSTORE&0FFh,ftdiv&0FFh   ; 28h
+        DB      fd0&0FFh,fd1&0FFh,fd2&0FFh,fd3&0FFh,fd4&0FFh,fd5&0FFh,fd6&0FFh,fd7&0FFh   ; 30h
+        DB      fd8&0FFh,fd9&0FFh,fs_dup&0FFh,fs_drop&0FFh,fs_lt&0FFh,fs_eq&0FFh,fs_gt&0FFh,ftkey&0FFh   ; 38h
+        DB      fs_fet&0FFh,fuA&0FFh,fuB&0FFh,fuC&0FFh,fuD&0FFh,fuE&0FFh,fuF&0FFh,fuG&0FFh   ; 40h
+        DB      fuH&0FFh,fuI&0FFh,fuJ&0FFh,fuK&0FFh,fuL&0FFh,fuM&0FFh,fuN&0FFh,fuO&0FFh   ; 48h
+        DB      fuP&0FFh,fuQ&0FFh,fuR&0FFh,fuS&0FFh,fuT&0FFh,fuU&0FFh,fuV&0FFh,fuW&0FFh   ; 50h
+        DB      fuX&0FFh,fuY&0FFh,fuZ&0FFh,ftdef&0FFh,ftbreak&0FFh,fs_ret&0FFh,fs_xor&0FFh,ftalloc&0FFh   ; 58h
+        DB      ftgrave&0FFh,fva&0FFh,fvb&0FFh,fvc&0FFh,fvd&0FFh,fve&0FFh,fvf&0FFh,fvg&0FFh   ; 60h
+        DB      fvh&0FFh,fvi&0FFh,fvj&0FFh,fvk&0FFh,fvl&0FFh,fvm&0FFh,fvn&0FFh,fvo&0FFh   ; 68h
+        DB      fvp&0FFh,fvq&0FFh,fvr&0FFh,fvs&0FFh,fvt&0FFh,fvu&0FFh,fvv&0FFh,fvw&0FFh   ; 70h
+        DB      fvx&0FFh,fvy&0FFh,fvz&0FFh,rpushd&0FFh,fs_or&0FFh,fs_fromr&0FFh,fs_not&0FFh,fign&0FFh   ; 78h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; 80h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; 88h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; 90h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; 98h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; A0h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; A8h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; B0h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; B8h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; C0h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; C8h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; D0h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; D8h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; E0h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; E8h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; F0h
+        DB      FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh,FHIGH&0FFh   ; F8h
+        DB      fs_nul/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256   ; 00h
+        DB      fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256   ; 08h
+        DB      fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256   ; 10h
+        DB      fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256   ; 18h
+        DB      fign/256,FSTORE/256,ftstr/256,ftnum/256,ftprint/256,fs_swap/256,fs_and/256,ftemit/256   ; 20h
+        DB      fs_open/256,fs_close/256,fs_mul/256,fs_add/256,fs_cfet/256,fs_sub/256,FCSTORE/256,ftdiv/256   ; 28h
+        DB      fd0/256,fd1/256,fd2/256,fd3/256,fd4/256,fd5/256,fd6/256,fd7/256   ; 30h
+        DB      fd8/256,fd9/256,fs_dup/256,fs_drop/256,fs_lt/256,fs_eq/256,fs_gt/256,ftkey/256   ; 38h
+        DB      fs_fet/256,fuA/256,fuB/256,fuC/256,fuD/256,fuE/256,fuF/256,fuG/256   ; 40h
+        DB      fuH/256,fuI/256,fuJ/256,fuK/256,fuL/256,fuM/256,fuN/256,fuO/256   ; 48h
+        DB      fuP/256,fuQ/256,fuR/256,fuS/256,fuT/256,fuU/256,fuV/256,fuW/256   ; 50h
+        DB      fuX/256,fuY/256,fuZ/256,ftdef/256,ftbreak/256,fs_ret/256,fs_xor/256,ftalloc/256   ; 58h
+        DB      ftgrave/256,fva/256,fvb/256,fvc/256,fvd/256,fve/256,fvf/256,fvg/256   ; 60h
+        DB      fvh/256,fvi/256,fvj/256,fvk/256,fvl/256,fvm/256,fvn/256,fvo/256   ; 68h
+        DB      fvp/256,fvq/256,fvr/256,fvs/256,fvt/256,fvu/256,fvv/256,fvw/256   ; 70h
+        DB      fvx/256,fvy/256,fvz/256,rpushd/256,fs_or/256,fs_fromr/256,fs_not/256,fign/256   ; 78h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; 80h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; 88h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; 90h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; 98h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; A0h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; A8h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; B0h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; B8h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; C0h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; C8h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; D0h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; D8h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; E0h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; E8h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; F0h
+        DB      FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256,FHIGH/256   ; F8h
+        ENDIF
+
         IF      CPM
 ; RAM pages, after the image
-RSPAGE  EQU     (imgend + 255) / 256
-DSPAGE  EQU     RSPAGE + 1
+CPAGE   EQU     (imgend + 255) / 256 ; the skip cache (QK builds), first, so
+RSPAGE  EQU     CPAGE + QK      ;   that the letter page is still the one
+DSPAGE  EQU     RSPAGE + 1      ;   just below the program text
 LETPAGE EQU     RSPAGE + 2
 PROG    EQU     LETPAGE*256 + 256
         ENDIF

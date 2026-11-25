@@ -1,76 +1,64 @@
 """Copy finished builds from out/ into the release folders next to the sources.
 
-usage: mkrel.py [OUTDIR]   (after build.sh has filled OUTDIR/z80, OUTDIR/8080,
-                           ...; OUTDIR defaults to out)
+usage: mkrel.py [OUTDIR]   (after build.sh and build_win32.sh have filled
+                           OUTDIR/z80, OUTDIR/8080, ...; OUTDIR defaults to out)
 
-For each CPU it writes the ROM images (.bin), the CP/M programs (.COM, Z80
-and 8080 only) and the listings (.lst), under the names the README uses;
-for Windows (OUTDIR/win32, from build_win32.sh) the four .EXE files and
-their listings.
+Each CPU's folder has three, one for each setting of SPEED: small/ (0),
+base/ (1) and fast/ (2). Into each go the ROM images (.bin), the CP/M programs
+(.COM, Z80 and 8080) or the Windows programs (.EXE), each with its listing
+(.lst) under the same name:
+
+  CP/M and Windows   B8S, then U if unchecked, then S (small) or F (fast),
+                     then E with the line editor: B8S.COM is the base
+                     runner, checked; B8SUSE.COM the small editor, unchecked
+  ROM images         b8s-CPU-TIER-rom, then -zp (the zero-page 6502
+                     interpreter), -editor, -unchecked, and the address it
+                     starts at: b8s-z80-base-rom-0000.bin
 """
 import os, shutil, sys
 here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, here)
 from harness_z80 import load_hex
 
-CPUS = {            # folder: (ROM origin, CP/M file stem or None)
-    'z80': ('0000', 'B8SZ80'),
-    '8080': ('0000', 'B8S8080'),
-    '6502': ('E000', None),
-    '6809': ('F000', None),
+TIERS = (('small', 'S'), ('base', ''), ('fast', 'F'))
+CPUS = {            # folder: (source stems, ROM origin by tier, has CP/M)
+    'z80': (('b8s-z80',), {'small': '0000', 'base': '0000', 'fast': '0000'}, True),
+    '8080': (('b8s-8080',), {'small': '0000', 'base': '0000', 'fast': '0000'}, True),
+    '6502': (('b8s-6502', 'b8s-6502-zp'), {'small': 'E000', 'base': 'E000', 'fast': 'E000'}, False),
+    '6809': (('b8s-6809',), {'small': 'F000', 'base': 'F000', 'fast': 'E000'}, False),
 }
 out = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else f'{here}/out'
-for cpu, (org, com) in CPUS.items():
-    src, dst = f'{out}/{cpu}', f'{here}/../{cpu}'
-    if not os.path.isdir(src):
-        continue
-    for variant, name in (('gen', f'b8s-{cpu}-rom-{org}.bin'),
-                          ('gen-chk', f'b8s-{cpu}-rom-checked-{org}.bin'),
-                          ('ed', f'b8s-{cpu}-rom-editor-{org}.bin'),
-                          ('ed-chk', f'b8s-{cpu}-rom-editor-checked-{org}.bin'),
-                          ('cpm-ed', com and com + 'E.COM'),
-                          ('cpm-ed-chk', com and com + 'EC.COM'),
-                          ('zp-gen', f'b8s-{cpu}-rom-zp-{org}.bin'),
-                          ('zp-gen-chk', f'b8s-{cpu}-rom-zp-checked-{org}.bin'),
-                          ('cpm', com and com + '.COM'),
-                          ('cpm-chk', com and com + 'C.COM')):
-        base = f'{src}/b8s-{cpu}-{variant}'
-        if not name or not os.path.exists(base + '.hex'):
-            continue
-        lo, img = load_hex(base + '.hex')
-        open(f'{dst}/{name}', 'wb').write(bytes(img))
-        shutil.copy(base + '.lst', f'{dst}/b8s-{cpu}-{variant}.lst')
-        print(f'{cpu:5} {variant:10} {len(img):5} bytes -> {name}')
-# The Z80 builds with QUICK = 1 go in their own folder, quick/
-src, dst = f'{out}/z80', f'{here}/../quick'
-for variant, name in (('quick-gen', 'b8s-z80-quick-rom-0000.bin'), ('quick-gen-chk', 'b8s-z80-quick-rom-checked-0000.bin'),
-                      ('quick-ed', 'b8s-z80-quick-rom-editor-0000.bin'), ('quick-ed-chk', 'b8s-z80-quick-rom-editor-checked-0000.bin'),
-                      ('quick-cpm', 'B8SZ80Q.COM'), ('quick-cpm-chk', 'B8SZ80QC.COM'),
-                      ('quick-cpm-ed', 'B8SZ80QE.COM'), ('quick-cpm-ed-chk', 'B8SZ80QEC.COM')):
-    base = f'{src}/b8s-z80-{variant}'
-    if not os.path.exists(base + '.hex'):
-        continue
-    os.makedirs(dst, exist_ok=True)
-    lo, img = load_hex(base + '.hex')
-    open(f'{dst}/{name}', 'wb').write(bytes(img))
-    shutil.copy(base + '.lst', f'{dst}/b8s-z80-{variant}.lst')
-    print(f'quick {variant:16} {len(img):5} bytes -> quick/{name}')
-# The Z80's speed builds go in their own folder, fast/
-src, dst = f'{out}/z80', f'{here}/../fast'
-for variant, name in (('fast-gen', 'b8s-z80-fast-rom-0000.bin'), ('fast-gen-chk', 'b8s-z80-fast-rom-checked-0000.bin'),
-                      ('fast-cpm', 'B8SZ80F.COM'), ('fast-cpm-chk', 'B8SZ80FC.COM')):
-    base = f'{src}/b8s-z80-{variant}'
-    if not os.path.exists(base + '.hex'):
-        continue
-    os.makedirs(dst, exist_ok=True)
-    lo, img = load_hex(base + '.hex')
-    open(f'{dst}/{name}', 'wb').write(bytes(img))
-    shutil.copy(base + '.lst', f'{dst}/b8s-z80-{variant}.lst')
-    print(f'fast  {variant:12} {len(img):5} bytes -> fast/{name}')
-# Windows: the .EXE files and their listings, as they are
-src, dst = f'{out}/win32', f'{here}/../win32'
-for name in ('B8SWIN', 'B8SWINC', 'B8SWINE', 'B8SWINEC'):
-    if os.path.exists(f'{src}/{name}.EXE'):
-        shutil.copy(f'{src}/{name}.EXE', f'{dst}/{name}.EXE')
-        shutil.copy(f'{src}/{name}.lst', f'{dst}/{name}.lst')
-        print(f'win32 {name:10} {os.path.getsize(src + "/" + name + ".EXE"):5} bytes -> {name}.EXE')
+
+
+def copy(src, dst, data, lst, label):
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    open(dst, 'wb').write(data)
+    shutil.copy(lst, dst[:dst.rindex('.')] + '.lst')
+    print(f'{label:28} {len(data):5} bytes -> {os.path.relpath(dst, here + "/..")}')
+
+
+for cpu, (stems, orgs, cpm) in CPUS.items():
+    for tier, t in TIERS:
+        dst = f'{here}/../{cpu}/{tier}'
+        for stem in stems:
+            zp = '-zp' if stem.endswith('-zp') else ''
+            for ed in ('', '-ed'):
+                for chk in ('-chk', ''):
+                    unc = '' if chk else '-unchecked'
+                    builds = [(f'gen{ed}', f'b8s-{cpu}-{tier}-rom{zp}{"-editor" if ed else ""}{unc}-{orgs[tier]}.bin')]
+                    if cpm:
+                        builds.append((f'cpm{ed}', f'B8S{"" if chk else "U"}{t}{"E" if ed else ""}.COM'))
+                    for kind, name in builds:
+                        kind = kind.replace('gen-ed', 'ed')
+                        base = f'{out}/{cpu}/{stem}-{tier}-{kind}{chk}'
+                        if os.path.exists(base + '.hex'):
+                            lo, img = load_hex(base + '.hex')
+                            copy(base, f'{dst}/{name}', bytes(img), base + '.lst', f'{cpu} {tier} {kind}{chk}')
+# Windows: the .EXE files and their listings, as they are named already
+for tier, t in TIERS:
+    for e in ('', 'E'):
+        for u in ('', 'U'):
+            name = f'B8S{u}{t}{e}'
+            src = f'{out}/win32/{name}'
+            if os.path.exists(src + '.EXE'):
+                copy(src, f'{here}/../win32/{tier}/{name}.EXE', open(src + '.EXE', 'rb').read(), src + '.lst', f'win32 {tier} {name}')

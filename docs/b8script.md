@@ -24,9 +24,7 @@ B8Script is a postfix stack language for 64 KB 8-bit computers. Every instructio
 - [Appendix B: 8080](#appendix-b-8080)
 - [Appendix C: 6502](#appendix-c-6502)
 - [Appendix D: 6809](#appendix-d-6809)
-- [Appendix E: B8SIC](#appendix-e-b8sic)
-- [Appendix F: the B8Script TTL computer](#appendix-f-the-b8script-ttl-computer)
-- [Appendix G: Windows (32-bit x86)](#appendix-g-windows-32-bit-x86)
+- [Appendix E: Windows (32-bit x86)](#appendix-e-windows-32-bit-x86)
 
 ## Execution model
 
@@ -59,7 +57,7 @@ Operands follow written order: `a b -` is a − b. Effects are written `( before
 
 **Characters** have no literal; push the code (`65` for A).
 
-**Hex** has no literal either. See *Bits and hex* under [Idioms](#idioms) for three ways to write hex constants.
+**Hex** has no literal either. See *Bits, bytes and hex* in [idioms.md](idioms.md#bits-bytes-and-hex) for three ways to write hex constants.
 
 **Strings.** `"` pushes the address of the text after it and skips to the closing `"`. The text stays inline and nothing is copied. `$` prints it: `"Hi"$`.
 
@@ -149,7 +147,7 @@ Characters marked **†** have a catch, explained under *Marked characters* belo
 **Marked characters**
 
 - `-` **Two jobs.** Directly before a digit it starts a negative number; anywhere else it subtracts. To subtract a number, put a space after the `-`: `5- 3`, not `5-3`.
-- `/` **Truncates toward zero and leaves the remainder.** `-7 2/` leaves −3 and −1: the quotient (not −4), then the remainder on top with the dividend's sign. Use `/;` for the quotient alone and `/%;` for the remainder alone. Dividing by 0 is unsafe: an unchecked build leaves two cells of no meaning (the stack stays balanced), a checked build stops with `Z`. Dividing by 2 or −2 is a shift inside the interpreter, so `2/` is fast halving; it is still division, not a shift right (see *Bits and hex* under Idioms).
+- `/` **Truncates toward zero and leaves the remainder.** `-7 2/` leaves −3 and −1: the quotient (not −4), then the remainder on top with the dividend's sign. Use `/;` for the quotient alone and `/%;` for the remainder alone. Dividing by 0 is unsafe: an unchecked build leaves two cells of no meaning (the stack stays balanced), a checked build stops with `Z`. Dividing by 2 or −2 is a shift inside the interpreter, so `2/` is fast halving; it is still division, not a shift right (see *Bits, bytes and hex* in [idioms.md](idioms.md#bits-bytes-and-hex)).
 - `{` `}` **Share the return stack with blocks.** Inside a block, the top entry is the block's start, so keep them paired unless you mean a trick.
 - `a`–`z` **Start undefined.** Store before you read.
 - `_` **Signed, and it does not negate.** A positive count allocates, a negative count releases, and `0_` just reads the heap top. One call moves the top by at most 32767 bytes; allocate more with two calls. Negate with `-1*`. See *Heap* below.
@@ -193,7 +191,7 @@ One pair of round brackets gives every structure. The closing flag decides wheth
 
 **Definitions.** `[X body]` stores the address after `X` in word X's cell, then skips to the matching `]`. `X` pushes the address after the letter onto the return stack and jumps to the body; executing `]` pops an address and jumps to it. A definition must run before its word is called, and running it again redefines the word. Recursion works.
 
-`[x body]` does the same, but stores the address in variable x: call it with `x@X`, using the eval word `[X{]` (see Idioms). `[ body]` pushes the address instead, so code can be handed to a word on the stack: `[ 7#]X`.
+`[x body]` does the same, but stores the address in variable x: call it with `x@X`, using the eval word `[X{]` (see [Idioms](#idioms)). `[ body]` pushes the address instead, so code can be handed to a word on the stack: `[ 7#]X`.
 
 ### How skipping works
 
@@ -262,9 +260,9 @@ Then `3#` runs and prints 3. Nothing else printed, and word A was never defined,
 
 **Brackets must balance.** Any text that may be skipped must balance by the skipper's count, and each opener must close with its own kind: `(` with `)`, `[` with `]`. Mixed kinds are unsafe. They balance for the skipper but run differently, and nothing useful comes of it. A checked build stops with `N` when a skip from `(` or `[` reaches NUL or reaches a closer of the wrong kind at its own level. A `\` that finds no closer still ends the program, as `1\` does.
 
-**A skip may be remembered.** The text of a running program doesn't change, so an implementation may remember where a skip from each place ended, and the next time skip there at once (the Z80's `QUICK` and speed builds do: see [Speed](#speed)). A program that changes its own text while it runs may then be skipped by the old text: that is unsafe.
+**A skip may be remembered.** The text of a running program doesn't change, so an implementation may remember where a skip from each place ended, and the next time skip there at once (the base and fast builds of the interpreters here do: see [Speed](#speed)). A program that changes its own text while it runs may then be skipped by the old text: that is unsafe.
 
-**The return stack is exposed.** It holds plain 16-bit addresses and values. `{` and `}` need not be balanced: `)` and `]` act on whatever is on top. That makes goto, eval and tail calls possible (see Idioms).
+**The return stack is exposed.** It holds plain 16-bit addresses and values. `{` and `}` need not be balanced: `)` and `]` act on whatever is on top. That makes goto, eval and tail calls possible (see [Words and code as data](idioms.md#words-and-code-as-data) in idioms.md).
 
 [↑ Back to top](#b8script-spec)
 
@@ -357,7 +355,7 @@ R:1
 
 **After an error or a break,** a one-shot build returns to the OS or monitor. A build with a prompt or editor returns there, with both stacks cleared and words and variables kept.
 
-**No report at a normal end.** A program that ends normally prints nothing extra, so its output can be piped. To catch values leaked on the stack, use the sentinel idiom under *Debugging* in [Idioms](#idioms).
+**No report at a normal end.** A program that ends normally prints nothing extra, so its output can be piped. To catch values leaked on the stack, use the sentinel idiom under *Debugging* in [idioms.md](idioms.md#debugging).
 
 [↑ Back to top](#b8script-spec)
 
@@ -365,7 +363,7 @@ R:1
 
 Every build, checked or not, stops a running program on Ctrl-C (03h).
 
-- The key is polled at the true `)` loop-back and at every word call, which catches every endless loop, including the goto idiom (a word call). Endless recursion overflows the return stack anyway. An implementation may poll only every so often, for speed, as long as it polls at least once every 256 of those points.
+- The key is polled at the true `)` loop-back and at every word call, which catches every endless loop, including [the goto idiom](idioms.md#words-and-code-as-data) (a word call). Endless recursion overflows the return stack anyway. An implementation may poll only every so often, for speed, as long as it polls at least once every 256 of those points.
 - A poll that reads a key other than Ctrl-C holds it for the next `?`, and a newer key replaces the held one. A program never sees Ctrl-C.
 - A checked build reports `B` with the place, which shows where an endless loop was spinning. What an unchecked build prints is implementation-defined.
 - An implementation may let a program turn the break key off, through a system address given in its appendix, so that the program reads Ctrl-C as an ordinary key (03h). Even then, Ctrl-C pressed twice in quick succession always breaks, so a runaway program can always be stopped.
@@ -408,7 +406,7 @@ What the other control codes do (TAB and ESC among them) is implementation-defin
 - **How a build does it** is up to the build, and its appendix says. The existing interpreters have a build switch, `ANSI`:
   - `ANSI = 1` sends ANSI (VT100) sequences: ESC `[H` ESC `[J` for `/{`, ESC `[K` for `/}`, ESC `[?25h` and ESC `[?25l` for `/|` and `` /` ``, and ESC `[` row+1 `;` col+1 `H` for `/~`.
   - `ANSI = 0` calls four routines of the machine's own instead: clear the screen, clear to the end of the line, cursor on or off, and cursor to a row and column. Each appendix gives their interface.
-  - The generic builds default to `ANSI = 0`; the CP/M builds always send ANSI; the Windows builds send ANSI, which the console understands in the mode they set (Appendix G).
+  - The generic builds default to `ANSI = 0`; the CP/M builds always send ANSI; the Windows builds send ANSI, which the console understands in the mode they set (Appendix E).
 - **Screen size** is implementation-defined and given in the appendix; 80 × 24 is the usual. Programs that assume a size should say so.
 - **More than this** (colours, reverse video, scrolling regions) has no escape. A program can still send a terminal's own sequences, with `/[` or `27'`, but they then work only on that kind of terminal. Keep them optional.
 
@@ -420,91 +418,23 @@ Because a program's screen control is in the escapes and not in a terminal's cod
 
 Every idiom here runs as shown in the reference interpreter. A word in this section is free for you to rename; the letters are only what the examples use.
 
-**Stack**
+An idiom is a short, well-worn piece of B8Script for a job the language has no command for, such as a stack shuffle, a shift or a switch. A few are shown here for the flavour; [idioms.md](idioms.md) is the full collection.
+
+**Stack.** There are only dup, drop and swap, so other shuffles park a value on the return stack:
 
 | Name | Code | Effect |
 |---|---|---|
 | over | `{:}%` | `( a b -- a b a )` |
 | rot | `{%}%` | `( a b c -- b c a )` |
-| -rot | `%{%}` | `( a b c -- c a b )` |
 | nip | `%;` | `( a b -- b )` |
-| tuck | `:{%}` | `( a b -- b a b )` |
-| 2dup | `{:}%{:}%` | `( a b -- a b a b )` |
-| 2drop | `;;` | `( a b -- )` |
-| Copy parked value | `}:{` | Like Forth's R@ |
 
-**Arithmetic**
-
-| Name | Code | Effect |
-|---|---|---|
-| Negate | `-1*` |  |
-| Absolute value | `:0<(-1*0)` |  |
-| Sign | `:0<%0>-` | −1, 0 or 1 |
-| Min | `{:}%{:}%>(%0);` | `( a b -- min )` |
-| Max | `{:}%{:}%<(%0);` | `( a b -- max )` |
-| Quotient | `/;` | `( a b -- q )` |
-| Remainder | `/%;` | `( a b -- r )`; takes a's sign |
-| Modulo word | `[M/%;]` | `( n d -- n mod d )` |
-| Double | `:+` | Faster than `2*` everywhere |
-| Halve (toward zero) | `2/;` | Fast everywhere |
-| Increment variable | `[I:@1+%!]` | `xI` adds 1 to x |
-| Flag to 1/0 | `0=1+` |  |
-| Branchless select | `flag n&` | n if true, else 0 |
-| Logical not of a flag | `0=` | Same as `~` on a flag; also right on any value |
-
-**Bits and hex**
-
-| Name | Code | Effect |
-|---|---|---|
-| Bitwise NOT | `~` or `-1^` |  |
-| Set, clear, test bits | `m\|`, `m~&`, `m&` |  |
-| Shift left | `:+` | Repeat for more places |
-| Arithmetic shift right | `2/:0<&+` | Rounds down: −7 gives −4 |
-| Logical shift right | `2/:0<&+32767&` | FFFFh gives 7FFFh, 8000h gives 4000h |
-| Low byte, high byte | `255&`, `256/;255&` |  |
-| Hex digit (0–15) | `[D:9>7&+48+']` | Prints one digit |
-| Print a cell in hex | `[H:-4096&4096/;15&D:3840&256/;D:240&16/;D15&D]` | Uses D; always four digits |
-| Hex constant, from text | `[P0%1(:,32\|48-:9>(39- 0):-16&\{%}%:+:+:+:++%1+1);;]` | `"F000"P` pushes F000h; stops at the first non-hex character |
-| Hex from the keyboard | `-8?P` | Uses P |
-| Hex constant, by bytes | `3_h!` once, then `` h@:`3412;@ `` | Pushes 1234h, with no text to parse |
-
-The shift-right idioms work because `/` leaves the remainder with the dividend's sign: adding a negative remainder turns truncation into rounding down. In D the flag `9>` is all ones, so `7&` adds 7 for A–F with no branch. H masks each nibble in place and divides it down. For the top nibble the division gives −8 to −1 on negative cells, which is why it is masked again with `15&`. P folds case with `32|`, turns `a`–`f` into 10–15 by subtracting 39 more, and stops when the value has any bit outside 0–15 (`-16&`). Parsing costs time, so in a loop keep the value in a variable. In the by-bytes form, bytes are written little-endian and the third byte absorbs the RET; it reaches any bit pattern, such as 8000h (`` `0080 ``).
-
-**Control**
-
-Countdown, with the counter on the stack:
+**Loop.** Countdown, with the counter on the stack:
 
 ```text
 10 1( :# 1-: );
 ```
 
-Continue: `skip\` ends this pass early when skip is true, and the loop goes on.
-
-```text
-1(
-  1( part  skip\  rest 0)
-cond)
-```
-
-Return from inside a loop: record the flag as you break, then test it after the closer.
-
-```text
-[W 0q!
-   1( ...  cond:q!\  ... 1)
-   q@\
-   ...after the loop...
-]
-```
-
-Quit on q:
-
-```text
-1( 1?113=\
-   ...frame...
-1)
-```
-
-Switch, short. Every case is tested, so bodies must leave the stack alone:
+**Conditional.** Switch, short. Every case is tested, so bodies must leave the stack alone:
 
 ```text
 v :1=( one   0)
@@ -513,19 +443,6 @@ v :1=( one   0)
 ;
 ```
 
-Switch, fast, with a default:
-
-```text
-v 1(
-  :1=:( %; one   0)\
-  :2=:( %; two   0)\
-  :3=:( %; three 0)\
-  ;        other
-0)
-```
-
-In the fast switch, a match drops the value, runs its body, then breaks past the remaining cases without testing them.
-
 **Words as values.** Executing `]` pops an address and jumps to it, so these small words work:
 
 | Word | Code | Use |
@@ -533,59 +450,17 @@ In the fast switch, a match drops the value, runs its body, then breaks past the
 | Eval | `[X{]` | `"1 2+#]"X` runs the string; it ends with `]` to return |
 | Function in a variable | `[f 7#]` then `f@X` | Defines the body straight into f |
 | Anonymous block | `[ 7#]X` | Pushes code to hand to a word |
-| Function from a string | `"7#]"f!` then `f@X` | Code built or chosen at run time |
-| Here | `[L}:{]` | Pushes the address just after `L` |
-| Goto | `[G};{]` | `L x! ... x@:G` loops back to the `x!` |
-| Tail call | `f@G` | Jumps to f without returning here |
-| Continue | `}:{G` | Restarts the current block |
-| Exit caller | `[E};]` | Returns from the word that called E |
 
-These assume you know your nesting depth: inside a block, the top of the return stack is the block start, not a return address. Brackets inside an eval string are invisible to the skipper, because they are inside a string. A string run with X may therefore hold brackets that look unbalanced, as long as it ends with `]` and leaves the return stack as its caller expects.
-
-**Memory**
-
-| Name | Code |
-|---|---|
-| Allocate | `n_a!` |
-| Mark the heap | `0_m!` |
-| Release to the mark | `m@0_-_;` |
-| Clear n bytes at a | `0i! 1( 0a@i@+. i@1+:i! n@<)` |
-| Array cell i | `a@i@:++` (cell address), then `@` or `!` |
-
-**Input and output**
-
-| Name | Code |
-|---|---|
-| Comment | `"any text";` |
-| New line | `13'10'`, or `/M/J` inside a string |
-| Print a variable in the text | `"You have /g gold and /h hit points./M/J"$` (the values as `#` prints them) |
-| Wait for a key | `0?` |
-| Random seed from key timing | `0r! [K0 1(;r@1+r!1?:0=)]` |
-| Read a number | `[N0v!1(0?:48<\48-:#v@10*+v!1);v@]` |
-| Read a line | `-72?a!` (the text at a ends with CR, 13) |
-| Run a typed line | `[X{] -72?:{1(:,13=\1+1)93%.}X` (writes `]` over the CR, then runs it) |
-
-**Screen** (the console escapes; see [The console](#the-console))
+**Bits and hex.** There are no hex literals, so a program prints hex itself:
 
 | Name | Code | Effect |
 |---|---|---|
-| Clear the screen | `"/{"$` | Clears it and puts the cursor at the top left |
-| Clear to the end of the line | `"/}"$` | The cursor stays put |
-| Cursor to row, column | `r c"/~"$` | Both from 0: `0 0"/~"$` is the top left |
-| Print at a place | `5 10"/~Hello"$` | The text starts at row 5, column 10 |
-| A status line | `0 0"/~Score /s  Lives /l/}"$` | Writes over the last one: `/}` clears what is left of it |
-| Hide the cursor, show it again | ``"/`"$`` first, `"/\|"$` before the program ends | A game that redraws looks steadier with the cursor hidden |
-| Cursor word | `[Y"/~"$]` | `( row col -- )`: `5 10Y`, for a program that places the cursor from the stack often |
+| Hex digit (0–15) | `[D:9>7&+48+']` | Prints one digit |
+| Print a cell in hex | `[H:-4096&4096/;15&D:3840&256/;D:240&16/;D15&D]` | Uses D; always four digits |
 
-**Debugging**
+In D the flag `9>` is all ones, so `7&` adds 7 for A–F with no branch. H masks each nibble in place and divides it down.
 
-| Name | Code |
-|---|---|
-| Stack-leak sentinel | `12345` first, then `12345=0=("Stack leak"$0)` last |
-| Trace a value | `:#" "$` |
-| Mark a place | `"@3"$` |
-
-If anything leaked, the top of the stack at the end isn't the sentinel. Add it while debugging and take it out before the program goes into a pipe.
+Also in [idioms.md](idioms.md): [arithmetic and flags](idioms.md#arithmetic-comparisons-and-flags), [shifts and hex input](idioms.md#bits-bytes-and-hex), [goto, tail calls and other code as data](idioms.md#words-and-code-as-data), [the heap](idioms.md#memory-and-data-layout), [strings, input and the screen](idioms.md#strings-and-output), and [debugging](idioms.md#debugging).
 
 [↑ Back to top](#b8script-spec)
 
@@ -763,38 +638,38 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 
 **Where the time goes.** On the Z80, `+` takes about 160 clock cycles, but its own work is three instructions, about 21. The rest is the inner loop: getting back to it, sorting the character by range, and the jump through the table. `*` and `/` take about 900 and 1,500 cycles, as each always runs 16 rounds, and a skip reads every character it passes, about 100 cycles each. So a faster interpreter makes each dispatch cheaper, does fewer dispatches, makes the slow commands faster, or skips less.
 
-**What the Z80 does.** Its builds are tuned for size, and two switches, both off by default, add speed:
+**What the Z80 does.** Its builds come in three tiers, set by the switch `SPEED` (the other CPUs have them too, below). **Small** (`SPEED = 0`) is tuned for size; **base** (`SPEED = 1`, the default) and **fast** (`SPEED = 2`) add speed:
 
-- **`QUICK`** adds the speed-ups that cost 180 to 230 bytes, to any of the eight builds:
+- **Base** adds the speed-ups that cost 180 to 230 bytes, to any of the eight builds:
   - **A skip cache.** Nearly every skip has happened before: a loop skips the same false block on every pass. So the end of each skip is remembered, in a 256-byte page of 64 entries found by the start's low byte, and the next skip from there is one lookup. Only skips that start in the program text are kept (the line buffer changes), and the cache is emptied whenever a run starts.
   - **A faster skip.** Two range tests rule out most characters (`*` to `Z`, and `^` and up) before the six that matter are tested.
   - **`*` in 8 rounds** when either operand is below 256, which most multiplications have.
   - **`/` by any power of two** as a shift, with the same sign rules: `256/` for a high byte, and the 32 or 64 of fixed point.
   - **A true `)`** reads the block start where it is, instead of popping it and pushing it back.
   - **A variable then `@` or `!`** in one step, in the unchecked builds. A checked build checks the stacks between the two, so it keeps them apart.
-- **The speed builds** (switch `FAST`, in `B8Script-interpreters/fast/`) take everything, with no size limit:
+- **Fast** (in `B8Script-interpreters/z80/fast/`) takes everything, with no size limit. It is built for running benchmarks:
   - **Dispatch through a full table.** 256 entries, the handlers' low bytes in one page and their high bytes in the next: read the character, two loads, and `JP (HL)`.
-  - **The dispatcher inline** at the end of every entry of the speed build's own, so there is no jump back to the loop.
+  - **The dispatcher inline** at the end of every entry of the fast build's own, so there is no jump back to the loop.
   - **One entry per letter and digit,** each knowing its cell or its value already: a variable is `LD HL,cell`, a word call reads its own cell, and a one-digit number needs no loop.
   - **The commonest punctuation written for the table** (`+ - : ; % @ , < = > & | ^ ~ * ( ) ]`, and `!` and `.` unchecked), the rest reached through a two-instruction thunk.
-  - **`*` and `/` unrolled,** besides everything `QUICK` has.
+  - **`*` and `/` unrolled,** besides everything base has.
 
-Measured in Z80 clock cycles on the generic builds, against the regular build (same output in every case):
+Measured in Z80 clock cycles on the generic builds, against the small build (same output in every case):
 
-| Program | Regular | `QUICK` | Speed build |
+| Program | Small | Base | Fast |
 |---|---|---|---|
 | SIEVE, 1 pass | 56.8 M | 1.09× | 2.24× |
 | PI, 100 digits | 316.2 M | 1.21× | 2.05× |
 | MANDEL | 163.2 M | 1.36× | 2.53× |
-| Tiny BASIC, a short program | 115.4 M | 1.38× | 2.40× |
-| Robots, scripted play | 8.3 M | 1.18× | 2.11× |
+| Tiny BASIC, a short program | 114.0 M | 1.42× | 2.56× |
+| Robots, scripted play | 8.2 M | 1.18× | 2.10× |
 | Reversi, scripted play | 43.9 M | 1.47× | 2.56× |
 | Qubic, scripted play | 61.4 M | 1.26× | 2.35× |
 | Tetris, scripted play | 10.9 M | 1.13× | 1.69× |
 
 Tetris gains least because much of its time is spent in `n?` waits, which are timed and rightly don't get shorter.
 
-**Ideas for the other CPUs.** None of the other interpreters has these yet. On the Z80, counting how often each pattern occurs on the runs above gave these estimates before any were built, and the measurements bore them out:
+**What each idea is worth.** On the Z80, counting how often each pattern occurs on the runs above gives these estimates, and the measurements agree:
 
 | Idea | Time saved on the Z80 | Cost on the Z80 |
 |---|---|---|
@@ -805,9 +680,29 @@ Tetris gains least because much of its time is spent in `n?` waits, which are ti
 | Reading the loop's address in place at a true `)` | Under 2% | About 20 bytes |
 | Dispatch through a full table, with the dispatcher inline | 15–25% more | 512 bytes of table, and the dispatcher's 12 to 15 bytes at every entry |
 
+**The other CPUs** have the same three tiers, with each idea fitted to the CPU, or left out where it doesn't apply:
+- the 8080 multiplies a small operand as a byte;
+- the 6809 already multiplies with MUL;
+- x86 has IMUL;
+- the 6809's and x86's small `)` already reads its block start in place;
+- each CPU has a table of its own form: two pages of low and high bytes on the Z80, 8080 and 6502, and whole addresses on the 6809 and x86.
+
+Against the small build of the same CPU, on the same eight runs (in clock cycles; on Windows, in instructions):
+
+| CPU | Base costs | Base | Fast | Fast size |
+|---|---|---|---|---|
+| Z80 | 180–230 bytes | 1.09–1.47× | 1.69–2.56× | 4,352–4,864 bytes |
+| 8080 | 180–212 bytes | 1.09–1.49× | 1.76–2.69× | 4,352–4,864 bytes |
+| 6502, stack in pages 2–3 | 269–326 bytes | 1.10–1.49× | 1.78–2.71× | 5,506–7,448 bytes |
+| 6502, stack in zero page | 273–328 bytes | 1.11–1.51× | 1.76–2.74× | 5,069–6,949 bytes |
+| 6809 | 116–153 bytes | 1.10–1.52× | 1.94–2.95× | 4,257–4,654 bytes |
+| Windows (x86) | 144–190 bytes of code | 1.10–1.57× | 2.68–4.61× | 7,680–8,704-byte files |
+
+The interpreters README has every run on every CPU.
+
 ### Build options
 
-An implementation may offer its variants as assembly switches. The existing sources use `CPM` (a CP/M .COM file or a generic ROM image), `CHECKED`, `EDITOR` and `ANSI` (how the console escapes reach the screen; see [The console](#the-console)). Which environments a build offers is up to the implementation; the smallest builds for vintage and homebrew machines are typically unchecked runners, with the loader left to the machine.
+An implementation may offer its variants as assembly switches. The existing sources use `CPM` (a CP/M .COM file or a generic ROM image), `CHECKED`, `EDITOR`, `ANSI` (how the console escapes reach the screen; see [The console](#the-console)), and `SPEED` (small, base or fast; see [Speed](#speed)). Which environments a build offers is up to the implementation; the smallest builds for vintage and homebrew machines are typically unchecked runners, with the loader left to the machine.
 
 [↑ Back to top](#b8script-spec)
 
@@ -817,7 +712,7 @@ An environment is what surrounds the interpreter: how a program gets in, how it 
 
 | Kind | What it is |
 |---|---|
-| Runner | Loads one program, runs it and exits: `B8SZ80 PROG.B8S` |
+| Runner | Loads one program, runs it and exits: `B8S PROG.B8S` |
 | Prompt | Runs each typed line at once. Words, variables and the data stack carry over from line to line |
 | Line editor | A prompt plus stored, counted lines |
 | Screen editor | Full-screen editing on an ANSI terminal |
@@ -863,7 +758,7 @@ A screen editor is free to use the WordStar keys CP/M users know: ^E ^X ^S ^D to
 
 ## Programs
 
-Two longer programs, written as files with comments. Comments are strings dropped with `;`, so they cost time only where they run: keep them outside loops and words.
+Two longer programs, with comments. Comments are strings dropped with `;`, so they cost time only where they run: keep them outside loops and words.
 
 **Conway's Life** (`LIFE.B8S`). Each grid has a border of dead cells, so the eight neighbours are at fixed offsets and need no edge tests. About 3.6 seconds per generation on a 4 MHz Z80. Any key stops it.
 
@@ -925,7 +820,7 @@ Two longer programs, written as files with comments. Comments are strings droppe
 "/|"$
 ```
 
-**Star Trek** (`TREK.B8S`). A short version of the classic: one quadrant of 8 × 8 sectors, Klingons to destroy, a starbase to dock at.
+**Star Trek.** A short version of the classic: one quadrant of 8 × 8 sectors, Klingons to destroy, a starbase to dock at.
 
 ```text
 "STAR TREK for B8Script. One quadrant, 8 x 8 sectors.";
@@ -1062,24 +957,26 @@ q@0=)
 
 ## Appendix A: Z80
 
-Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`, `ANSI`, and for speed `QUICK` and `FAST` (both off by default; see [Speed](#speed)).
+Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`, `ANSI`, and for speed `SPEED`: 0 small, 1 base (the default), 2 fast (see [Speed](#speed)).
 
 **Builds**
 
-| Build | File | Bytes | Notes |
+Each build comes in the three tiers, in `B8Script-interpreters/z80/small/`, `base/` and `fast/`. The table names the base files:
+
+| Build | File | Bytes: small, base, fast | Notes |
 |---|---|---|---|
-| Generic ROM | `b8s-z80-rom-0000.bin` | 835 | Starts at 0000h (reset); owns page zero. `ANSI = 0`; with `ANSI = 1`, 886 |
-| Generic ROM, checked | `b8s-z80-rom-checked-0000.bin` | 1,219 | With `ANSI = 1`, 1,266 |
-| CP/M runner | `B8SZ80.COM` | 1,017 | `B8SZ80 PROG.B8S` |
-| CP/M runner, checked | `B8SZ80C.COM` | 1,414 |  |
-| Generic ROM with the line editor | `b8s-z80-rom-editor-0000.bin` | 1,355 | The suggested standard under [Environments](#environments); see the interpreters README |
-| The same, checked | `b8s-z80-rom-editor-checked-0000.bin` | 1,742 |  |
-| CP/M with the line editor | `B8SZ80E.COM` | 1,646 | `B8SZ80E PROG.B8S`, or with no file |
-| The same, checked | `B8SZ80EC.COM` | 2,048 |  |
+| Generic ROM, checked | `b8s-z80-base-rom-0000.bin` | 1,219, 1,402, 4,608 | Starts at 0000h (reset); owns page zero. `ANSI = 0`; with `ANSI = 1`, 1,266, 1,449, 4,608 |
+| Generic ROM, unchecked | `b8s-z80-base-rom-unchecked-0000.bin` | 835, 1,054, 4,352 | With `ANSI = 1`, 886, 1,118, 4,352 |
+| CP/M runner, checked | `B8S.COM` | 1,414, 1,593, 4,864 | `B8S PROG.B8S` |
+| CP/M runner, unchecked | `B8SU.COM` | 1,017, 1,231, 4,608 |  |
+| Generic ROM with the line editor, checked | `b8s-z80-base-rom-editor-0000.bin` | 1,742, 1,951, none | The suggested standard under [Environments](#environments); see the interpreters README |
+| The same, unchecked | `b8s-z80-base-rom-editor-unchecked-0000.bin` | 1,355, 1,568, none |  |
+| CP/M with the line editor, checked | `B8SE.COM` | 2,048, 2,227, none | `B8SE PROG.B8S`, or with no file |
+| The same, unchecked | `B8SUE.COM` | 1,646, 1,860, none |  |
 
-Each of these also comes with `QUICK = 1`, in `B8Script-interpreters/quick/` (`B8SZ80Q.COM` and so on, a Q after the Z80), 180 to 230 bytes bigger and 1.1 to 1.5 times as fast; and there are four speed builds (`FAST = 1`) in `B8Script-interpreters/fast/`, `B8SZ80F.COM`, `B8SZ80FC.COM` and two generic ROMs, of 4,352 to 4,864 bytes, about twice as fast. See [Speed](#speed) and the interpreters README.
+A small file has `small` in place of `base` (`b8s-z80-small-rom-0000.bin`) or an S after `B8S` and any U (`B8SS.COM`, `B8SUSE.COM`); a fast one has `fast` or an F (`b8s-z80-fast-rom-0000.bin`, `B8SF.COM`, `B8SUF.COM`). Base is 180 to 230 bytes bigger than small and 1.1 to 1.6 times as fast; fast is about twice as fast as small, and has no editor (one can be added if there's enough interest). See [Speed](#speed) and the interpreters README.
 
-**Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), IY is the return-stack pointer. A and DE are scratch. In the CP/M builds and the speed builds IX holds the inner loop's address, so a handler ends with `JP (IX)`. The alternate registers are not used, so an interrupt routine may use them.
+**Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), IY is the return-stack pointer. A and DE are scratch. In the CP/M builds and the fast builds IX holds the inner loop's address, so a handler ends with `JP (IX)`. The alternate registers are not used, so an interrupt routine may use them.
 
 **Memory map (generic build)**
 
@@ -1091,12 +988,12 @@ Each of these also comes with `QUICK = 1`, in `B8Script-interpreters/quick/` (`B
 | -n? line buffer (127 characters and CR) | 8280h | 33408 | −32128 |
 | Program text (`PROG`) | 8300h | 33536 | −32000 |
 | Heap limit (default `HEAPLIM`) | F000h | 61440 | −4096 |
-| Skip cache (`QUICK` and speed builds): the page at the heap limit | F000h | 61440 | −4096 |
+| Skip cache (base and fast builds): the page at the heap limit | F000h | 61440 | −4096 |
 | Heap pointer cell | 827Ch | 33404 | −32132 |
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 827Ah | 33402 | −32134 |
 
-Under CP/M the pages sit after the image and the heap limit is the BDOS. The `QUICK` and speed builds have the skip cache's page first, before the return stack. The break-off cell is at offset 7Bh of the letter page, which is the page below the program text: 077Bh (1915) in `B8SZ80.COM`, 097Bh (2427) in `B8SZ80C.COM`, 0A7Bh (2683) in `B8SZ80E.COM` and 0B7Bh (2939) in `B8SZ80EC.COM`; 097Bh, 0B7Bh, 0C7Bh and 0D7Bh in their `QUICK` versions (`B8SZ80Q.COM` and so on); 167Bh (5755) and 177Bh (6011) in the speed builds `B8SZ80F.COM` and `B8SZ80FC.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
+Under CP/M the pages sit after the image and the heap limit is the BDOS. The base and fast builds have the skip cache's page first, before the return stack. The break-off cell is at offset 7Bh of the letter page, which is the page below the program text: 097Bh (2427) in `B8SU.COM`, 0B7Bh (2939) in `B8S.COM`, 0C7Bh (3195) in `B8SUE.COM` and 0D7Bh (3451) in `B8SE.COM`; in the small builds 077Bh (1915) in `B8SUS.COM`, 097Bh in `B8SS.COM`, 0A7Bh (2683) in `B8SUSE.COM` and 0B7Bh in `B8SSE.COM`; in the fast builds 167Bh (5755) in `B8SUF.COM` and 177Bh (6011) in `B8SF.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
 
 **The break key.** The keyboard is looked at on every word call, block entry, true `)` and `{`, one time in 256. A program that stores a non-zero byte in the break-off cell gets Ctrl-C as key 3; two within about 250 ms still stop it. An unchecked build prints nothing when it is stopped.
 
@@ -1121,25 +1018,28 @@ All four must keep BC and IY, and all but `CONAT` also HL. The flags may change.
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (926 bytes; 980 with `ANSI = 1`), `b8s-8080-rom-checked-0000.bin` (1,348; 1,402), `B8S8080.COM` (1,129), `B8S8080C.COM` (1,583).
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`, and for speed `SPEED`, as on the Z80 (see [Speed](#speed)). Builds, in `B8Script-interpreters/8080/small/`, `base/` and `fast/`, with the bytes of small, base and fast: the generic ROM, `b8s-8080-base-rom-unchecked-0000.bin` (926, 1,134 and 4,352; with `ANSI = 1`, 980, 1,188 and 4,352), and checked, `b8s-8080-base-rom-0000.bin` (1,348, 1,528 and 4,864; 1,402, 1,582 and 4,864), with `small` or `fast` in place of `base` in the other tiers; the CP/M runner, `B8SUS.COM`, `B8SU.COM` and `B8SUF.COM` (1,129, 1,341 and 4,608), and checked, `B8SS.COM`, `B8S.COM` and `B8SF.COM` (1,583, 1,763 and 4,864).
 
-The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers, without IY) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 0A7Bh in `B8S8080C.COM`), with these differences: the routines keep BC (and HL where the Z80's do); the return-stack pointer is a RAM cell; and the generic image's one-byte calls are `RST 1` to `RST 6` (08h, 18h, 20h, 28h and 30h), where `RST 5` (28h) prints A and keeps BC, DE and HL. The CP/M builds don't use page zero: there the same routines are CALLs and JMPs. The RET byte is C9h.
+The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers, without IY) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 0A7Bh in `B8SU.COM` and 0B7Bh in `B8S.COM`; 087Bh and 0A7Bh in `B8SUS.COM` and `B8SS.COM`; 167Bh and 177Bh in `B8SUF.COM` and `B8SF.COM`; the skip cache is where the Z80's is), with these differences: the routines keep BC (and HL where the Z80's do); the return-stack pointer is a RAM cell; and the generic image's one-byte calls are `RST 1`, `3`, `4`, `5` and `6` (08h, 18h, 20h, 28h and 30h), where `RST 5` (28h) prints A and keeps BC, DE and HL. The CP/M builds don't use page zero: there the same routines are CALLs and JMPs. The RET byte is C9h.
 
 [↑ Back to top](#b8script-spec)
 
 ## Appendix C: 6502
 
-Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-6502-zp.asm` is smaller and keeps it in zero page. Switches: `CHECKED`, `ANSI`. The image starts at E000h; point the reset vector at label `start`.
+Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-6502-zp.asm` is smaller and keeps it in zero page. Switches: `CHECKED`, `ANSI`, and for speed `SPEED`, as on the Z80 (see [Speed](#speed)). The image starts at E000h; point the reset vector at label `start`. In the fast builds the dispatch table fills E000h–E1FFh, and `start` is at E200h. The builds are in `B8Script-interpreters/6502/small/`, `base/` and `fast/`: `b8s-6502-base-rom-E000.bin` (checked) and `b8s-6502-base-rom-unchecked-E000.bin`, `-rom-zp-` for the zero-page interpreter (`b8s-6502-base-rom-zp-E000.bin`), and `small` or `fast` in place of `base` in the other tiers.
 
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
 |---|---|---|
-| Bytes (unchecked, checked), `ANSI = 0` | 1,208 and 1,707 | 1,155 and 1,673 |
+| Bytes, small (unchecked, checked), `ANSI = 0` | 1,208 and 1,707 | 1,155 and 1,673 |
 | The same, `ANSI = 1` | 1,265 and 1,750 | 1,217 and 1,721 |
+| Base, `ANSI = 0` | 1,534 and 1,976 | 1,483 and 1,946 |
+| Fast, `ANSI = 0` | 7,448 and 5,506 | 6,949 and 5,069 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
 | Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |
 | Program text | $0500 | $0500 |
-| Heap limit (default) | E000h (57344, −8192) | Same |
+| Heap limit | DF00h (57088, −8448) in base and fast; E000h (57344, −8192) in small | E000h (57344, −8192) in every build |
+| Skip cache (base and fast builds) | DF00h, the page at the heap limit | $0200, page 2, which this interpreter doesn't otherwise use |
 | Heap pointer cell | $047C | $047C |
 | Break-off cell | $047B (1147, the same signed) | Same |
 | Held key | $07 in zero page (unchecked), $047A (1146) (checked) | $047A (1146) |
@@ -1166,7 +1066,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 ## Appendix D: 6809
 
-Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. Builds: `b8s-6809-rom-F000.bin` (873 bytes; 934 with `ANSI = 1`), `b8s-6809-rom-checked-F000.bin` (1,264; 1,313). The image starts at F000h, with label `start`: point the reset vector at it.
+Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`, and for speed `SPEED`, as on the Z80 (see [Speed](#speed)). Builds, in `B8Script-interpreters/6809/small/`, `base/` and `fast/` (bytes with `ANSI = 0`, then with `ANSI = 1`): base, `b8s-6809-base-rom-F000.bin` (checked, 1,380; 1,429) and `b8s-6809-base-rom-unchecked-F000.bin` (1,026; 1,087); small, `b8s-6809-small-rom-F000.bin` (checked, 1,264; 1,313) and `b8s-6809-small-rom-unchecked-F000.bin` (873; 934); fast, `b8s-6809-fast-rom-E000.bin` (checked, 4,257; 4,306) and `b8s-6809-fast-rom-unchecked-E000.bin` (4,654; 4,715). The image starts at F000h (E000h in fast), with label `start`: point the reset vector at it.
 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|
@@ -1174,7 +1074,9 @@ Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. 
 | Data stack (U, 127 cells; 125 in the checked build) | 8100h page | 33024 | −32512 |
 | Letter page (DP) | 8200h | 33280 | −32256 |
 | Program text | 8300h | 33536 | −32000 |
-| Heap limit (default) | F000h | 61440 | −4096 |
+| Heap limit and skip cache, base builds | EF00h | 61184 | −4352 |
+| Heap limit, small builds | F000h | 61440 | −4096 |
+| Heap limit and skip cache, fast builds | DF00h | 57088 | −8448 |
 | Heap pointer cell (little-endian) | 827Ch | 33404 | −32132 |
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 8234h | 33332 | −32204 |
@@ -1198,111 +1100,22 @@ Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. 
 
 [↑ Back to top](#b8script-spec)
 
-## Appendix E: B8SIC
+## Appendix E: Windows (32-bit x86)
 
-Source: `asm/lib/b8script/` in the B8SIC repository (`b8s-core.b8a`, `b8s-e.b8a`, `b8s-ec.b8a`). B8SIC is a microcoded 8-bit
-stack machine, built with B8Script in mind: its microcode reads, sorts and dispatches the characters itself. One
-instruction, `B8S`, reads the program text, passes over ignored bytes, pushes a variable's address, calls a word and
-reads a number by itself, and jumps through the packed table in page 0 only for punctuation and NUL, each handler
-ending with `B8S`; a second, `B8SKIP`, is the skipper. The B8Script stacks are the machine's own two stacks.
-The interpreters are B8SDOS programs, loaded at 0000h. The environment is a runner (`B8SCRIPT PROG.B8S`), planned: until
-it is built they run under the B8SIC's tests.
+Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`, `EDITOR`, and for speed `SPEED`, as on the Z80 (see [Speed](#speed)). These programs run in the Windows command shell; a program is a file named on the command line. They are tested in an emulator and have not yet been run on Windows itself.
 
 **Builds**
 
-| Build | File | Bytes | Notes |
+Each comes in the three tiers. The table names the base files, in `B8Script-interpreters/win32/base/`:
+
+| Build | File | Bytes: small, base, fast | Notes |
 |---|---|---|---|
-| Pure | `b8s-e.b8a` | 800 | Unchecked. The program text follows at 0320h |
-| Checked | `b8s-ec.b8a` | 1,773 | The spec's checked build, and the default under B8SDOS. The program text follows at 06EDh. `/U` in the command tail runs a program unchecked: `B8SCRIPT /U PROG.B8S` |
+| Runner, checked | `B8S.EXE` | 3,072, 3,072, 7,680 | `B8S PROG.B8S` |
+| Runner, unchecked | `B8SU.EXE` | 2,560, 2,560, 8,192 |  |
+| With the line editor, checked | `B8SE.EXE` | 3,584, 4,096, 8,704 | `B8SE PROG.B8S`, or with no file. The suggested standard under [Environments](#environments) |
+| The same, unchecked | `B8SUE.EXE` | 3,072, 3,584, 8,704 |  |
 
-Both share one file for the packed table, the handlers and the skipping, byte for byte. The console is B8SDOS's (output
-by `CONOUT`, keys by `CONIN` and `CONST`), so its code is not counted.
-
-**Registers.** PR is the reading position, TOS is the machine's top-of-stack register and the rest of the data stack is
-the machine's data stack ((SP) is NOS), the return stack is the machine's return stack. AR, X, Y and FR are scratch.
-
-**Memory map**
-
-| Item | Hex | Unsigned | Signed |
-|---|---|---|---|
-| NUL's table cell | 0002h | 2 | 2 |
-| Word cells A-Z, two bytes each (the packed table's cells, `2c - 4`) | 007Eh | 126 | 126 |
-| Variable cells a-z, two bytes each | 00BEh | 190 | 190 |
-| The interpreter's code and variables | 0100h up to the program | 256 | 256 |
-| Program text, pure build | 0320h | 800 | 800 |
-| Program text, checked build | 06EDh | 1773 | 1773 |
-| `-n?` line buffer (127 characters and CR), MEMTOP − 128 | EF70h | 61296 | −4240 |
-| MEMTOP, the first byte past a program's space; the heap limit is the line buffer | EFF0h | 61424 | −4112 |
-
-The heap starts just past the program's NUL and ends at the line buffer; a checked build stops with `H` past it or
-below its start. The data stack holds 252 cells (251 in the checked build, which keeps one spare cell under the program's, so that a pop past empty and a push after it, which the stack-limit interrupt does not see yet, touch nothing the OS keeps) and the return stack 250 entries (more than the 64 and 64 the spec asks):
-each stack is 256 cells with the four deepest the hardware's guard zone, and the OS keeps room for itself in them.
-Before the program runs, the cell of a variable holds a byte of the startup code in the pure build (the spec's undefined
-start) and 0 in the checked one; a word's cell likewise holds startup bytes in the pure build and points at an internal
-stop in the checked one. `[` and a lowercase letter stores the body's address in that variable's cell, so a variable is
-the cell of its letter (a-z at 00BEh, 2 bytes each). MEMTOP is the OS's and is the same for every program.
-
-A program's space for `!` and `.` (a checked build stops with `O` outside it) is the letters' cells and everything from
-the program text up to MEMTOP: the heap and the line buffer included, the interpreter, the table's punctuation cells and
-the OS not.
-
-**System addresses.** None. The B8SIC has no cell a program reads for the heap limit or free memory (the heap's limit is
-the line buffer's address, EF70h, which `0_` and the program's end give), and no break-off cell: the break key is the OS's.
-
-**The break key.** The OS's own break check is the poll: Ctrl-C on the console and the keyboard's B8S+B stop a running
-program in every build, at the next clock tick. A checked build reports
-`B` with the place (one character late at most); the pure build prints the OS's own message. A program never sees
-Ctrl-C and cannot turn the key off, and there is no held key (the OS keeps its own key ring).
-
-**The console.** Output goes through `CONOUT`, which sends a character to every output of the console's set (the UART,
-the display, the panel's LCD). The console escapes of `$` are sent as ANSI sequences (`ANSI = 1`): ESC `[H` ESC `[J` for
-`/{`, ESC `[K` for `/}`, ESC `[?25h` and ESC `[?25l` for `/|` and `` /` ``, and ESC `[` row+1 `;` col+1 `H` for `/~`, the
-numbers printed as `#` prints them; the B8SIC's terminal (Cards' console card) and a serial terminal take them. The
-interpreters call no screen routine of the machine's own. The screen is the console card's, and the interpreters do
-not know its size.
-
-**The checked build's report** is the spec's, to the console. Besides the spec's wording: more than eight stack values
-show as ` ...` (three dots) and the top eight. A stop from the OS (`S`, `s`, `R`, `r`, `B`) reports the depths and no
-values, since the stack-limit interrupt and the break check arrive through the fault hook with no room to read the
-stack; the place may be one character late. The data stack's limit is the guard zone, so an underflow is seen only
-past the empty cell (a first excess pop is not a stop). The other codes report the stacks as the character found them,
-its operands still on the data stack. A `$` is looked at whole before it prints (`Q`, and `s` for the cells its `/~`
-escapes need). A reserved byte (80h-FFh) outside a string is found by a look at the text before it runs, and reported as
-`X` with an empty stack; a byte that a program writes into its own text later is ignored. A trap in machine code is
-reported as `T` (not a spec code).
-
-**Implementation-defined choices.** `-n?` caps its count at 127; Backspace and Delete erase and echo BS, space, BS; the
-other control keys are ignored; a full line takes only Backspace, Delete and CR; the CR is stored and not echoed. `n?`
-for n > 0 waits up to about n milliseconds. `_` moves the top by at most
-32767 bytes in one call, as the spec says. Dividing by 0 in the pure build leaves the dividend and 65535 (two cells with
-no meaning). Division by 2 and −2 is a shift.
-
-**Machine-code contract.** The grave runs the code at the address on top as a subroutine (`CALLT`): the return address
-is on the return stack and the data stack is B8Script's, with B8Script's TOS in TOS (the address already consumed). The
-code returns with `RET` (opcode 02h, which the loader writes). It must keep PR, the stack pair and the return stack
-below its return address; it may change AR, X, Y, FR and the flags, and it may leave the data stack deeper or
-shallower. The loader's RET byte is 02h. Example: `4_:d! `61 ; 21 d@` #` prints 42 (SL0.w, RET).
-
-[↑ Back to top](#b8script-spec)
-
-## Appendix F: the B8Script TTL computer
-
-Also built with B8Script in mind. On this machine the hex loader's RET byte is `]`. This appendix is to come.
-
-[↑ Back to top](#b8script-spec)
-
-## Appendix G: Windows (32-bit x86)
-
-Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`, `EDITOR`. These programs run in the Windows command shell; a program is a file named on the command line. They are tested in an emulator and have not yet been run on Windows itself.
-
-**Builds**
-
-| Build | File | Bytes | Notes |
-|---|---|---|---|
-| Runner | `B8SWIN.EXE` | 2,560 | `B8SWIN PROG.B8S` |
-| Runner, checked | `B8SWINC.EXE` | 3,072 |  |
-| With the line editor | `B8SWINE.EXE` | 3,072 | `B8SWINE PROG.B8S`, or with no file. The suggested standard under [Environments](#environments) |
-| The same, checked | `B8SWINEC.EXE` | 3,584 |  |
+The small ones, in `win32/small/`, have an S after `B8S` (`B8SS.EXE`, `B8SUS.EXE`, `B8SSE.EXE`, `B8SUSE.EXE`), and the fast ones, in `win32/fast/`, an F (`B8SF.EXE`, `B8SUF.EXE`, `B8SFE.EXE`, `B8SUFE.EXE`). The skip cache of base and fast is outside the 64 KB, so the memory map is the same in every tier.
 
 **Memory map.** The machine is the 64 KB one of this spec, held in the last 64 KB of the program's image (at 00410000h). A B8Script address is an offset into it.
 

@@ -7,7 +7,9 @@ usage: b8strip.py SRC [OUT]        write the stripped program to OUT (or print i
 A comment is a string dropped at once: '"text";', with white space allowed
 between the closing quote and the ';'. It pushes an address and drops it, so
 it does nothing, and taking it out changes nothing (unless a program works
-out addresses inside its own text, which none of the games does).
+out addresses inside its own text, which none of the games does). A comment
+whose text starts with '!' is kept, as '"!text";': a note meant for the
+stripped program too (put it outside loops: it runs).
 
 White space is space, the other control characters and DEL. All of it goes,
 except one space wherever taking it out would join two things into something
@@ -58,10 +60,14 @@ def strip(src):
             k = j
             while k < n and blank(src[k]):
                 k += 1
-            if k < n and src[k] == SEMI:           # a comment: drop it and its ';'
-                gap = True
-                i = k + 1
-                continue
+            keep = None
+            if k < n and src[k] == SEMI:
+                if j - i > 2 and src[i + 1] == ord('!'):
+                    keep = k                       # "!...": kept, with its ';'
+                else:                              # a comment: drop it and its ';'
+                    gap = True
+                    i = k + 1
+                    continue
         if gap and out:
             p = out[-1]
             if ((p in DIG and c in DIG) or (p == MINUS and c in DIG) or p == OPEN
@@ -72,6 +78,9 @@ def strip(src):
             out += src[i:j]
             inhex = False
             i = j
+            if keep is not None:
+                out.append(SEMI)
+                i = keep + 1
             continue
         # a hex load is a grave followed at once by a hex character, and runs
         # on while the characters that follow at once are hex

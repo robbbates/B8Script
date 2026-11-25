@@ -42,7 +42,7 @@ The interpreters are in [`B8Script-interpreters/`](../B8Script-interpreters/), a
 | `ROBOTS.B8S` | **Robots**: the robots step towards you each turn. Make them crash into each other. | q w e / a d / z x c move, s stays, space waits, t teleports, Q quits. |
 | `SUPERTRK.B8S` | **Super Star Trek**: 8 × 8 quadrants; destroy every Klingon before the stardates run out. | m move, j warp, l long-range scan, g map, p phasers, t torpedo, z shields, h help, q quit. |
 | `TETRIS.B8S` | **Tetris**. | a d move, w rotates, s moves down, space drops, q quits. |
-| `TINYBAS.B8S` | **Tiny BASIC**: not a game but a BASIC interpreter written in B8Script, with PRINT, IF, FOR, GOSUB, INPUT and RND. | Type BASIC lines, then `RUN`. Ctrl-C stops a running program (BREAK); `BYE` leaves. |
+| `TINYBAS.B8S` | **Tiny BASIC**: not a game but a BASIC interpreter written in B8Script, with PRINT, IF, FOR, GOSUB, INPUT and RND. | Type BASIC lines, then `RUN`. Ctrl-B stops a running program (BREAK); `BYE` or Ctrl-C leaves. |
 | `TRADER.B8S` | **Space Trader**: buy low, fly, sell high, among five planets in 40 days. | b buy, s sell, f refuel, t travel, q quit. |
 | `WUMPUS.B8S` | **Hunt the Wumpus**, after the 1973 original: 20 rooms on a dodecahedron. | m moves, s shoots, then type room numbers and press Return. |
 

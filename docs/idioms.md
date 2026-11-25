@@ -211,8 +211,7 @@ v 1(
 | Why the loop ended | `0q! 1( ... q@0=) q@1=( ... 0) q@2=( ... 0)` | One variable is both the loop test and the reason (IDOL, LIGHTS) |
 | Check everything, decide at the end | `1n@1(%0?:'D=&%1-:);` | Each test is ANDed into one flag under the counter (SIMON) |
 | Error code, not unwinding | `(2x!0) x@\` | Set a code, keep the stack balanced, and leave at the next `x@\` (TINYBAS) |
-| Look for Ctrl-C every 16 passes | `k@1+:k!15&0=(1?3=(4x!0)0)` | A masked counter makes a one-in-16 test (TINYBAS) |
-| Take Ctrl-C for yourself | `""134- 1%.` as the program's very first characters | Stores 1 in the break-off cell, so Ctrl-C reaches the program as key 3 instead of stopping it; two quick Ctrl-Cs still stop it. A string at the very start of a program lies 1 byte into the text, and the cell is offset 7Bh of the letter page, the page just below: 133 bytes before the text, on every build. The space keeps `-1` from reading as a negative number (TINYBAS) |
+| Look for a key every 16 passes | `k@1+:k!15&0=(K(4x!0)0)`, with `[K1?2=]` | A masked counter makes a one-in-16 test; K is "is Ctrl-B down?". Use a key of your own for a program's own break: Ctrl-C belongs to the interpreter (TINYBAS) |
 | Neighbourhood scan | `y@1-j! 1( x@1-i! 1( ... i@1+:i! x@2+<) j@1+:j! y@2+<)` | The 3×3 around x, y with no offset table (SUPERTRK) |
 
 ## Words and code as data

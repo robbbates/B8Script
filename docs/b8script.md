@@ -1121,9 +1121,9 @@ All four must keep BC and IY, and all but `CONAT` also HL. The flags may change.
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`. Builds: `b8s-8080-rom-0000.bin` (926 bytes; 980 with `ANSI = 1`), `b8s-8080-rom-checked-0000.bin` (1,348; 1,402), `B8S8080.COM` (1,129), `B8S8080C.COM` (1,583).
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`, and for speed `QUICK` and `FAST`, as on the Z80 (both off by default; see [Speed](#speed)). Builds: `b8s-8080-rom-0000.bin` (926 bytes; 980 with `ANSI = 1`), `b8s-8080-rom-checked-0000.bin` (1,348; 1,402), `B8S8080.COM` (1,129), `B8S8080C.COM` (1,583). With `QUICK = 1`, in `B8Script-interpreters/quick/`: 1,134, 1,528, `B8S8080Q.COM` 1,341 and `B8S8080QC.COM` 1,763. The speed builds, in `B8Script-interpreters/fast/`: 4,352, 4,864, `B8S8080F.COM` 4,608 and `B8S8080FC.COM` 4,864.
 
-The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers, without IY) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 0A7Bh in `B8S8080C.COM`), with these differences: the routines keep BC (and HL where the Z80's do); the return-stack pointer is a RAM cell; and the generic image's one-byte calls are `RST 1` to `RST 6` (08h, 18h, 20h, 28h and 30h), where `RST 5` (28h) prints A and keeps BC, DE and HL. The CP/M builds don't use page zero: there the same routines are CALLs and JMPs. The RET byte is C9h.
+The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers, without IY) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 087Bh in `B8S8080.COM` and 0A7Bh in `B8S8080C.COM`; 0A7Bh and 0B7Bh in `B8S8080Q.COM` and `B8S8080QC.COM`; 167Bh and 177Bh in `B8S8080F.COM` and `B8S8080FC.COM`; the skip cache is where the Z80's is), with these differences: the routines keep BC (and HL where the Z80's do); the return-stack pointer is a RAM cell; and the generic image's one-byte calls are `RST 1` to `RST 6` (08h, 18h, 20h, 28h and 30h), where `RST 5` (28h) prints A and keeps BC, DE and HL. The CP/M builds don't use page zero: there the same routines are CALLs and JMPs. The RET byte is C9h.
 
 [↑ Back to top](#b8script-spec)
 
@@ -1166,7 +1166,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 ## Appendix D: 6809
 
-Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. Builds: `b8s-6809-rom-F000.bin` (873 bytes; 934 with `ANSI = 1`), `b8s-6809-rom-checked-F000.bin` (1,264; 1,313). The image starts at F000h, with label `start`: point the reset vector at it.
+Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`, and for speed `QUICK` and `FAST`, as on the Z80 (both off by default; see [Speed](#speed)). Builds: `b8s-6809-rom-F000.bin` (873 bytes; 934 with `ANSI = 1`), `b8s-6809-rom-checked-F000.bin` (1,264; 1,313). The image starts at F000h, with label `start`: point the reset vector at it. With `QUICK = 1`, in `B8Script-interpreters/quick/`: `b8s-6809-quick-rom-F000.bin` (1,026; 1,087) and `b8s-6809-quick-rom-checked-F000.bin` (1,380; 1,429). The speed builds, in `B8Script-interpreters/fast/`, start at E000h: `b8s-6809-fast-rom-E000.bin` (4,654; 4,715) and `b8s-6809-fast-rom-checked-E000.bin` (4,257; 4,306).
 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|
@@ -1175,6 +1175,8 @@ Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`. 
 | Letter page (DP) | 8200h | 33280 | −32256 |
 | Program text | 8300h | 33536 | −32000 |
 | Heap limit (default) | F000h | 61440 | −4096 |
+| Heap limit and skip cache, `QUICK` builds | EF00h | 61184 | −4352 |
+| Heap limit and skip cache, speed builds | DF00h | 57088 | −8448 |
 | Heap pointer cell (little-endian) | 827Ch | 33404 | −32132 |
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 8234h | 33332 | −32204 |
@@ -1293,7 +1295,7 @@ Also built with B8Script in mind. On this machine the hex loader's RET byte is `
 
 ## Appendix G: Windows (32-bit x86)
 
-Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`, `EDITOR`. These programs run in the Windows command shell; a program is a file named on the command line. They are tested in an emulator and have not yet been run on Windows itself.
+Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`, `EDITOR`, and for speed `QUICK` and `FAST`, as on the Z80 (both off by default; see [Speed](#speed)). These programs run in the Windows command shell; a program is a file named on the command line. They are tested in an emulator and have not yet been run on Windows itself.
 
 **Builds**
 
@@ -1303,6 +1305,8 @@ Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`,
 | Runner, checked | `B8SWINC.EXE` | 3,072 |  |
 | With the line editor | `B8SWINE.EXE` | 3,072 | `B8SWINE PROG.B8S`, or with no file. The suggested standard under [Environments](#environments) |
 | The same, checked | `B8SWINEC.EXE` | 3,584 |  |
+
+Each also comes with `QUICK = 1`, in `B8Script-interpreters/quick/`: `B8SWINQ.EXE` (2,560 bytes), `B8SWINQC.EXE` (3,072), `B8SWINQE.EXE` (3,584) and `B8SWINQEC.EXE` (4,096); and as a speed build, in `B8Script-interpreters/fast/`: `B8SWINF.EXE` (8,192), `B8SWINFC.EXE` (7,680), `B8SWINFE.EXE` (8,704) and `B8SWINFEC.EXE` (8,704). Their skip cache is outside the 64 KB, so the memory map is the same.
 
 **Memory map.** The machine is the 64 KB one of this spec, held in the last 64 KB of the program's image (at 00410000h). A B8Script address is an offset into it.
 

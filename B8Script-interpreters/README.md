@@ -43,9 +43,13 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | Z80 with the line editor, `QUICK = 1` | 1,568 | 1,618 | 1,951 | 1,968 |
 | Z80 speed build (`FAST = 1`) | 4,352 | 4,352 | 4,608 | 4,608 |
 | 8080 | 926 | 980 | 1,348 | 1,402 |
+| 8080, `QUICK = 1` | 1,134 | 1,188 | 1,528 | 1,582 |
+| 8080 speed build (`FAST = 1`) | 4,352 | 4,352 | 4,864 | 4,864 |
 | 6502, stack in pages 2-3 | 1,208 | 1,265 | 1,707 | 1,750 |
 | 6502, stack in zero page | 1,155 | 1,217 | 1,673 | 1,721 |
 | 6809 | 873 | 934 | 1,264 | 1,313 |
+| 6809, `QUICK = 1` | 1,026 | 1,087 | 1,380 | 1,429 |
+| 6809 speed build (`FAST = 1`) | 4,654 | 4,715 | 4,257 | 4,306 |
 
 **CP/M .COM files** (always ANSI):
 
@@ -57,6 +61,8 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | Z80 with the line editor, `QUICK = 1` | 1,860 | 2,227 |
 | Z80 speed build (`FAST = 1`) | 4,608 | 4,864 |
 | 8080 | 1,129 | 1,583 |
+| 8080, `QUICK = 1` | 1,341 | 1,763 |
+| 8080 speed build (`FAST = 1`) | 4,608 | 4,864 |
 
 **Windows .EXE files** (always ANSI):
 
@@ -64,9 +70,15 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 |---|---|---|---|---|
 | The file | 2,560 | 3,072 | 3,072 | 3,584 |
 | Code and table | 1,319 | 1,829 | 2,021 | 2,543 |
+| The file, `QUICK = 1` | 2,560 | 3,072 | 3,584 | 4,096 |
+| Code and table, `QUICK = 1` | 1,509 | 1,973 | 2,207 | 2,687 |
+| The file, speed build (`FAST = 1`) | 8,192 | 7,680 | 8,704 | 8,704 |
+| Code and tables, speed build | 6,963 | 6,575 | 7,663 | 7,291 |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
-- A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 357, 359, 143 and 133 bytes to spare before their next step up.
+- A checked speed build can be smaller than its unchecked one (6809, Windows): the unchecked one's 26 variable entries each also do `@` and `!`.
+- The 8080 speed builds include up to 255 bytes of padding, which puts their 512-byte table on a page boundary.
+- A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four regular ones have 357, 359, 143 and 133 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
 - Where the bytes go, on the Z80: the console escapes take about 60 bytes with `ANSI = 0` and 110 with `ANSI = 1`; the break key 60 to 80 (about 30 of them the break-off cell and its wait for a second Ctrl-C); a checked build's checks and report about 380 more; the line editor about 520 (generic) or 630 (CP/M, with its file commands). The CP/M builds reach their five most-used routines with CALL and jumps instead of one-byte RSTs (page zero is the system's), which costs them about 60 bytes on the Z80 and 80 to 100 on the 8080.
@@ -123,6 +135,10 @@ CP/M has no clock a program can count on, so the CP/M builds time `n?` by counti
    | `quick/B8SZ80QEC.COM` | 1C7h | 2C7h | 9 | 9B2h |
    | `fast/B8SZ80F.COM` | 1A0h | 2A0h | 18 | 12FFh |
    | `fast/B8SZ80FC.COM` | 19Ah | 29Ah | 19 | 13FFh |
+   | `quick/B8S8080Q.COM` | 1B7h | 2B7h | 6 | 63Ch |
+   | `quick/B8S8080QC.COM` | 1E2h | 2E2h | 7 | 7E2h |
+   | `fast/B8S8080F.COM` | 17Eh | 27Eh | 18 | 12FFh |
+   | `fast/B8S8080FC.COM` | 1A7h | 2A7h | 19 | 13FFh |
 
    These move when the code changes: `testing/patchinfo.py` prints the table for the current builds.
 3. **Patch it**, in hex (8 is `08`, 12 is `0C`). Any one of these:

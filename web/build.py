@@ -1,4 +1,4 @@
-"""Builds b8script.html, the web player: player.html with b8s.js and every program
+"""Builds b8script.html, the web player: template.html with b8s.js and every program
 in games/ and programs/ put inside it, so that the one file works on its own,
 opened from disk or from any web server.
 
@@ -25,6 +25,65 @@ GROUPS = [
 # where the README says more than a line can
 HOW = {'programs/MON.B8S': 'XXXX shows 16 bytes, Return the next 16, XXXX.YYYY a range, XXXX: hh hh '
                            'stores bytes, ? is the help, Q quits. XXXXR (machine code) can\'t run here.'}
+
+# Each program's own keys, for the on-screen pad: (left side, right side), each a list of
+# rows; a key is a character, or Spc, Ret, Bs or ^B, and . is a gap. Rows follow the
+# program's layout (w a s d as a cross, TICTAC's 1-9 as its board). Programs that need
+# typing use the phone's keyboard as well.
+DIGITS = ['7 8 9', '4 5 6', '1 2 3', 'Bs 0 Ret']
+KEYS = {
+    'programs/MON.B8S': ([], ['Ret']),
+    'programs/PI.B8S': ([], DIGITS),
+    'programs/SIEVE.B8S': ([], DIGITS),
+    'programs/TINYBAS.B8S': ([], ['^B', 'Ret']),
+    'games/BATTLE.B8S': (['. w .', 'a s d'], ['t r', 'Spc q']),
+    'games/BREAKOUT.B8S': (['a d'], ['Spc', 'q']),
+    'games/CONNECT4.B8S': (['1 2', '3 4'], ['5 6', '7 y']),
+    'games/DUNGEON.B8S': (['. w .', 'a s d'], ['p', 'q']),
+    'games/FIFTEEN.B8S': (['. w .', 'a s d'], ['q']),
+    'games/G2048.B8S': (['. w .', 'a s d'], ['q']),
+    'games/GREED.B8S': (['q w e', 'a . d', 'z x c'], ['h', 'Q']),
+    'games/HANGMAN.B8S': ([], ['y n']),
+    'games/IDOL.B8S': (['c m y', 'k l f', 'r t v'], ['w ?', 's q', 'b x', 'Ret']),
+    'games/KLONDIKE.B8S': (['1 2', '3 4', '5 6', '7 .'], ['d w', 'f q']),
+    'games/LIFE.B8S': ([], ['Spc']),
+    'games/LIGHTS.B8S': (['. w .', 'a s d'], ['Spc', 'n q']),
+    'games/MASTER.B8S': (['y', 'n'], ['1 2 3', '4 5 6', 'Bs . Ret']),
+    'games/MINES.B8S': (['. w .', 'a s d'], ['Spc f', 'q']),
+    'games/QUBIC.B8S': ([], ['1 2', '3 4', 'Bs Ret']),
+    'games/REVERSI.B8S': (['. w .', 'a s d'], ['Spc m', 'q']),
+    'games/ROBOTS.B8S': (['q w e', 'a s d', 'z x c'], ['Spc t', 'Q']),
+    'games/SUPERTRK.B8S': (['m j l', 'g p t', 'z h q'], DIGITS),
+    'games/TETRIS.B8S': (['. w .', 'a s d'], ['Spc', 'q']),
+    'games/TRADER.B8S': (['b s', 'f t', 'q .'], DIGITS),
+    'games/WUMPUS.B8S': (['m', 's'], DIGITS),
+}
+for d in ('games/b8sms', 'games/tweet140'):
+    KEYS.update({
+        d + '/HILO.B8S': ([], DIGITS),
+        d + '/LANDER.B8S': ([], ['7 8 9', '4 5 6', '1 2 3', '. 0 .']),
+        d + '/LIGHTS.B8S': (['a b c d e', 'f g h i j', 'k l m n o', 'p q r s t', 'u v w x y'], []),
+        d + '/NIM.B8S': ([], ['1 2 3']),
+        d + '/PIG.B8S': (['Spc'], ['h']),
+        d + '/REFLEX.B8S': ([], ['Spc']),
+        d + '/RPS.B8S': ([], ['1 2 3']),
+        d + '/SIMON.B8S': ([], ['1 2 3 4', '5 6 7 8']),
+        d + '/SKI.B8S': (['j'], ['l']),
+        d + '/TRON.B8S': ([','], ['.']),
+    })
+KEYS.update({
+    'games/tweet280/BLACKJCK.B8S': (['h'], ['Spc']),
+    'games/tweet280/BREAKOUT.B8S': (['j'], ['l']),
+    'games/tweet280/COPTER.B8S': ([], ['Spc']),
+    'games/tweet280/DUEL.B8S': ([','], ['.']),
+    'games/tweet280/KINGDOM.B8S': ([], DIGITS),
+    'games/tweet280/MASTER.B8S': ([], ['1 2 3', '4 5 6', 'Bs . Ret']),
+    'games/tweet280/MAZE.B8S': (['. i .', 'j k l'], []),
+    'games/tweet280/NIM357.B8S': ([], ['1 2 3', '4 5 6', '7 . .']),
+    'games/tweet280/SNAKE.B8S': ([','], ['.']),
+    'games/tweet280/TICTAC.B8S': ([], ['1 2 3', '4 5 6', '7 8 9']),
+    'games/longer/MINE390.B8S': ([], ['1 2 3', '4 5 6', '7 8 .']),
+})
 
 
 def md(s):
@@ -64,12 +123,15 @@ def build():
             how = HOW.get(pid, how)
             info = (md(what) + (' <i>' + md(how) + '</i>' if how else '')) if what else ''
             src = open(os.path.join(ROOT, folder, f), 'rb').read().decode('latin-1')
-            items.append(dict(id=pid, name=f + (' — ' + title if title else ''), info=info, src=src))
+            items.append(dict(id=pid, name=f + (' — ' + title if title else ''), info=info, src=src,
+                              keys=KEYS.get(pid, ([], []))))
         groups.append(dict(group=name, items=items))
-    page = open(os.path.join(HERE, 'player.html'), encoding='utf-8').read()
+    page = open(os.path.join(HERE, 'template.html'), encoding='utf-8').read()
     core = open(os.path.join(HERE, 'b8s.js'), encoding='utf-8').read()
     progs = json.dumps(groups, ensure_ascii=True, separators=(',', ':')).replace('</', '<\\/')
     assert '</script' not in core.lower()
+    missing = set(KEYS) - {it['id'] for g in groups for it in g['items']}
+    assert not missing, missing
     return page.replace('/*PROGRAMS*/', progs, 1).replace('/*CORE*/', core, 1)
 
 

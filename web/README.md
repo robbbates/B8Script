@@ -10,8 +10,8 @@ Every game in [`games/`](../games/) and every program in [`programs/`](../progra
 - The arrow keys send Esc `[` and a letter, as on an ANSI terminal.
 - Pasting types the text, so a BASIC program can be pasted into Tiny BASIC.
 - On a phone, tap the screen for the keyboard. The bar below the screen has Esc, Ctrl, Tab, the arrows, Backspace, Return and Break.
-  - **Pad** adds big keys for games: w a s d, Space, Return, y, n and q. Held down, they repeat.
-  - Sideways, the pad sits either side of the screen.
+  - Each program has its own big keys: the ones it uses, laid out as it uses them (w a s d as a cross, GREED's eight directions as a 3 × 3 grid, Tic-tac-toe's 1 to 9 as its board, Ski's j and l one each side). **Pad** shows or hides them. Movement keys repeat while held.
+  - Sideways, the screen takes the whole height, with the program's keys either side and ⌨, Ctrl, ⌫, ⏎ and Break above them; **☰** shows the bars above and below the screen.
 
 ## This build
 
@@ -51,9 +51,9 @@ Every game in [`games/`](../games/) and every program in [`programs/`](../progra
 | File | What it is |
 |---|---|
 | `b8script.html` | The player, built by `build.py`. Don't edit it: edit the sources and build it again |
-| `player.html` | The page: its look, the screen, the keys and the menu |
+| `template.html` | The page: its look, the screen, the keys and the menu. It has no programs in it, so open `b8script.html`, not this |
 | `b8s.js` | The interpreter |
-| `build.py` | Builds `b8script.html` from `player.html`, `b8s.js` and the programs, taking each program's line of help from the READMEs. `build.py --check` checks it is up to date. Run it after changing a game or a program |
+| `build.py` | Builds `b8script.html` from `template.html`, `b8s.js` and the programs, taking each program's line of help from the READMEs; each program's keys are listed in it. `build.py --check` checks it is up to date. Run it after changing a game or a program |
 
 The tests are in [`B8Script-interpreters/testing/`](../B8Script-interpreters/testing/):
 - **`test_web.py`** runs the test suite, Tiny BASIC, the programs and the scripted games on `b8s.js` under Node, and checks every run against `ref.py`, byte for byte.

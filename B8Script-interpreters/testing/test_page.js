@@ -221,6 +221,18 @@ async function runSrc(page, src) {
   ok('no errors in the page', errors.length === 0, errors.join(' | '));
   await page.close();
 
+  // the template, opened as it is, says to open b8script.html
+  {
+    const t = await browser.newPage();
+    const terrs = [];
+    t.on('pageerror', e => terrs.push(String(e)));
+    await t.goto('file://' + path.join(ROOT, 'web', 'template.html'));
+    const txt = await t.$eval('#screen', e => e.textContent);
+    ok('template.html says to open b8script.html, with no errors', txt.includes('Open b8script.html') && !terrs.length
+       && await t.$eval('#run', e => e.disabled), terrs.join(' | '));
+    await t.close();
+  }
+
   // ------------------------------------------------------------ a phone
   for (const [dev, land] of [['Pixel 7', false], ['Pixel 7', true], ['iPhone 13', false]]) {
     const d = { ...devices[dev] };
@@ -231,11 +243,24 @@ async function runSrc(page, src) {
     p.on('pageerror', e => errs.push(String(e)));
     await p.goto(URL);
     const tag = `${dev}${land ? ' sideways' : ''}`;
-    ok(`${tag}: the on-screen keys show`, await p.$eval('#keys', e => getComputedStyle(e).display !== 'none'));
+    const vis = sel => p.locator(sel + ' >> visible=true').first();
+    if (land) {
+      // sideways: the screen has the whole height, the bars are behind the menu button
+      ok(`${tag}: the bars above and below are hidden`, await p.$eval('#top', e => getComputedStyle(e).display === 'none')
+         && await p.$eval('#bottom', e => getComputedStyle(e).display === 'none'));
+      const h = await p.evaluate(() => document.getElementById('wrap').getBoundingClientRect().height / innerHeight);
+      ok(`${tag}: the screen's box has the whole height (${(h * 100).toFixed(0)}%)`, h > 0.99);
+      await vis('[data-act=menu]').tap();
+      ok(`${tag}: the menu shows the bars`, await p.$eval('#top', e => getComputedStyle(e).display !== 'none'));
+    } else {
+      ok(`${tag}: the on-screen keys show`, await p.$eval('#keys', e => getComputedStyle(e).display !== 'none'));
+    }
     await fits(p, tag);
+    const openMenu = async () => { if (land && !(await p.evaluate(() => document.body.classList.contains('menu')))) await vis('[data-act=menu]').tap(); };
+    const runIt = async src => { await openMenu(); await runSrc(p, src); };
 
     // a phone's keyboard: text arrives by input events, keydown says 'Unidentified'
-    await runSrc(p, LINE);
+    await runIt(LINE);
     await until(p, /Waiting for a line/);
     await p.evaluate(() => {
       const k = document.getElementById('kbd');
@@ -248,33 +273,47 @@ async function runSrc(page, src) {
       typeText(' ', 'deleteContentBackward');        // Backspace takes the 9 back
       typeText('  ' + '0', 'insertText');
     });
-    await p.tap('#keys button[data-key="13"]');           // the on-screen Return
+    await vis('button[data-key="13"]').tap();             // the on-screen Return
     await until(p, /^Ended/);
     const g = await screen(p);
     ok(`${tag}: typed by input events (Backspace too) and the on-screen Return`, g[0] === '30' && g[1] === '51 48 13', g.slice(0, 2).join('|'));
 
-    // the pad: its keys reach the program
-    await p.tap('#padb');
-    ok(`${tag}: Pad shows the game keys`, await p.$eval('#mid .cross', e => getComputedStyle(e).display !== 'none'));
-    await p.selectOption('#prog', 'games/G2048.B8S');          // a longer description
+    // the program's own keys: MINES has w a s d as a cross, Space, f and q
+    await openMenu();
+    await p.selectOption('#prog', 'games/MINES.B8S');
     await p.waitForTimeout(100);
-    await fits(p, tag + ' with the pad');
-    await runSrc(p, '0?# " "$ 0?# " "$ 0?#');
-    await p.tap('#mid button[data-key="119"]');
-    await p.tap('#mid button.space');
-    await p.tap('#ctrlb');
+    const pk = await p.evaluate(() => [...document.querySelectorAll('#pkl button, #pkr button')].map(b => b.textContent).join(' '));
+    ok(`${tag}: MINES's keys (${pk})`, pk === 'w a s d Space f q');
+    ok(`${tag}: Pad is on, and they show`, await p.$eval('#pkl', e => e.getBoundingClientRect().height > 40));
+    await fits(p, tag + ' with the keys');
+    if (land) {
+      const h2 = await p.evaluate(() => document.getElementById('wrap').getBoundingClientRect().height / innerHeight);
+      ok(`${tag}: with the keys too, the screen's box has the whole height (${(h2 * 100).toFixed(0)}%)`, h2 > 0.99);
+    }
+    await runIt('0?# " "$ 0?# " "$ 0?#');                     // an edited program keeps the keys
+    await p.tap('#pkl button[data-key="119"]');
+    await p.tap('#pkr button[data-key="32"]');
+    await vis('[data-act=ctrl]').tap();
     await p.evaluate(() => {
       const k = document.getElementById('kbd');
       k.value = '  b'; k.dispatchEvent(new InputEvent('input', { inputType: 'insertText', bubbles: true }));
     });
     await until(p, /^Ended/, 3000);
-    ok(`${tag}: pad w, Space, and Ctrl then b`, (await screen(p))[0] === '119 32 2', (await screen(p))[0]);
+    ok(`${tag}: w, Space, and Ctrl then b`, (await screen(p))[0] === '119 32 2', (await screen(p))[0]);
+    await openMenu();
+    await p.selectOption('#prog', 'games/tweet280/TICTAC.B8S');
+    await p.waitForTimeout(100);
+    const tt = await p.evaluate(() => [...document.querySelectorAll('#pkr button')].map(b => b.textContent).join(''));
+    ok(`${tag}: TICTAC's keys are its board, 1 to 9`, tt === '123456789', tt);
     if (shots) {
-      await p.selectOption('#prog', 'games/G2048.B8S');
-      await p.tap('#run');
-      await p.waitForTimeout(600);
-      await p.screenshot({ path: path.join(shots, `${dev.replace(' ', '')}${land ? '-side' : ''}.png`) });
-      await p.tap('#keys button[data-act="brk"]');
+      for (const prog of ['games/G2048.B8S', 'games/BREAKOUT.B8S', 'games/tweet280/TICTAC.B8S']) {
+        await openMenu();
+        await p.selectOption('#prog', prog);
+        await p.click('#run');
+        await p.waitForTimeout(700);
+        await p.screenshot({ path: path.join(shots, `${dev.replace(' ', '')}${land ? '-side' : ''}-${path.basename(prog, '.B8S')}.png`) });
+        await vis('[data-act="brk"]').tap();
+      }
     }
     ok(`${tag}: no errors in the page`, errs.length === 0, errs.join(' | '));
     await ctx.close();

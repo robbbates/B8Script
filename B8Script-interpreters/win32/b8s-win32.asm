@@ -8,10 +8,10 @@
 ;      nasm -f bin -DCHECKED=1 -o B8S.EXE b8s-win32.asm
 ;      nasm -f bin -o B8SU.EXE b8s-win32.asm
 ;      nasm -f bin -DEDITOR=1 -DCHECKED=1 -o B8SE.EXE b8s-win32.asm
-;      nasm -f bin -DEDITOR=1 -o B8SEU.EXE b8s-win32.asm
+;      nasm -f bin -DEDITOR=1 -o B8SUE.EXE b8s-win32.asm
 ;
 ;  Those are the base builds. Add -DSPEED=0 for the small ones (B8SS.EXE,
-;  B8SSU.EXE, B8SSE.EXE, B8SSEU.EXE) or -DSPEED=2 for the fast ones (B8SF*).
+;  B8SUS.EXE, B8SSE.EXE, B8SUSE.EXE) or -DSPEED=2 for the fast ones (B8SF*).
 ;
 ;  Three switches (the defaults below, or -D on the command line):
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)

@@ -671,7 +671,7 @@ Measured in Z80 clock cycles on the generic builds, against the small build (sam
 
 Tetris gains least because much of its time is spent in `n?` waits, which are timed and rightly don't get shorter.
 
-**What each idea is worth.** On the Z80, counting how often each pattern occurs on the runs above gave these estimates before any were built, and the measurements bore them out:
+**What each idea is worth.** On the Z80, counting how often each pattern occurs on the runs above gives these estimates, and the measurements agree:
 
 | Idea | Time saved on the Z80 | Cost on the Z80 |
 |---|---|---|
@@ -760,7 +760,7 @@ A screen editor is free to use the WordStar keys CP/M users know: ^E ^X ^S ^D to
 
 ## Programs
 
-Two longer programs, written as files with comments. Comments are strings dropped with `;`, so they cost time only where they run: keep them outside loops and words.
+Two longer programs, with comments. Comments are strings dropped with `;`, so they cost time only where they run: keep them outside loops and words.
 
 **Conway's Life** (`LIFE.B8S`). Each grid has a border of dead cells, so the eight neighbours are at fixed offsets and need no edge tests. About 3.6 seconds per generation on a 4 MHz Z80. Any key stops it.
 
@@ -822,7 +822,7 @@ Two longer programs, written as files with comments. Comments are strings droppe
 "/|"$
 ```
 
-**Star Trek** (`TREK.B8S`). A short version of the classic: one quadrant of 8 × 8 sectors, Klingons to destroy, a starbase to dock at.
+**Star Trek.** A short version of the classic: one quadrant of 8 × 8 sectors, Klingons to destroy, a starbase to dock at.
 
 ```text
 "STAR TREK for B8Script. One quadrant, 8 x 8 sectors.";
@@ -974,9 +974,9 @@ Each build comes in the three tiers, in `B8Script-interpreters/z80/small/`, `bas
 | Generic ROM with the line editor, checked | `b8s-z80-base-rom-editor-0000.bin` | 1,742, 1,951, none | The suggested standard under [Environments](#environments); see the interpreters README |
 | The same, unchecked | `b8s-z80-base-rom-editor-unchecked-0000.bin` | 1,355, 1,568, none |  |
 | CP/M with the line editor, checked | `B8SE.COM` | 2,048, 2,227, none | `B8SE PROG.B8S`, or with no file |
-| The same, unchecked | `B8SEU.COM` | 1,646, 1,860, none |  |
+| The same, unchecked | `B8SUE.COM` | 1,646, 1,860, none |  |
 
-A small file has `small` in place of `base` (`b8s-z80-small-rom-0000.bin`) or an S after `B8S` (`B8SS.COM`, `B8SSEU.COM`); a fast one has `fast` or an F (`b8s-z80-fast-rom-0000.bin`, `B8SF.COM`, `B8SFU.COM`). Base is 180 to 230 bytes bigger than small and 1.1 to 1.5 times as fast; fast is about twice as fast as small, and has no editor. See [Speed](#speed) and the interpreters README.
+A small file has `small` in place of `base` (`b8s-z80-small-rom-0000.bin`) or an S after `B8S` (`B8SS.COM`, `B8SUSE.COM`); a fast one has `fast` or an F (`b8s-z80-fast-rom-0000.bin`, `B8SF.COM`, `B8SUF.COM`). Base is 180 to 230 bytes bigger than small and 1.1 to 1.5 times as fast; fast is about twice as fast as small, and has no editor. See [Speed](#speed) and the interpreters README.
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), IY is the return-stack pointer. A and DE are scratch. In the CP/M builds and the fast builds IX holds the inner loop's address, so a handler ends with `JP (IX)`. The alternate registers are not used, so an interrupt routine may use them.
 
@@ -995,7 +995,7 @@ A small file has `small` in place of `base` (`b8s-z80-small-rom-0000.bin`) or an
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 827Ah | 33402 | −32134 |
 
-Under CP/M the pages sit after the image and the heap limit is the BDOS. The base and fast builds have the skip cache's page first, before the return stack. The break-off cell is at offset 7Bh of the letter page, which is the page below the program text: 097Bh (2427) in `B8SU.COM`, 0B7Bh (2939) in `B8S.COM`, 0C7Bh (3195) in `B8SEU.COM` and 0D7Bh (3451) in `B8SE.COM`; in the small builds 077Bh (1915) in `B8SSU.COM`, 097Bh in `B8SS.COM`, 0A7Bh (2683) in `B8SSEU.COM` and 0B7Bh in `B8SSE.COM`; in the fast builds 167Bh (5755) in `B8SFU.COM` and 177Bh (6011) in `B8SF.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
+Under CP/M the pages sit after the image and the heap limit is the BDOS. The base and fast builds have the skip cache's page first, before the return stack. The break-off cell is at offset 7Bh of the letter page, which is the page below the program text: 097Bh (2427) in `B8SU.COM`, 0B7Bh (2939) in `B8S.COM`, 0C7Bh (3195) in `B8SUE.COM` and 0D7Bh (3451) in `B8SE.COM`; in the small builds 077Bh (1915) in `B8SUS.COM`, 097Bh in `B8SS.COM`, 0A7Bh (2683) in `B8SUSE.COM` and 0B7Bh in `B8SSE.COM`; in the fast builds 167Bh (5755) in `B8SUF.COM` and 177Bh (6011) in `B8SF.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
 
 **The break key.** The keyboard is looked at on every word call, block entry, true `)` and `{`, one time in 256. A program that stores a non-zero byte in the break-off cell gets Ctrl-C as key 3; two within about 250 ms still stop it. An unchecked build prints nothing when it is stopped.
 
@@ -1020,9 +1020,9 @@ All four must keep BC and IY, and all but `CONAT` also HL. The flags may change.
 
 ## Appendix B: 8080
 
-Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`, and for speed `SPEED`, as on the Z80 (see [Speed](#speed)). Builds, in `B8Script-interpreters/8080/small/`, `base/` and `fast/`, with the bytes of small, base and fast: the generic ROM, `b8s-8080-base-rom-unchecked-0000.bin` (926, 1,134 and 4,352; with `ANSI = 1`, 980, 1,188 and 4,352), and checked, `b8s-8080-base-rom-0000.bin` (1,348, 1,528 and 4,864; 1,402, 1,582 and 4,864), with `small` or `fast` in place of `base` in the other tiers; the CP/M runner, `B8SSU.COM`, `B8SU.COM` and `B8SFU.COM` (1,129, 1,341 and 4,608), and checked, `B8SS.COM`, `B8S.COM` and `B8SF.COM` (1,583, 1,763 and 4,864).
+Source: `B8Script-interpreters/8080/b8s-8080.asm`. Switches: `CPM`, `CHECKED`, `ANSI`, and for speed `SPEED`, as on the Z80 (see [Speed](#speed)). Builds, in `B8Script-interpreters/8080/small/`, `base/` and `fast/`, with the bytes of small, base and fast: the generic ROM, `b8s-8080-base-rom-unchecked-0000.bin` (926, 1,134 and 4,352; with `ANSI = 1`, 980, 1,188 and 4,352), and checked, `b8s-8080-base-rom-0000.bin` (1,348, 1,528 and 4,864; 1,402, 1,582 and 4,864), with `small` or `fast` in place of `base` in the other tiers; the CP/M runner, `B8SUS.COM`, `B8SU.COM` and `B8SUF.COM` (1,129, 1,341 and 4,608), and checked, `B8SS.COM`, `B8S.COM` and `B8SF.COM` (1,583, 1,763 and 4,864).
 
-The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers, without IY) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 0A7Bh in `B8SU.COM` and 0B7Bh in `B8S.COM`; 087Bh and 0A7Bh in `B8SSU.COM` and `B8SS.COM`; 167Bh and 177Bh in `B8SFU.COM` and `B8SF.COM`; the skip cache is where the Z80's is), with these differences: the routines keep BC (and HL where the Z80's do); the return-stack pointer is a RAM cell; and the generic image's one-byte calls are `RST 1` to `RST 6` (08h, 18h, 20h, 28h and 30h), where `RST 5` (28h) prints A and keeps BC, DE and HL. The CP/M builds don't use page zero: there the same routines are CALLs and JMPs. The RET byte is C9h.
+The memory map, the break key, the console interface, the console escapes (switch `ANSI`, the same four routines at the same addresses, the same registers, without IY) and the contract are the Z80's (the break-off cell is 827Bh in the generic builds, 0A7Bh in `B8SU.COM` and 0B7Bh in `B8S.COM`; 087Bh and 0A7Bh in `B8SUS.COM` and `B8SS.COM`; 167Bh and 177Bh in `B8SUF.COM` and `B8SF.COM`; the skip cache is where the Z80's is), with these differences: the routines keep BC (and HL where the Z80's do); the return-stack pointer is a RAM cell; and the generic image's one-byte calls are `RST 1`, `3`, `4`, `5` and `6` (08h, 18h, 20h, 28h and 30h), where `RST 5` (28h) prints A and keeps BC, DE and HL. The CP/M builds don't use page zero: there the same routines are CALLs and JMPs. The RET byte is C9h.
 
 [↑ Back to top](#b8script-spec)
 
@@ -1185,7 +1185,7 @@ no meaning). Division by 2 and −2 is a shift.
 is on the return stack and the data stack is B8Script's, with B8Script's TOS in TOS (the address already consumed). The
 code returns with `RET` (opcode 02h, which the loader writes). It must keep PR, the stack pair and the return stack
 below its return address; it may change AR, X, Y, FR and the flags, and it may leave the data stack deeper or
-shallower. The loader's RET byte is 02h. Example: `4_:d! `61 ; 21 d@` #` prints 42 (SL0.w, RET).
+shallower. The loader's RET byte is 02h. Example: `` 4_:d! `61 ; 21 d@` # `` prints 42 (SL0.w, RET).
 
 [↑ Back to top](#b8script-spec)
 
@@ -1208,9 +1208,9 @@ Each comes in the three tiers. The table names the base files, in `B8Script-inte
 | Runner, checked | `B8S.EXE` | 3,072, 3,072, 7,680 | `B8S PROG.B8S` |
 | Runner, unchecked | `B8SU.EXE` | 2,560, 2,560, 8,192 |  |
 | With the line editor, checked | `B8SE.EXE` | 3,584, 4,096, 8,704 | `B8SE PROG.B8S`, or with no file. The suggested standard under [Environments](#environments) |
-| The same, unchecked | `B8SEU.EXE` | 3,072, 3,584, 8,704 |  |
+| The same, unchecked | `B8SUE.EXE` | 3,072, 3,584, 8,704 |  |
 
-The small ones, in `win32/small/`, have an S after `B8S` (`B8SS.EXE`, `B8SSU.EXE`, `B8SSE.EXE`, `B8SSEU.EXE`), and the fast ones, in `win32/fast/`, an F (`B8SF.EXE`, `B8SFU.EXE`, `B8SFE.EXE`, `B8SFEU.EXE`). The skip cache of base and fast is outside the 64 KB, so the memory map is the same in every tier.
+The small ones, in `win32/small/`, have an S after `B8S` (`B8SS.EXE`, `B8SUS.EXE`, `B8SSE.EXE`, `B8SUSE.EXE`), and the fast ones, in `win32/fast/`, an F (`B8SF.EXE`, `B8SUF.EXE`, `B8SFE.EXE`, `B8SUFE.EXE`). The skip cache of base and fast is outside the 64 KB, so the memory map is the same in every tier.
 
 **Memory map.** The machine is the 64 KB one of this spec, held in the last 64 KB of the program's image (at 00410000h). A B8Script address is an offset into it.
 

@@ -5,7 +5,7 @@ usage: run_win32.py [DIR] [-v] [--nogames]     (DIR defaults to out/win32)
 The runners (B8S, B8SU and their small and fast versions) go through
 run_tests.check(): the whole suite, the machine-code tests below, LOOSE or
 CHK, Tiny BASIC, ERRS and the break-key tests with the count of looks. The
-editor builds (B8SE, B8SEU and theirs) are typed at by test_editor.py's
+editor builds (B8SE, B8SUE and theirs) are typed at by test_editor.py's
 sessions, plus a session of their own for the arrow keys as Windows sends
 them. Then a few things only Windows has: the report goes to the standard
 error handle and the program's output to standard output, the console's
@@ -131,8 +131,8 @@ def main():
     for exe in sorted(glob.glob(d + '/*.EXE')):
         name = os.path.basename(exe)[:-4]
         mapf = exe[:-4] + '.map'
-        checked = not name.endswith('U')               # B8S, B8SS, B8SF and their E: checked
-        editor = bool(re.fullmatch(r'B8S[SF]?EU?', name))
+        checked = not name.startswith('B8SU')          # B8SU... is unchecked
+        editor = bool(re.fullmatch(r'B8SU?[SF]?E', name))
         if editor:
             total += test_editor.check_editor(exe[:-4], verbose=verbose, target=test_editor.win32_target(exe))
         else:

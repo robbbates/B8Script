@@ -22,7 +22,7 @@
 
 ## How to read this
 
-This is a working collection of B8Script idioms, tips and tricks. It gathers the spec's Idioms and Tips with the tricks found in the tutorial, the size-contest games and the commented game sources. The source file is named for each idea that came from a program. The language itself is defined in [b8script.md](b8script.md).
+This is a working collection of B8Script idioms, tips and tricks. It gathers the spec's Idioms and Tips with the tricks found in the tutorial, the tweet games and the commented game sources. The source file is named for each idea that came from a program. The language itself is defined in [b8script.md](b8script.md).
 
 - **Stack effects** are written `( before -- after )`, top of the stack on the right; `R:` marks the return stack.
 - **Letters are examples.** Word and variable letters in an idiom are only what its source used; rename freely.

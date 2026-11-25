@@ -8,9 +8,9 @@ base/ (1) and fast/ (2). Into each go the ROM images (.bin), the CP/M programs
 (.COM, Z80 and 8080) or the Windows programs (.EXE), each with its listing
 (.lst) under the same name:
 
-  CP/M and Windows   B8S, then S (small) or F (fast), then E with the line
-                     editor, then U if unchecked: B8S.COM is the base
-                     runner, checked; B8SSEU.COM the small editor, unchecked
+  CP/M and Windows   B8S, then U if unchecked, then S (small) or F (fast),
+                     then E with the line editor: B8S.COM is the base
+                     runner, checked; B8SUSE.COM the small editor, unchecked
   ROM images         b8s-CPU-TIER-rom, then -zp (the zero-page 6502
                      interpreter), -editor, -unchecked, and the address it
                      starts at: b8s-z80-base-rom-0000.bin
@@ -47,7 +47,7 @@ for cpu, (stems, orgs, cpm) in CPUS.items():
                     unc = '' if chk else '-unchecked'
                     builds = [(f'gen{ed}', f'b8s-{cpu}-{tier}-rom{zp}{"-editor" if ed else ""}{unc}-{orgs[tier]}.bin')]
                     if cpm:
-                        builds.append((f'cpm{ed}', f'B8S{t}{"E" if ed else ""}{"" if chk else "U"}.COM'))
+                        builds.append((f'cpm{ed}', f'B8S{"" if chk else "U"}{t}{"E" if ed else ""}.COM'))
                     for kind, name in builds:
                         kind = kind.replace('gen-ed', 'ed')
                         base = f'{out}/{cpu}/{stem}-{tier}-{kind}{chk}'
@@ -58,7 +58,7 @@ for cpu, (stems, orgs, cpm) in CPUS.items():
 for tier, t in TIERS:
     for e in ('', 'E'):
         for u in ('', 'U'):
-            name = f'B8S{t}{e}{u}'
+            name = f'B8S{u}{t}{e}'
             src = f'{out}/win32/{name}'
             if os.path.exists(src + '.EXE'):
                 copy(src, f'{here}/../win32/{tier}/{name}.EXE', open(src + '.EXE', 'rb').read(), src + '.lst', f'win32 {tier} {name}')

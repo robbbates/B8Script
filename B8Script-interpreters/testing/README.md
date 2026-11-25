@@ -31,7 +31,7 @@ python3 run_6809.py out/6809                       # -nogames skips Tiny BASIC
 ./build_win32.sh                                   # the twelve Windows .EXE files (NASM), then chkpe.py
 python3 run_win32.py out/win32                     # --nogames skips Tiny BASIC
 
-python3 chktab.py out/z80/*.lst out/8080/*.lst     # layout rules (see the main README)
+python3 chktab.py out/z80/*.lst out/8080/*.lst     # layout rules (see ../README.md)
 python3 chktab09.py out/6809/*.lst
 python3 chktab6502.py out/6502/*.lst
 python3 chkbr6502.py out/6502/*.lst                # asm80 misses some bad 6502 branches
@@ -62,11 +62,11 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `harness_6502.py`, `harness_6809.py` | The same wrapper for py65 and MC6809 |
 | `run_z80.py`, `run_8080.py`, `run_6502.py`, `run_6809.py` | Run every build in a folder through `check()`. `run_6502.py` holds the two 6502 machine-code tests, one per interpreter |
 | `test_editor.py` | Types sessions at the Z80 editor builds, each step when the editor is waiting for it, and compares the output byte for byte with a model of the editor (which follows the source key for key, and uses `ref.py` for whatever a line runs). Generic builds get paste and print sessions, CP/M builds file ones (the disk is compared too), checked builds error ones; a few sessions with keys pressed while a program is busy are compared with patterns |
-| `build_win32.sh` | Builds the twelve Windows programs, four in each tier (`B8S.EXE`, `B8SU.EXE`, `B8SE.EXE`, `B8SEU.EXE`, and the same with S or F after `B8S`), into `out/win32` (each with a listing and a map file of its symbols), then runs `chkpe.py` |
+| `build_win32.sh` | Builds the twelve Windows programs, four in each tier (`B8S.EXE`, `B8SU.EXE`, `B8SE.EXE`, `B8SUE.EXE`, and the same with S or F after `B8S`), into `out/win32` (each with a listing and a map file of its symbols), then runs `chkpe.py` |
 | `harness_win32.py` | Runs a Windows .EXE in the Unicorn emulator: maps the file as Windows would, models the `kernel32` calls it makes, gives it a command line, a console (or redirected input) and a few files. Same interface as the others |
 | `run_win32.py` | Runs every Windows build through `check()`, the editor builds through `test_editor.py`, and all of them through a few Windows-only tests |
 | `chkpe.py` | Checks a Windows .EXE's header against the rules: alignments, sizes, the section, the entry point, the import table |
-| `gamecheck.py` | Runs every game, and every program in `programs/` but MON, both `.B8S` and `.TXT`, on every build for a short while and compares the output with `ref.py` |
+| `gamecheck.py` | Runs every full-size game in `games/`, and every program in `programs/` but MON, both `.B8S` and `.TXT` (IDOL's `.TXT` is documentation only, so it is left out), on every build for a short while and compares the output with `ref.py` |
 | `test_web.py` | Runs the suite, Tiny BASIC, the programs and the scripted games on the web player's interpreter (`../../web/b8s.js`) under Node, through `web_run.js`, and checks every run against `ref.py`, byte for byte. It also checks that `../../web/b8script.html` is up to date |
 | `test_page.js` | Drives the web player in Chromium (Playwright), as a computer and as phones: the screen, typing, a phone's keyboard, the pad, `n?`'s clock, the break key and checked reports. `node test_page.js DIR` also saves screenshots in DIR |
 | `test_programs.py` | Checks SIEVE, PI, MANDEL and MON on `ref.py` against models written in Python (PI's digits are themselves checked against Machin's formula), then, given `out`, runs each on every build and compares the output with `ref.py`'s. MON's R runs one return instruction of the build's CPU |
@@ -77,7 +77,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `../../games/` | The games, at the root of the repository (its README says how to play each one). The programs are each in two files: `NAME.TXT`, with comments that explain how it works, and `NAME.B8S`, the same code stripped of comments and white space. `games/tweet140/` and `games/tweet280/` hold the tiny games, which are already stripped and have no `.TXT` |
 | `../../programs/` | Programs that aren't games, in the same two files: Tiny BASIC (`TINYBAS.B8S` is part of the suite), MON, SIEVE, PI and MANDEL |
 | `b8strip.py` | Strips a program of comments and white space (but keeps a comment that starts with `!`), keeping a space only where B8Script needs one (`b8strip.py ../../games/NAME.TXT ../../games/NAME.B8S` after editing a game). `--same A B` checks that two files hold the same code |
-| `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files in each CPU's `small/`, `base/` and `fast/` folders, under the names the main README gives (`B8S.COM`, `b8s-z80-base-rom-0000.bin` and so on) |
+| `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files in each CPU's `small/`, `base/` and `fast/` folders, under the names `../README.md` gives (`B8S.COM`, `b8s-z80-base-rom-0000.bin` and so on) |
 | `patchinfo.py` | Where n?'s timing count sits in each CP/M .COM, to patch it for a machine whose BDOS is faster or slower (see `../TIMING.B8S`) |
 | `cpmsim.py` | Runs the CP/M builds under real CP/M 2.2 (Digital Research's BDOS and CCP) in z80pack's `cpmsim`: `cpmsim.py suite out B8S B8SU` runs the suite's programs and compares each output with `ref.py`'s; `cpmsim.py type out STEP...` types at CP/M, for the editors. `-8` runs on an 8080 instead of the Z80 (which traps undocumented opcodes). Needs z80pack (set `Z80PACK`) and cpmtools; see its header. Not part of the usual run: it takes about ten minutes a build |
 

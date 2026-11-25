@@ -156,7 +156,7 @@ def check_builds(out):
     for cpu in ('z80', '8080', '6502', '6809', 'win32'):
         for f in sorted(glob.glob(f'{out}/{cpu}/*.hex') + glob.glob(f'{out}/{cpu}/*.EXE')):
             base, name = f[:-4], os.path.basename(f[:-4])
-            if '-ed' in name or re.fullmatch(r'B8S[SF]?EU?', name):      # the editors run no file
+            if '-ed' in name or re.fullmatch(r'B8SU?[SF]?E', name):      # the editors run no file
                 continue
             cpm = '-cpm' in name
             run, ret = runner(cpu, base, cpm)

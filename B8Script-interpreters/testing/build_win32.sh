@@ -5,17 +5,17 @@
 #   B8S.EXE    the runner, checked     (SPEED=1 CHECKED=1 EDITOR=0)
 #   B8SU.EXE   the runner, unchecked   (SPEED=1 CHECKED=0 EDITOR=0)
 #   B8SE.EXE   the line editor, checked (SPEED=1 CHECKED=1 EDITOR=1)
-#   B8SEU.EXE  the editor, unchecked   (SPEED=1 CHECKED=0 EDITOR=1)
-# and the same with SPEED=0, the small builds (B8SS, B8SSU, B8SSE, B8SSEU),
-# and SPEED=2, the fast builds (B8SF, B8SFU, B8SFE, B8SFEU).
+#   B8SUE.EXE  the editor, unchecked   (SPEED=1 CHECKED=0 EDITOR=1)
+# and the same with SPEED=0, the small builds (B8SS, B8SUS, B8SSE, B8SUSE),
+# and SPEED=2, the fast builds (B8SF, B8SUF, B8SFE, B8SUFE).
 # Each also gets a NASM listing (.lst) and a map file (.map) with every
 # symbol's value, which harness_win32.py reads. Then chkpe.py checks them.
 cd "$(dirname "$0")"
 src=$(realpath ${1:-../win32/b8s-win32.asm}); out=${2:-out/win32}; mkdir -p $out
 fail=0
-for v in "B8S 1 0 1" "B8SU 0 0 1" "B8SE 1 1 1" "B8SEU 0 1 1" \
-         "B8SS 1 0 0" "B8SSU 0 0 0" "B8SSE 1 1 0" "B8SSEU 0 1 0" \
-         "B8SF 1 0 2" "B8SFU 0 0 2" "B8SFE 1 1 2" "B8SFEU 0 1 2"; do
+for v in "B8S 1 0 1" "B8SU 0 0 1" "B8SE 1 1 1" "B8SUE 0 1 1" \
+         "B8SS 1 0 0" "B8SUS 0 0 0" "B8SSE 1 1 0" "B8SUSE 0 1 0" \
+         "B8SF 1 0 2" "B8SUF 0 0 2" "B8SFE 1 1 2" "B8SUFE 0 1 2"; do
   set -- $v
   printf '%%define CHECKED %s\n%%define EDITOR %s\n%%define SPEED %s\n[map all %s.map]\n%%include "%s"\n' \
     $2 $3 $4 $1 "$src" > $out/$1.asm

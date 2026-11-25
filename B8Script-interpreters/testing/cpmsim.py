@@ -30,14 +30,15 @@ FMT = 'ibm-3740'
 
 def coms(cpu8):
     """One CPU's CP/M builds, by the names they are released under: B8S (base,
-    checked), B8SU (unchecked), B8SE and B8SEU (with the editor), and the
-    same with S for the small builds and F for the fast ones."""
+    checked), B8SU (unchecked), B8SE and B8SUE (with the editor), and the
+    same with S for the small builds and F for the fast ones: B8SS, B8SUS,
+    B8SSE, B8SUSE, B8SF, B8SUF."""
     cpu = '8080' if cpu8 else 'z80'
     d = {}
     for t, tier in (('S', 'small'), ('', 'base'), ('F', 'fast')):
         for e, kind in (('', 'cpm'), ('E', 'cpm-ed')):
             d[f'B8S{t}{e}'] = f'{cpu}/b8s-{cpu}-{tier}-{kind}-chk'
-            d[f'B8S{t}{e}U'] = f'{cpu}/b8s-{cpu}-{tier}-{kind}'
+            d[f'B8SU{t}{e}'] = f'{cpu}/b8s-{cpu}-{tier}-{kind}'
     return d
 
 
@@ -133,7 +134,7 @@ def suite(outdir, builds, cpu8):
         put(c, names[n], p)
     fails = 0
     for b in builds:
-        checked = not b.endswith('U')
+        checked = not b.startswith('B8SU')
         sim, bad, ran = Sim(cpu8), [], 0
         for n, p, i in progs:
             if (n, p, i) in CHK and not checked or (n, p, i) in LOOSE and checked:

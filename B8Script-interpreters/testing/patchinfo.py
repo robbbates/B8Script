@@ -11,7 +11,7 @@ address for CP/M 3's SAVE. Run TIMING.B8S to find the value your machine
 wants."""
 import re, sys, os
 out = sys.argv[1] if len(sys.argv) > 1 else 'out'
-NAMES = [(f'{cpu}/b8s-{cpu}-{tier}-cpm{ed}{chk}', f'{cpu}/{tier}/B8S{t}{e}{u}.COM')
+NAMES = [(f'{cpu}/b8s-{cpu}-{tier}-cpm{ed}{chk}', f'{cpu}/{tier}/B8S{u}{t}{e}.COM')
          for cpu in ('z80', '8080') for tier, t in (('small', 'S'), ('base', ''), ('fast', 'F'))
          for ed, e in (('', ''), ('-ed', 'E')) for chk, u in (('-chk', ''), ('', 'U'))]
 print(f'{"file":22} {"offset":>7} {"address":>8} {"value":>6} {"SAVE pages":>11} {"last address":>13}')

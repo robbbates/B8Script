@@ -111,14 +111,14 @@ Each CPU has a folder, `z80/`, `8080/`, `6502/`, `6809/` and `win32/`, which hol
 | `*.lst` | The assembler's listings, each named as its build, next to it |
 | `TIMING.B8S` | Times `n?` on your machine, to tune the CP/M builds' count (see The language) |
 
-The CP/M and Windows files are named `B8S`, then `S` (small) or `F` (fast), then `E` with the line editor, then `U` if unchecked. The CPU is in the folder, not the name:
+The CP/M and Windows files are named `B8S`, then `U` if unchecked, then `S` (small) or `F` (fast), then `E` with the line editor. The CPU is in the folder, not the name:
 
 | Build | `small/` | `base/` | `fast/` |
 |---|---|---|---|
 | Runner, checked | `B8SS` | `B8S` | `B8SF` |
-| Runner, unchecked | `B8SSU` | `B8SU` | `B8SFU` |
+| Runner, unchecked | `B8SUS` | `B8SU` | `B8SUF` |
 | With the line editor, checked | `B8SSE` | `B8SE` | `B8SFE` (Windows only) |
-| With the line editor, unchecked | `B8SSEU` | `B8SEU` | `B8SFEU` (Windows only) |
+| With the line editor, unchecked | `B8SUSE` | `B8SUE` | `B8SUFE` (Windows only) |
 
 The Z80 has all ten as `.COM` files, the 8080 the six runners, and Windows all twelve as `.EXE` files. `B8S.COM` (or `B8S.EXE`) is the one to start with: the base runner, checked.
 
@@ -147,21 +147,21 @@ CP/M has no clock a program can count on, so the CP/M builds time `n?` by counti
    | File | File offset | Address once loaded | Pages (CP/M 2.2 SAVE) | Last address (CP/M 3 SAVE) |
    |---|---|---|---|---|
    | `z80/small/B8SS.COM` | 1E5h | 2E5h | 6 | 685h |
-   | `z80/small/B8SSU.COM` | 1E8h | 2E8h | 4 | 4F8h |
+   | `z80/small/B8SUS.COM` | 1E8h | 2E8h | 4 | 4F8h |
    | `z80/small/B8SSE.COM` | 1DEh | 2DEh | 8 | 8FFh |
-   | `z80/small/B8SSEU.COM` | 1D8h | 2D8h | 7 | 76Dh |
+   | `z80/small/B8SUSE.COM` | 1D8h | 2D8h | 7 | 76Dh |
    | `z80/base/B8S.COM` | 1CEh | 2CEh | 7 | 738h |
    | `z80/base/B8SU.COM` | 1CDh | 2CDh | 5 | 5CEh |
    | `z80/base/B8SE.COM` | 1C7h | 2C7h | 9 | 9B2h |
-   | `z80/base/B8SEU.COM` | 1BDh | 2BDh | 8 | 843h |
+   | `z80/base/B8SUE.COM` | 1BDh | 2BDh | 8 | 843h |
    | `z80/fast/B8SF.COM` | 19Ah | 29Ah | 19 | 13FFh |
-   | `z80/fast/B8SFU.COM` | 1A0h | 2A0h | 18 | 12FFh |
+   | `z80/fast/B8SUF.COM` | 1A0h | 2A0h | 18 | 12FFh |
    | `8080/small/B8SS.COM` | 202h | 302h | 7 | 72Eh |
-   | `8080/small/B8SSU.COM` | 1D7h | 2D7h | 5 | 568h |
+   | `8080/small/B8SUS.COM` | 1D7h | 2D7h | 5 | 568h |
    | `8080/base/B8S.COM` | 1E2h | 2E2h | 7 | 7E2h |
    | `8080/base/B8SU.COM` | 1B7h | 2B7h | 6 | 63Ch |
    | `8080/fast/B8SF.COM` | 1A7h | 2A7h | 19 | 13FFh |
-   | `8080/fast/B8SFU.COM` | 17Eh | 27Eh | 18 | 12FFh |
+   | `8080/fast/B8SUF.COM` | 17Eh | 27Eh | 18 | 12FFh |
 
    These move when the code changes: `testing/patchinfo.py` prints the table for the current builds.
 3. **Patch it**, in hex (8 is `08`, 12 is `0C`). Use **either** a hex editor on a PC **or** the CP/M tools on the machine itself; you need only one of the three ways below.
@@ -335,7 +335,7 @@ A command key ends the line too, and takes what was typed before it as its argum
 - ^R ends at ^Z only. The spec also names ^@, but KEY returns 0 for "no key", so a NUL can't be seen.
 - Nothing checks that the text fits in memory.
 
-**With CP/M** (`B8SE`, `B8SEU`, `B8SSE`, `B8SSEU`):
+**With CP/M** (`B8SE`, `B8SUE`, `B8SSE`, `B8SUSE`):
 - The file named on the command line is the program to start with, and the name that ^R and ^W use until another is typed. With no file, or no such file, there is no program.
 - A name is up to 8 characters, a dot and up to 3 more, on the current drive. It is put in capitals.
 - The text ends at the file's first ^Z, and a last line with no CR LF is given one. ^W pads the last record with ^Z.
@@ -352,7 +352,7 @@ In the small builds the editor adds 520 bytes to the unchecked generic build and
 
 ## The Windows builds (`win32/`)
 
-Twelve programs for the Windows command shell, in 32-bit x86 assembly, four in each tier. In `win32/base/`: `B8S.EXE` (the runner, checked), `B8SU.EXE` (unchecked), `B8SE.EXE` (with the line editor, checked) and `B8SEU.EXE` (editor, unchecked); in `win32/small/` the same with an S after `B8S` (`B8SS.EXE` and so on), and in `win32/fast/` with an F (`B8SF.EXE` and so on). A 32-bit program runs on every Windows, the 64-bit and ARM ones included.
+Twelve programs for the Windows command shell, in 32-bit x86 assembly, four in each tier. In `win32/base/`: `B8S.EXE` (the runner, checked), `B8SU.EXE` (unchecked), `B8SE.EXE` (with the line editor, checked) and `B8SUE.EXE` (editor, unchecked); in `win32/small/` the same with an S after `B8S` (`B8SS.EXE` and so on), and in `win32/fast/` with an F (`B8SF.EXE` and so on). A 32-bit program runs on every Windows, the 64-bit and ARM ones included.
 
 ```
 B8S PROG.B8S
@@ -360,7 +360,7 @@ B8S PROG.B8S > out.txt
 B8SE PROG.B8S
 ```
 
-- **They have not been run on Windows yet.** They are tested in an emulator, with the Windows calls they make modelled by hand, and their headers are checked against the documented rules (see How they were tested). Wine would not start in the container they were written in. The first run on a real machine is still to do.
+- **They have not been run on Windows yet.** They are tested in an emulator, with the Windows calls they make modelled by hand, and their headers are checked against the documented rules (see How they were tested). The first run on a real machine is still to do.
 - **The machine is the spec's:** 64 KB of memory, 16-bit cells and addresses. The memory map is in the spec's Appendix G. The language, the break key, the checked builds' errors and report, and the editor are the Z80's, key for key.
 - **The file.** A runner loads the file named on the command line, runs it and exits. With no file, or one that can't be opened, it exits without a word. An editor build starts with that file as its program, or empty. A file can hold up to 64,765 bytes.
 - **Output** goes to standard output, so it can be redirected. A checked build's report goes to standard error.
@@ -449,7 +449,7 @@ Every source builds in three tiers, set by `SPEED`. They come from the same sour
 
 - **small** (`SPEED = 0`) is tuned for size. Its files are in each CPU's `small/`.
 - **base** (`SPEED = 1`, the default) adds the speed-ups that cost least, about 120 to 330 bytes, and is 1.1 to 1.5 times as fast as small. It goes with every build. Its files are in each CPU's `base/`.
-- **fast** (`SPEED = 2`) is base and everything else, size no object: 4 to 9 KB, about twice as fast as small on the 8-bit CPUs and three to four times on Windows. It goes with every build except the Z80's line editor; Windows has fast editor builds. Its files are in each CPU's `fast/`.
+- **fast** (`SPEED = 2`) is base and everything else, size no object: 4 to 9 KB, 1.7 to 3 times as fast as small on the 8-bit CPUs and 2.7 to 4.3 times on Windows. It goes with every build except the Z80's line editor; Windows has fast editor builds. Its files are in each CPU's `fast/`.
 
 **What base adds:**
 
@@ -527,7 +527,7 @@ To build the tiers, see [Building](#building).
 Every build runs, in an emulator, against a reference interpreter written from the spec (`testing/ref.py`):
 - every example program in the spec;
 - edge cases for `/`, compares, number wrap, string escapes, skips over strings, `\`, `[x`, `[ `, `{]` jumps, heap mark and release with a signed `_`, the hex loader, `0?`, `n?`, `-n?` with editing, and deep stacks;
-- your Tiny BASIC, driven with a typed program (entering, LIST, RUN, GOSUB, FOR, expressions);
+- Tiny BASIC (`programs/TINYBAS.B8S`), driven with a typed program (entering, LIST, RUN, GOSUB, FOR, expressions);
 - a machine-code test per CPU (and per interpreter on the 6502);
 - the break key, on unchecked and checked builds alike: Ctrl-C in a loop, in a chain of word calls and in `?`; the held key, the newest key winning, `?` taking the held key first; the break-off cell, with one Ctrl-C, two quick ones and two slow ones; and a count of how often KEY is called;
 - for checked builds, every error in the table, several ways each, with the whole report compared byte for byte against the reference (run with that build's own addresses); the stack overruns are compared against patterns, since stack sizes differ.
@@ -538,6 +538,6 @@ The six small CP/M .COM files have also run under real CP/M 2.2, Digital Researc
 
 The Windows builds run in the Unicorn emulator (`testing/harness_win32.py`): the .EXE is mapped as Windows would map it, and the dozen `kernel32` calls it makes are modelled. They go through the same suite as the others, the break-key tests and the editor sessions included, plus a few tests of their own (the report on standard error, redirected input, the arrow keys, the command line). That tests the interpreter, and the header against the rules; it can't show that Windows itself accepts the file, or that the model of each call is right.
 
-Every game, and every program in `programs/` but MON, is also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`); SIEVE, PI, MANDEL and MON are run in full, and MON's R with each CPU's own return instruction (`testing/test_programs.py`). Each game is in two files, `NAME.TXT` with comments that explain it and `NAME.B8S` stripped from it (`testing/b8strip.py`), and both are run, and the reference plays scripted games of the newest twelve (Wumpus, Robots, 2048, Minesweeper, Breakout, Qubic, Klondike, Lights Out, Fifteen, Greed, Reversi and Battleship) to a win, a loss or a known message (`testing/test_games.py`). The test setup is in `testing/` (see its README).
+Every full-size game, and every program in `programs/` but MON, is also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`); SIEVE, PI, MANDEL and MON are run in full, and MON's R with each CPU's own return instruction (`testing/test_programs.py`). Each full-size game is in two files, `NAME.TXT` with comments that explain it and `NAME.B8S` stripped from it (`testing/b8strip.py`), and both are run (IDOL's `.TXT` is documentation only, so only its `.B8S` is). The reference plays scripted games of all 21 full-size games to a win, a loss or a known message (`testing/test_games.py`), and of the 21 tiny ones (`testing/test_tweets.py`). The test setup is in `testing/` (see its README).
 
 [↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)

@@ -29,7 +29,7 @@ for cpu in ('z80', '8080', '6502', '6809', 'win32'):
     for hexf in sorted(glob.glob(f'{out}/{cpu}/*.hex') + glob.glob(f'{out}/{cpu}/*.EXE')):
         base = hexf[:-4]
         name = os.path.basename(base)
-        if '-ed' in name or re.fullmatch(r'B8S[SF]?EU?', name):               # the editor builds have their own test
+        if '-ed' in name or re.fullmatch(r'B8SU?[SF]?E', name):               # the editor builds have their own test
             continue
         cpm = '-cpm' in name
         short = []

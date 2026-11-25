@@ -206,8 +206,11 @@ class Run:
         return None
 
     # ---- the keyboard ----
-    def look(self, t):
-        """A wait on the input handle for t ms: True if an event is there."""
+    def look(self, t, keywait=False):
+        """A wait on the input handle for t ms: True if an event is there. A
+        look with t = 0 is the break check, which is given only keys already
+        pressed; but a key wait (keywait) whose time is already up still
+        gets the next key typed, as Windows gives a waiting key first."""
         self.looks += 1
         if self.brk_at is not None and len(self.out) >= self.brk_at:
             self.pressed.append(3)
@@ -220,7 +223,7 @@ class Run:
         if self.pressed:
             self.press(self.pressed.pop(0))
             return True
-        if t == 0:
+        if t == 0 and not keywait:
             return False
         if not self.inp and t == INFINITE and self.stages:
             self.inp = list(self.stages.pop(0))
@@ -371,7 +374,7 @@ class Run:
         self.timerwaits += 1
         # the input first, as Windows gives the lowest signalled index; the
         # timer ends the wait when its time is up
-        return 0 if self.look(max(0, self.tdue - self.now())) else 1
+        return 0 if self.look(max(0, self.tdue - self.now()), keywait=True) else 1
 
     def k_ReadConsoleInputA(self, h, buf, n, pcnt):
         if not self.events:                 # (never: only after a wait said so)

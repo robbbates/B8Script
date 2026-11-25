@@ -19,7 +19,7 @@ Nov 22, 2026 · @ROB8S
 
 ## Welcome
 
-B8Script is a tiny programming language where every command is a single character, and you can learn its basics in an afternoon. It was made for little 8-bit computers with 64 KB of memory, so the whole interpreter fits in under a kilobyte on a Z80. It's also great fun on a modern PC.
+B8Script is a tiny programming language where every command is a single character, and you can learn its basics in an afternoon. It was made for little 8-bit computers with 64 KB of memory, so its smallest build fits in under a kilobyte on a Z80. It's also great fun on a modern PC.
 
 You don't need any programming experience. You do need a willingness to read things a bit backwards at first. By the end you'll have written a guessing game.
 
@@ -30,7 +30,7 @@ You don't need any programming experience. You do need a willingness to read thi
 The interpreters live in this repo, in the [`B8Script-interpreters`](../B8Script-interpreters) folder. On Windows, the easiest one to learn with is **`B8SE.EXE`**, in the `win32/base` folder:
 
 - the **E** means it has a line editor, so you can type a line and it runs straight away;
-- it's a *checked* build, so when you make a mistake it tells you what went wrong instead of doing something strange. (An unchecked build has a **U** at the end of its name.)
+- it's a *checked* build, so when you make a mistake it tells you what went wrong instead of doing something strange. (An unchecked build has a **U** right after the `B8S` of its name: `B8SU.EXE`.)
 
 Open a command window in that folder and type `B8SE`. Now you can type B8Script and press Enter to run it.
 

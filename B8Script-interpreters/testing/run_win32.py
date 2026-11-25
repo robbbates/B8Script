@@ -132,7 +132,7 @@ def main():
         name = os.path.basename(exe)[:-4]
         mapf = exe[:-4] + '.map'
         checked = name.endswith('C')
-        editor = name.startswith('B8SWINE')
+        editor = name.startswith(('B8SWINE', 'B8SWINQE', 'B8SWINFE'))
         if editor:
             total += test_editor.check_editor(exe[:-4], verbose=verbose, target=test_editor.win32_target(exe))
         else:

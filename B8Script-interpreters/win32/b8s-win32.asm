@@ -10,7 +10,9 @@
 ;      nasm -f bin -DEDITOR=1 -o B8SWINE.EXE b8s-win32.asm
 ;      nasm -f bin -DEDITOR=1 -DCHECKED=1 -o B8SWINEC.EXE b8s-win32.asm
 ;
-;  Two switches (the defaults below, or -D on the command line):
+;  (and the same with -DQUICK=1 for B8SWINQ*.EXE, or -DFAST=1 for B8SWINF*.EXE)
+;
+;  Four switches (the defaults below, or -D on the command line):
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
 ;             1 = starts with every variable at 0 and every word undefined,
 ;                 and stops on every error in the spec's table (and Ctrl-C)
@@ -19,6 +21,13 @@
 ;             1 = the line editor of the spec's suggested standard (the same
 ;                 editor as the Z80's, key for key); the file named on the
 ;                 command line is the program to start with.
+;    QUICK    1 = the speed-ups that cost few bytes: a skip cache, a faster
+;                 skip, '/' by a power of two as shifts, and (unchecked) a
+;                 variable then '@' or '!' in one step (see "Speed-ups").
+;                 0, the default, is the smallest build.
+;    FAST     1 = the speed build: QUICK, and a 256-entry jump table besides,
+;                 with no size limit (see "The speed build"). It goes with
+;                 either setting of the other two.
 ;
 ;  In every build Ctrl-C stops a running program (an unchecked runner stops
 ;  without a word): see the console layer for the rules, the held key and
@@ -34,6 +43,22 @@
 %endif
 %ifndef EDITOR
 %define EDITOR  0
+%endif
+%ifndef QUICK
+%define QUICK   0
+%endif
+%ifndef FAST
+%define FAST    0
+%endif
+%if QUICK || FAST
+ %define QK     1               ; (the speed-ups: QUICK, or the speed build)
+%else
+ %define QK     0
+%endif
+%if QK && !CHECKED && !FAST
+ %define QUICKU 1               ; (and those that only the unchecked QUICK
+%else                           ;   builds take; the speed build has its own)
+ %define QUICKU 0
 %endif
 
 ; -----------------------------------------------------------------------------
@@ -80,7 +105,9 @@
 ;  The stacks are outside the arena: the return stack is 112 entries below
 ;  RSTOP (in the image's uninitialised space below the arena) and the data
 ;  stack is the thread's stack (127 cells in the checked builds, as deep as
-;  the 1 MB stack reserve allows in the others).
+;  the 1 MB stack reserve allows in the others). The QUICK and speed builds
+;  keep their skip cache (64 entries, 512 bytes) after the interpreter's
+;  variables, in the image's uninitialised space below NAMEBUF.
 ;
 ;  The whole image (code, arena) is one section, readable, writable and
 ;  executable, so machine code can run in the arena (see h_grave).
@@ -107,6 +134,9 @@ RSTOP   equ     IB+0FF00h       ; the empty return stack (it grows down)
 RSMAX   equ     112             ; return stack entries (checked builds)
 DSMAX   equ     127             ; data stack cells (checked builds)
 NAMEBUF equ     IB+0F000h       ; the file's name, as typed (up to 3.5 KB)
+%if QK
+NSKC    equ     64              ; the skip cache's entries (QUICK)
+%endif
 
 ; -----------------------------------------------------------------------------
 ;  The PE header, by the documented rules: a 64-byte DOS header whose
@@ -202,6 +232,26 @@ tstart:
         jmp     %1
  %endif
 %endmacro
+%define NEXTJ   jmp ebp                 ; (how DIVCODE ends: the speed build's
+                                        ;   own '/' has the dispatcher there)
+
+; NEXTF (the speed build): the dispatcher. It is `next`, and it is inline at
+; the end of the speed build's own handlers, so they never jump back to it.
+; Every handler is entered with EAX = its character, zero-extended. NEXTD is
+; the one after a digit: through dtabd, where a digit goes on with the number.
+%macro  NEXTF 0
+%if CHECKED
+        call    chkstk                  ; both stacks, once per character
+%endif
+        movzx   eax,byte [esi]
+        inc     esi
+        jmp     [dtab+eax*4]
+%endmacro
+%macro  NEXTD 0
+        movzx   eax,byte [esi]
+        inc     esi
+        jmp     [dtabd+eax*4]
+%endmacro
 
 ; run0: start running at ESI. The heap starts after the stored program's
 ; NUL. TOS is popped: the data stack is as the last line left it. (The
@@ -215,6 +265,16 @@ run0:   mov     edx,ARENA+PROG
 %if CHECKED
         movzx   eax,dx                  ; '_' may not release below this
         mov     [V(v_npend)],eax
+%endif
+%if QK
+        lea     eax,[edx-(ARENA+PROG)]  ; the text's length, NUL included: only
+        mov     [v_tlen],eax            ;   skips that start inside it are kept
+        push    edi                     ; the skip cache is emptied (a start of
+        mov     edi,skc                 ;   0 matches no skip: every IP is in
+        mov     ecx,2*NSKC              ;   the arena)
+        xor     eax,eax
+        rep     stosd
+        pop     edi
 %endif
         pop     ebx
         jmp     ebp
@@ -407,7 +467,8 @@ alloc1: movzx   edx,word [ARENA+HEAP]
 ; quotient, 32768, does not fit in 16) wraps as the spec says instead of
 ; faulting. Dividing by 0 skips the IDIV in an unchecked build (two cells of
 ; no meaning: a and its sign); the checked build stops with Z. (The handler
-; itself in an unchecked build; in a checked one its body, div1.)
+; itself in an unchecked build; in a checked or QUICK one its body, div1;
+; the speed build's fs_div is another copy.)
 %macro  DIVCODE 0
 %if CHECKED
         test    bx,bx
@@ -415,6 +476,12 @@ alloc1: movzx   edx,word [ARENA+HEAP]
 %endif
         pop     eax
         movsx   ecx,bx
+%if QK
+        lea     edx,[ecx-1]             ; (QUICK: b a power of two? See DIVQ)
+        test    edx,ecx
+        jz      %%p
+%%o:
+%endif
         cwde
         cdq
 %if CHECKED=0
@@ -424,7 +491,35 @@ alloc1: movzx   edx,word [ARENA+HEAP]
 %%z:    mov     bx,ax
         push    ebx                     ; q
         mov     bx,dx                   ; r on top
-        jmp     ebp
+        NEXTJ
+%if QK
+%%p:    DIVQ    %%o, %%z
+%endif
+%endmacro
+
+; DIVQ (QUICK): '/' by a power of two, 2^k with k from 0 to 14, is shifts,
+; with IDIV's results: |a| >> k and |a| & (b - 1), both negated if a < 0
+; (-32768 is its own |a|, as an unsigned 16 bits). EAX = a (its low word),
+; ECX = b, EDX = b - 1. (A power of two or 0: an unchecked build divides by
+; 0 the regular way, at %1.) On to %2 with AX = q and DX = r. Shifts cost
+; more instructions than one IDIV, but far fewer cycles: IDIV takes 20 to
+; 40 (12 on the newest), the shifts a handful.
+%macro  DIVQ 2
+%if CHECKED=0
+        jecxz   %1
+%endif
+        bsf     ecx,ecx                 ; k
+        test    ax,ax
+        js      %%n
+        and     dx,ax                   ; r
+        shr     ax,cl                   ; q
+        jmp     %2
+%%n:    neg     ax                      ; |a|
+        and     dx,ax
+        shr     ax,cl
+        neg     ax                      ; q
+        neg     dx                      ; r
+        jmp     %2
 %endmacro
 
 ; PRLOOPCODE: the loop of '$' (h_print; in a checked build the routine
@@ -539,8 +634,9 @@ pch:    CALLP   putc
 ;  Punctuation handlers. PTAB holds one byte per character: its handler's
 ;  distance from hbase, so every handler starts in the 256 bytes from hbase
 ;  (PT checks it). Only the starts must be there: the last handler, '$',
-;  runs on past the window, and '[', '`' (and '_' and '/' in a checked
-;  build) are stubs that jump to their bodies after it. Each handler starts
+;  runs on past the window, and '[', '`' (and '_' in a checked build, and
+;  '/' in a checked or QUICK one) are stubs that jump to their bodies after
+;  it. Each handler starts
 ;  with EBX = TOS and EAX, ECX, EDX free, and ends with JMP EBP.
 ;  (Two other layouts were tried: handlers 2-aligned with the table holding
 ;  half the distance, which costs a NOP after every handler of odd length,
@@ -634,7 +730,7 @@ h_eq:   pop     edx
         jmp     tf
 
 
-%if CHECKED
+%if CHECKED || QK
 h_div:  jmp     div1                    ; ('/': its body is after the window)
 %else
 h_div:  DIVCODE
@@ -802,8 +898,38 @@ grave1: CALLP   hexc
         PESCCODE
 %endif
 
-%if CHECKED
+%if CHECKED || QK
 div1:   DIVCODE
+%endif
+
+; ---- Speed-ups (QUICK builds) ---------------------------------------------
+; QUICK takes what pays on x86 of the Z80's QUICK: the skip cache and the
+; faster skip (at skip), '/' by a power of two as shifts (DIVQ), and in the
+; unchecked build a variable then '@' or '!' in one step (here). The Z80's
+; '*' in 8 rounds has nothing to do here: x86 has IMUL. Nor has its true
+; ')': this ')' reads the block start where it is in every build.
+%if QUICKU
+; a-z, in the unchecked QUICK build: a variable followed by '@' or '!' is
+; fetched or stored in the same step (x@ is the commonest pair in most
+; programs). (A checked build checks the stacks between the two, so it keeps
+; them apart.)
+lower:  lea     edx,[ARENA+LET+eax*2]   ; EDX -> the cell
+        mov     al,[esi]
+        cmp     al,'@'
+        je      .lw1
+        cmp     al,'!'
+        je      .lw2
+        push    ebx                     ; neither: push the cell's address
+        mov     ebx,edx
+        jmp     ebp
+.lw1:   inc     esi                     ; x@: TOS = the cell's value
+        push    ebx
+        mov     bx,[edx]
+        jmp     ebp
+.lw2:   inc     esi                     ; x!: the cell = TOS, and NOS comes up
+        mov     [edx],bx
+        pop     ebx
+        jmp     ebp
 %endif
 
 ; =============================================================================
@@ -1246,6 +1372,7 @@ skipstr:mov     al,[esi]
 ; '[' at ']', and neither may run into the NUL (N); a string with no closing
 ; quote counts as running into it. '\' takes either closer. V_SKAT keeps the
 ; place where the skip started, for the report.
+%if QK == 0
 skip:
 %if CHECKED
         mov     [V(v_skat)],esi
@@ -1291,6 +1418,104 @@ skip:
         jmp     errp                    ; (errp drops skip's return address)
 %else
         ret
+%endif
+%else
+; The skip cache (QUICK). Nearly every skip is one that has happened before
+; (a loop skips the same false block on every pass), so the first scan from
+; each place is remembered: 64 entries of {start, end} at skc, found by the
+; start's low 6 bits. Only skips that start inside the program text are kept
+; (the line buffer changes, and so may the heap); the cache is emptied
+; whenever a run starts (run0). A program that changes its own text while it
+; runs is not looked after. A hit returns AL = 0 for ')' and not 0 for ']'.
+skip:   mov     ecx,esi
+        and     ecx,NSKC-1
+        cmp     [skc+ecx*8],esi
+        jne     .sk0
+        mov     esi,[skc+ecx*8+4]       ; a hit: the IP is past the closer
+        mov     al,[esi-1]
+        sub     al,')'
+        ret
+; The scan. EDX = where it starts (the cache's key, and in the checked build
+; the place for N; the opener is the character before it).
+%if FAST
+; (The speed build: a table of the six characters that count, NUL " ( ) [ ],
+; so the rest cost a load and a test each.)
+.sk0:   mov     edx,esi
+        xor     eax,eax                 ; (EAX indexes the table)
+        xor     ecx,ecx
+.sk3:   inc     ecx                     ; an opener: one deeper
+.sk1:   lodsb
+        test    byte [sktab+eax],1
+        jz      .sk1
+        cmp     al,'('
+        je      .sk3
+        cmp     al,'['
+        je      .sk3
+        cmp     al,')'
+        je      .skc
+        cmp     al,22h
+        je      .skq
+        test    al,al
+        jz      .skn
+        mov     al,2                    ; ]
+        jmp     short .sk4
+%else
+; (Two range tests rule out most characters, '^' and up and '*' to 'Z',
+; before the six that count, NUL " ( ) [ ], are looked for.)
+.sk0:   mov     edx,esi
+        xor     ecx,ecx
+.sk3:   inc     ecx                     ; an opener: one deeper
+.sk1:   lodsb
+        cmp     al,5Eh
+        jae     .sk1                    ; ^ _ ` a-z { | } ~ and 7Fh-FFh: nothing
+        cmp     al,2Ah
+        jb      .sk5
+        cmp     al,5Bh
+        jb      .sk1                    ; * to Z: nothing
+        sub     al,5Ch                  ; [ -1, backslash 0, ] 1
+        jz      .sk1                    ; (backslash is nothing here)
+        jc      .sk3                    ; [
+        mov     al,2                    ; ]
+        jmp     short .sk4
+.sk5:   cmp     al,28h
+        je      .sk3                    ; (
+        ja      .skc                    ; )
+        cmp     al,22h
+        je      .skq
+        test    al,al
+        jnz     .sk1                    ; the rest below '*': nothing
+        jmp     short .skn
+%endif
+.skc:   mov     al,0                    ; )
+.sk4:   dec     ecx                     ; a closer: AL = 0 for ')', 2 for ']'
+        jnz     .sk1
+%if CHECKED
+        mov     ah,[edx-1]              ; the closer at this level (as above):
+        xor     ah,al                   ;   2 here means the wrong closer
+        and     ah,6
+        cmp     ah,2
+        je      .sk7
+%endif
+        lea     ecx,[edx-(ARENA+PROG)]  ; remember it, if it started inside the
+        cmp     ecx,[v_tlen]            ;   program text
+        jae     .sk9
+        and     ecx,NSKC-1              ; (PROG is a multiple of 64: the same
+        mov     [skc+ecx*8],edx         ;   entry as the lookup's)
+        mov     [skc+ecx*8+4],esi
+.sk9:   ret
+.skq:   call    skipstr                 ; a string: stepped over whole
+        jmp     .sk1
+.skn:                                   ; NUL: the text ran out
+%if CHECKED
+        dec     esi                     ; (the IP stays on the NUL)
+        test    byte [edx-1],4
+        jnz     SKEND                   ; '\' with no closer ends the program
+.sk7:   mov     esi,edx                 ; N. The place is the opener
+        mov     al,'N'
+        jmp     errp                    ; (errp drops skip's return address)
+%else
+        jmp     SKEND                   ; (the end of the program)
+%endif
 %endif
 
 ; -n?: Backspace takes the last character back (and is echoed as it is),
@@ -1787,6 +2012,7 @@ setname:mov     esi,ARENA+LINEBUF
         db      (%1-hbase) & 0FFh
         times   -((%1-hbase) > 255) db 0
 %endmacro
+%if FAST == 0
 ptab:   PT h_store      ; !
         PT h_str        ; "
         PT h_num        ; #
@@ -1819,6 +2045,294 @@ ptab:   PT h_store      ; !
         PT h_or         ; |
         PT h_fromr      ; }
         PT h_not        ; ~
+%else
+; =============================================================================
+;  The speed build (FAST = 1)
+;
+;  The inner loop is a table of 256 handlers, one per character, and the
+;  dispatcher (NEXTF: MOVZX EAX,BYTE [ESI] / INC ESI / JMP [dtab+EAX*4]) is
+;  `next` and is inline at the end of the speed build's own handlers. Those
+;  are: one per letter and digit, which knows its cell or its value, and the
+;  commonest punctuation (fs_). The rest of the table is the regular
+;  handlers, which end with JMP EBP, into `next`.
+;
+;  A digit's handler pushes its value; the character after it goes through
+;  dtabd, which is dtab but for the digits: those go on with the number
+;  (fdm). (In the checked build anything else in dtabd is fdx, which goes back
+;  through `next`, for its check of the stacks once the number is read.)
+; =============================================================================
+%assign i 0
+%rep 10
+fd%[i]: push    ebx                     ; 0-9: a number starts
+        mov     ebx,ARENA+i
+        NEXTD
+%assign i i+1
+%endrep
+fdm:    imul    bx,bx,10                ; another digit (EAX = it)
+        sub     al,'0'
+        add     bx,ax
+        NEXTD
+%if CHECKED
+fdx:    dec     esi                     ; the number has ended: the character
+        jmp     ebp                     ;   after it goes through next
+%endif
+
+; A-Z: call the word. The return address goes on the return stack, the IP
+; becomes the word's body, and the break key is looked at as at rpush.
+%assign i 0
+%rep 26
+fu%[i]: sub     edi,4
+        mov     [edi],esi
+        mov     si,[ARENA+LET+2*i]
+        dec     byte [V(v_pcnt)]
+        jz      fpoll
+        NEXTF
+%assign i i+1
+%endrep
+fpoll:  call    pollk                   ; (one time in 256)
+        jmp     ebp
+
+; a-z: push the cell's address. In the unchecked build a variable followed
+; by '@' or '!' is fetched or stored in the same step.
+%assign i 0
+%rep 26
+%if CHECKED
+fv%[i]: push    ebx
+        mov     ebx,ARENA+LET+40h+2*i
+        NEXTF
+%else
+fv%[i]: cmp     byte [esi],'@'
+        jne     .v1
+        push    ebx                     ; x@
+        mov     bx,[ARENA+LET+40h+2*i]
+        inc     esi
+        NEXTF
+.v1:    cmp     byte [esi],'!'
+        jne     .v2
+        mov     [ARENA+LET+40h+2*i],bx  ; x!
+        pop     ebx
+        inc     esi
+        NEXTF
+.v2:    push    ebx
+        mov     ebx,ARENA+LET+40h+2*i
+        NEXTF
+%endif
+%assign i i+1
+%endrep
+
+; The commonest punctuation, written for the speed build (as the regular
+; handlers, but with the dispatcher inline; and '%' without XCHG with
+; memory, which is locked, and slow).
+fs_add: pop     edx                     ; +
+        add     bx,dx
+        NEXTF
+fs_sub: mov     al,[esi]                ; -
+        sub     al,'0'
+        cmp     al,10
+        jb      negnum                  ; (a negative number)
+        pop     edx
+        sub     dx,bx
+        mov     bx,dx
+        NEXTF
+fs_mul: pop     edx                     ; *
+        imul    bx,dx
+        NEXTF
+%undef  NEXTJ
+%define NEXTJ   NEXTF
+fs_div: DIVCODE                         ; /
+%undef  NEXTJ
+%define NEXTJ   jmp ebp
+fs_and: pop     edx                     ; &
+        and     bx,dx
+        NEXTF
+fs_or:  pop     edx                     ; |
+        or      bx,dx
+        NEXTF
+fs_xor: pop     edx                     ; ^
+        xor     bx,dx
+        NEXTF
+fs_not: not     bx                      ; ~
+        NEXTF
+fs_lt:  pop     edx                     ; <  (DX = a, BX = b: carry if a < b)
+        xor     dh,80h
+        xor     bh,80h
+        cmp     dx,bx
+        sbb     bx,bx
+        NEXTF
+fs_gt:  pop     edx                     ; >  (carry if b < a)
+        xor     dh,80h
+        xor     bh,80h
+        cmp     bx,dx
+        sbb     bx,bx
+        NEXTF
+fs_eq:  pop     edx                     ; =
+        sub     bx,dx
+        cmp     bx,1
+        sbb     bx,bx
+        NEXTF
+fs_dup: push    ebx                     ; :
+        NEXTF
+fs_drop:pop     ebx                     ; ;
+        NEXTF
+fs_swap:pop     edx                     ; %
+        push    ebx
+        mov     ebx,edx
+        NEXTF
+fs_fet: mov     bx,[ebx]                ; @
+        NEXTF
+fs_cfet:mov     bl,[ebx]                ; ,
+        mov     bh,0
+        NEXTF
+fs_store:                               ; !
+%if CHECKED
+        call    chkst2
+%endif
+        pop     edx
+        mov     [ebx],dx
+        pop     ebx
+        NEXTF
+fs_cstore:                              ; .
+%if CHECKED
+        call    chkst1
+%endif
+        pop     edx
+        mov     [ebx],dl
+        pop     ebx
+        NEXTF
+fs_open:test    bx,bx                   ; (
+        pop     ebx
+        jz      .op1
+        sub     edi,4                   ; the block start
+        mov     [edi],esi
+        dec     byte [V(v_pcnt)]
+        jz      fpoll
+        NEXTF
+.op1:   call    skip
+        NEXTF
+fs_close:test   bx,bx                   ; )
+        pop     ebx
+        jz      .cl1
+        mov     esi,[edi]               ; the block start, read where it is
+        dec     byte [V(v_pcnt)]
+        jz      fpoll
+        NEXTF
+.cl1:   add     edi,4
+        NEXTF
+fs_ret: mov     esi,[edi]               ; ]
+        add     edi,4
+        NEXTF
+fs_break:test   bx,bx                   ; backslash
+        pop     ebx
+        jz      .br2
+        call    skip
+        test    al,al                   ; ')': the block start goes; ']' returns
+        jz      .br1
+        mov     esi,[edi]
+.br1:   add     edi,4
+.br2:   NEXTF
+fs_tor: sub     edi,4                   ; {
+        mov     [edi],ebx
+        pop     ebx
+        dec     byte [V(v_pcnt)]
+        jz      fpoll
+        NEXTF
+fs_fromr:push   ebx                     ; }
+        mov     ebx,[edi]
+        add     edi,4
+        NEXTF
+fign:   NEXTF                           ; control characters, space, DEL (and
+                                        ;   80h-FFh unchecked): nothing
+
+; The tables. The punctuation's handlers, by character:
+%define FP_33   fs_store                ; !
+%define FP_34   h_str                   ; "
+%define FP_35   h_num                   ; #
+%define FP_36   h_print                 ; $
+%define FP_37   fs_swap                 ; %
+%define FP_38   fs_and                  ; &
+%define FP_39   h_emit                  ; '
+%define FP_40   fs_open                 ; (
+%define FP_41   fs_close                ; )
+%define FP_42   fs_mul                  ; *
+%define FP_43   fs_add                  ; +
+%define FP_44   fs_cfet                 ; ,
+%define FP_45   fs_sub                  ; -
+%define FP_46   fs_cstore               ; .
+%define FP_47   fs_div                  ; /
+%define FP_58   fs_dup                  ; :
+%define FP_59   fs_drop                 ; ;
+%define FP_60   fs_lt                   ; <
+%define FP_61   fs_eq                   ; =
+%define FP_62   fs_gt                   ; >
+%define FP_63   h_key                   ; ?
+%define FP_64   fs_fet                  ; @
+%define FP_91   h_def                   ; [
+%define FP_92   fs_break                ; backslash
+%define FP_93   fs_ret                  ; ]
+%define FP_94   fs_xor                  ; ^
+%define FP_95   h_alloc                 ; _
+%define FP_96   h_grave                 ; `
+%define FP_123  fs_tor                  ; {
+%define FP_124  fs_or                   ; |
+%define FP_125  fs_fromr                ; }
+%define FP_126  fs_not                  ; ~
+; DENT c, after: the entry for character c in dtab (after 0) or dtabd (1)
+%macro  DENT 2
+ %assign c %1
+ %if c >= 30h && c <= 39h
+  %if %2
+        dd      fdm
+  %else
+   %assign d c-30h
+        dd      fd%[d]
+  %endif
+ %elif %2 && CHECKED
+        dd      fdx
+ %elif c == 0
+        dd      endprog                 ; NUL: the end of the program
+ %elif c < 21h || c == 7Fh
+        dd      fign
+ %elif c >= 80h
+  %if CHECKED
+        dd      e_hi                    ; reserved (X)
+  %else
+        dd      fign
+  %endif
+ %elif c >= 41h && c <= 5Ah
+  %assign d c-41h
+        dd      fu%[d]
+ %elif c >= 61h && c <= 7Ah
+  %assign d c-61h
+        dd      fv%[d]
+ %else
+        dd      FP_%[c]
+ %endif
+%endmacro
+        align   4, db 0
+dtab:
+%assign j 0
+%rep 256
+        DENT    j, 0
+%assign j j+1
+%endrep
+dtabd:
+%assign j 0
+%rep 256
+        DENT    j, 1
+%assign j j+1
+%endrep
+; sktab: for skip, 1 for the six characters that count there
+sktab:
+%assign j 0
+%rep 256
+ %if j == 0 || j == 22h || j == 28h || j == 29h || j == 5Bh || j == 5Dh
+        db      1
+ %else
+        db      0
+ %endif
+%assign j j+1
+%endrep
+%endif
 
 ; =============================================================================
 ;  The imports: kernel32.dll only. An import directory entry, the import
@@ -1896,26 +2410,37 @@ ptrs:   PTR     putc
 ;    41h-5Ah      A-Z: call the word in that letter's cell
 ;    61h-7Ah      a-z: push the address of that letter's cell
 ;    the rest     punctuation: jump through PTAB, 32 entries
+;
+;  (The speed build has none of this: `next` is its table's dispatcher. See
+;  "The speed build".)
 ; =============================================================================
+%if FAST == 0
 ; Digits: step back onto the first digit and read the whole number.
 digit:  push    ebx
         dec     esi
         CALLP   rdnum
         jmp     ebp
 
-; a-z: push the cell's address (the cell is the variable).
+ %if QUICKU == 0
+; a-z: push the cell's address (the cell is the variable). (The unchecked
+; QUICK build does x@ and x! in one step: its `lower` is after the window.)
 lower:  push    ebx
         lea     ebx,[ARENA+LET+eax*2]
         jmp     ebp
+ %endif
 ; (digit, lower and ctl are here, before next, to keep the variables after
 ; next in reach)
 ctl:    add     al,21h                  ; back to c; zero only for NUL
         jnz     next                    ; the rest are ignored
         jmp     endprog
+%endif
 %if CHECKED
 e_hi:   mov     al,'X'                  ; a reserved byte outside a string
         jmp     error
 %endif
+%if FAST
+next:   NEXTF                           ; (the speed build: through the table)
+%else
 next:
 %if CHECKED
         call    chkstk                  ; both stacks, once per character
@@ -1951,6 +2476,7 @@ p3a:    add     al,5                    ; 3Ah-40h: index 15-21
 punct:  mov     al,[ptab+eax]
         lea     eax,[hbase+eax]
         jmp     eax
+%endif
 
 codeend:
 
@@ -1982,3 +2508,9 @@ v_rec:  resb    20              ; an INPUT_RECORD; ReadFile's byte. (Last:
                                 ;   only its first 15 bytes need be in reach)
         times   -((v_rec+15-next) > 127) db 0   ; (an error if out of reach)
         times   -((next-iat) > 128) db 0
+%if QK
+v_tlen: resd    1               ; the program text's length, NUL included
+        alignb  8
+skc:    resd    2*NSKC          ; the skip cache: {start, end}, 64 of them
+        times   -((skc+8*NSKC-tstart) > NAMEBUF-(IB+SECTVA)) db 0
+%endif

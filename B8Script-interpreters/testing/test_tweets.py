@@ -102,7 +102,7 @@ TESTS = {'tweet140': [
     ('HILO', 'binary search wins', b'\0\0\0k64\r32\r16\r8\r4\r', [b'64>', b'4= WIN'], 'end'),
     ('HILO', 'seven misses lose', b'k100\r50\r25\r12\r6\r3\r2\r', [b'2> was 1'], 'end'),
     # Lander: free fall, then a suicide burn (found by search over every burn)
-    ('LANDER', 'suicide burn lands', b'0' * 21 + b'99998999996', [b'1 LANDED'], 'end'),
+    ('LANDER', 'suicide burn lands', b'0' * 21 + b'99998999996', [b'h1000 v0 f99 ?0', b'?6 v1 LANDED'], 'end'),
     ('LANDER', 'no burn crashes', b'0' * 30, [b'CRASH'], 'end'),
     # Nim: start 24. Taking 3 leaves 21 (1 mod 4), and the player keeps it there
     ('NIM', 'perfect play wins', b'\0\0\0k3333333', [b'24 take 3, I 1', b'I lose'], 'end'),
@@ -118,17 +118,17 @@ TESTS = {'tweet140': [
     ('SIMON', 'eight rounds', simon(7, 8), [b'31824664', b'score 8'], 'end'),
     # Pig: the roll is the key's timing mod 6; five empty looks roll a 1
     ('PIG', 'pig, then hold at 102', b'r' + N * 5 + b'r' + (N * 4 + b'r') * 17 + b'h',
-     [b'0+2 1', b'0+96 6', b'2 turns'], 'end'),
+     [b'PIG to 100', b'0+2 1', b'0+96 6', b'2 turns'], 'end'),
     ('TRON', 'turn into its own trail', N * 5 + b'.' + N * 20 + b',' + N * 3 + b',' + N * 3 + b',' + N * 5,
-     [b'\x1b[9;10HO', b'\x1b[1;14HO', b'\x1b[18;1Hscore 21'], 'end'),
+     [b'\x1b[9;10HO', b'\x1b[1;14HO', b'\x1b[18;1H\x1b[?25hscore 21'], 'end'),
     # Lights Out: the 15-press solution of the all-on board, in both cases
-    ('LIGHTS14', 'solve it', b'abfgijmnoqrsvwy', [b'uvwxy 15'], 'end'),
-    ('LIGHTS14', 'upper case, stray keys', b' 0ABFGIJMNOQRSVWY0', [b'uvwxy 18'], 'end'),
+    ('LIGHTS14', 'solve it', b'abfgijmnoqrsvwy', [b'\x1b[1;1HA\x1b[1;2HB', b'\x1b[1;1Ha', b'\x1b[5;5Hy 15'], 'end'),
+    ('LIGHTS14', 'upper case, stray keys', b' 0ABFGIJMNOQRSVWY0', [b'\x1b[5;5Hy 18'], 'end'),
 ], 'tweet280': [
     # Snake: the first food is next to the start, so it grows at once
     ('SNAKE', 'eat, grow, new food', N * 8 + b'.' + N * 4 + b',' + N * 30,
      [b'\x1b[1;2H*', b'\x1b[7;64H*', b'\x1b[1;2HO\x1b[1;1H \x1b[1;3HO\x1b[1;2H '], None),
-    ('SNAKE', 'random steering, then a crash', mash(3, b'\0' * 6 + b',.', 20000), [b'\x1b[18;1Hscore 4'], 'end'),
+    ('SNAKE', 'random steering, then a crash', mash(3, b'\0' * 6 + b',.', 20000), [b'\x1b[18;1Hscore 3', b'\x1b[18;1H\x1b[?25hscore 4'], 'end'),
     # Mastermind: seed 1 picks 4321
     ('MASTER28', 'crack 4321', b'k1122\r3344\r5566\r1234\r4321\r',
      [b'1122 1B1W', b'5566 0B0W', b'1234 0B4W', b'4321 4B0W 4321'], 'end'),
@@ -136,26 +136,26 @@ TESTS = {'tweet140': [
     # Nim 3-5-7: the nim-sum line (found by a model of the game) beats it
     ('NIM357', 'perfect play wins', b'1121111121212121', [b'2 5 6 ?', b'you win'], 'end'),
     ('NIM357', 'it punishes a mistake', b'11' + b'31' * 10, [b'I win'], 'end'),
-    ('DUEL', 'head on, the computer swerves', N * 40, [b'\x1b[7;28HX', b' LOSE'], 'end'),
+    ('DUEL', 'head on, the computer swerves', N * 40, [b'\x1b[18;1HO you, X me', b'\x1b[7;28HX', b'\x1b[K\x1b[?25h LOSE'], 'end'),
     ('DUEL', 'the computer crashes', b',\0,\0\0\0\0,\0\0.\0\0\0\0\0,\0\0,\0\0\0\0\0\0\0.\0\0\0,\0\0\0\0\0\0,\0\0\0.\0\0',
      [b' WIN'], 'end'),
     # Kingdom: steady feeding lasts ten years; greedy growth is overthrown
-    ('KINGDOM', 'steady ruler', kingdom(0), [b'10: pop 99', b' 99'], 'end'),
+    ('KINGDOM', 'steady ruler', kingdom(0), [b'10: pop 99', b'\r\nscore 99'], 'end'),
     ('KINGDOM', 'greedy ruler', kingdom(0.5), [b'Overthrown'], 'end'),
-    ('KINGDOM', 'starve them', b'500\r', [b'Overthrown 99'], 'end'),
+    ('KINGDOM', 'starve them', b'500\r', [b'Overthrown\r\nscore 99'], 'end'),
     # Tic-tac-toe: it opens in the centre; --all checks every line
     ('TICTAC', 'it wins a sloppy game', b'1739', [b'\r\n.O.', b'OOO', b' I win'], 'end'),
     ('TICTAC', 'it blocks a fork', b'2938', [b' I win'], 'end'),
     ('BLACKJCK', 'eleven hands', b'k' + b'hs' * 8,
      [b'You AT 21 Me 2AT8 21', b'$90 You AA 12 h?8 20 h? Me 6J3 19', b'$100 You J7 17 h?Q 27'], None),
-    ('COPTER', 'flap and crash', b'\0\0\0k' * 30, [b'COPTER', b'score 8'], 'end'),
-    ('BRKOUT28', 'one brick, then the ball is lost', N * 200, [b'\x1b[4;31H#', b'\x1b[21;'], 'end'),
-    ('HANGMN28', 'guess it', b'kbinary', [b'B_____ 0 ?', b'BINARY won'], 'end'),
-    ('HANGMN28', 'six misses', b'kzqxjvw', [b'______ 5 ?', b'BINARY lost'], 'end'),
+    ('COPTER', 'flap and crash', b'\0\0\0k' * 30, [b'COPTER', b'CRASH! score 8'], 'end'),
+    ('BRKOUT28', 'one brick, then the ball is lost', N * 200, [b'\x1b[4;31H#', b'\x1b[21;', b'\x1b[22;1Hscore 1'], 'end'),
+    ('HANGMN28', 'guess it', b'kbinary', [b'B_____ 0/6 ?', b'BINARY won'], 'end'),
+    ('HANGMN28', 'six misses', b'kzqxjvw', [b'______ 5/6 ?', b'BINARY lost'], 'end'),
     # Maze: walls hold, and the shortest way out (54 steps in every binary-tree maze) gets out
     ('MAZE', 'walls hold', b'kiiii', [b'#######################################\r\n#', b'\x1b[2;39H@'], None),
-    ('MAZE', 'walk out', maze(b'k'), [b'\x1b[21;1HOut!'], 'end'),
-    ('MAZE', 'another maze', maze(b'\0\0\0\0\0k'), [b'\x1b[21;1HOut!'], 'end'),
+    ('MAZE', 'walk out', maze(b'k'), [b'\x1b[21;1HOut in 54 keys'], 'end'),
+    ('MAZE', 'another maze', maze(b'\0\0\0\0\0k'), [b'\x1b[21;1HOut in 54 keys'], 'end'),
 ]}
 
 

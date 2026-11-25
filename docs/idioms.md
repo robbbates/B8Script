@@ -55,7 +55,7 @@ B8Script has only dup, drop and swap, so every other shuffle is built from those
 | Update and keep the new value | `:@ f@- :{ %! }` | Parks a copy of the result across the store (SUPERTRK) |
 | Read and mark | `:,%1%.` | `( addr -- old )` leaves the old byte and sets it to 1 (TRON) |
 | Store with the value pushed last | `1%.` | Address first, then value, then swap (LIFE, GREED) |
-| One value into two variables | `11:y!x!` | Dup, then two stores: the ball starts at 11, 11 (BREAKOUT in tweet280) |
+| One value into two variables | `11:y!x!` | Dup, then two stores: the ball starts at 11, 11 (BRKOUT28) |
 | Value and flag in one | `4:( ... 1-:)` | A nonzero count is already true, so `:` makes the loop flag (TICTAC) |
 | Count up, print after | `0 1( ... 1+1)#` | The score sits under the loop; a `\` inside ends it (SKI) |
 | Fold results under a loop | `0 0i! 1( ... \| i@1+:i! 16<)` | Start at 0 and OR each test in; start at −1 and AND for "all hold" (G2048, BATTLE, LIGHTS) |
@@ -101,7 +101,7 @@ Min and max work by copying both values, comparing, swapping when needed, and dr
 | Count matches | `0 0i! 1( ... a@= - i@1+:i! 64<)` | The same subtract-the-flag trick tallies a loop (REVERSI) |
 | Weighted score, no branches | `c@H 100&+ c@Q 3000&+ c@X 2000&-` | `flag n&` gives n or 0 to add or subtract (REVERSI, QUBIC) |
 | Random tie-break | `8* 8R+` | Equal scores are ordered by chance; unequal ones never swap (REVERSI, QUBIC) |
-| Keys to −1, 0, +1 | `:106=%108=-` | j gives −1, l gives +1, anything else 0 (SKI, BREAKOUT in tweet280); `:46=%44=-` gives −1 for `.` and +1 for `,`, to turn one way or the other (TRON, SNAKE, DUEL) |
+| Keys to −1, 0, +1 | `:106=%108=-` | j gives −1, l gives +1, anything else 0 (SKI, BRKOUT28); `:46=%44=-` gives −1 for `.` and +1 for `,`, to turn one way or the other (TRON, SNAKE, DUEL) |
 | Bump 0 to 1 | `:0=-` | Adds 1 only when the value is 0 (NIM) |
 | Positive modulo | `c@- 3+3/%;` | Add the modulus before the remainder so the dividend is positive (RPS) |
 | Mod 3 compare to a score | `:1=%2=-` | 0, 1, 2 become 0, +1, −1 (RPS) |
@@ -109,7 +109,7 @@ Min and max work by copying both values, comparing, swapping when needed, and dr
 | The other side | `3z@-` | With sides 1 and 2 (REVERSI); `2f@+` turns a flag into player 1 or 2 (QUBIC) |
 | Toggle a flag | `f@0=f!` or `o@~o!` | (QUBIC, TINYBAS) |
 | Two-way range test | `c@47> c@58<&` | True for the digits 48–57 (most games) |
-| One-test range | `32767&30<` | Masking makes a negative large, so one compare checks 0–29 (BREAKOUT, b8sms) |
+| One-test range | `32767&30<` | Masking makes a negative large, so one compare checks 0–29 (BRKOUT28) |
 | Unsigned compare | `32768^` on both sides, then `<` | Flipping both sign bits turns the signed compare unsigned (TINYBAS) |
 | Numbers past 32767 | `y@9999>( y@10000-y! x@1+x! 0)` | Keep x×10000+y in two cells and carry (G2048, IDOL money) |
 | Percentage in 16 bits | `s@5*7/;` | s×1000/1400 reduced so it never overflows (GREED) |
@@ -145,14 +145,14 @@ There are no shift commands and no hex literals; these idioms make them from `:+
 
 | Name | Code | What it does |
 | --- | --- | --- |
-| Set or toggle a bit in a byte | `:,32\|%.`, `[F:,1^%.]` | Fetch, change, swap, store (MINE390, LIGHTS) |
+| Set or toggle a bit in a byte | `[F:,1^%.]` | Fetch, change, swap, store (LIGHTS14) |
 | Count and flag in one byte | `16+` to mark; `,15>` and `,15&` to read | A mine adds 16; the low bits hold the neighbour count (MINES) |
 | Fields in one byte | `5G@K3&`, `5G@K4/;3&` | Mask the low field; shift a higher one down with `4/;` first (IDOL) |
 | Decimal-packed record | `k@100/;`, `k@10/;10M`, `k@10M` | One cell holds three digits of data (SUPERTRK) |
 | Stored value plus 1 | `:1+` to store, `:1-` to print | Lets 0 mean "not yet known" (SUPERTRK) |
-| Fold a key to lower or upper case | `0? 32\|`, `0?95&` | Set or clear bit 5 (KLONDIKE, HANGMAN) |
+| Fold a key to lower or upper case | `0? 32\|`, `0?95&` | Set or clear bit 5 (KLONDIKE, HANGMN28) |
 | Fold letters only | `0? :64>( 32\| 0)` | Leaves Return and the digits alone (BATTLE) |
-| Digit key to its value | `0?15&` | The low nibble of 0–9 is the value (LANDER) |
+| Digit key to its value | `0?:'15&` | The low nibble of 0–9 is the value; `:'` echoes the key first (LANDER) |
 | Any key to 1–3 | `0?:'3&:0=-` | Low two bits, with 0 bumped to 1 (NIM) |
 | Opposite of a 0–3 direction | `2^` | XOR 2 swaps up and down, left and right (FIFTEEN) |
 | Step from a 0–3 heading | `:1&63*1+%2&1%-*` | +1, +64, −1 or −64 on a 64-wide grid, with no table (TRON) |
@@ -228,7 +228,7 @@ v 1(
 | Priority ladder | `q@-1>:( q@m! 0)\ k@-1>:( k@m! 0)\` | Take a win, else a block, else fall through (QUBIC) |
 | If-else on a copied flag | `:( then 0)0=( else 0)` | The flag stays on the data stack, so the then-part must leave the stack as it found it (KLONDIKE, LIGHTS) |
 | Else by NOT | `:( then 0)~( else 0)` | One byte shorter than `0=`; right only on a real −1/0 flag (SUPERTRK) |
-| Choose, then act once | `" CRASH"%5<(;" LANDED"0)$` | Push one string, swap in the other if the test says so, print once (LANDER) |
+| Choose, then act once | `" CRASH"v@5<(;" LANDED"0)$` | Push one string; if the test holds, drop it and push the other; print once (LANDER) |
 | Choose one of three, print once | `" WIN"p@(;" LOSE"0)q@p@&(;" DRAW"0)$` | Each test that holds drops the message on the stack and pushes its own; one `$` prints what is left (DUEL in tweet280) |
 | Last case takes the selector | `:1=( ... 0) :2=( ... 0) 5=( ... 0)` | Every case copies but the last, so nothing is left to drop (BATTLE, QUBIC) |
 | Fast switch with its own break | `:16=:(;;+ 1 0)\` | The body drops flag and selector, works, and pushes 1 for the `\` (TINYBAS) |
@@ -277,7 +277,7 @@ Executing `]` pops whatever address is on the return stack and jumps there, so c
 | Output to screen or buffer | `[E o@0=:(%'0)\ o@. o@1+o!]` | o is 0 for the screen, or the address of the next byte (IDOL) |
 | Save a variable around recursion | `v@{TN;0v@-T}v!` | The caller's value waits on the return stack (TICTAC) |
 | Save the random state | `[Q r@{ ... }r!]` | A deterministic draw inside leaves the game's sequence untouched (IDOL) |
-| Neighbour chain | `[T:F:1-F:1+F:6-F6+F]` | Copy the base before each call; the last call consumes it (LIGHTS) |
+| Neighbour chain | `[T:F:1-F:1+F:6-F6+F]` | Copy the base before each call; the last call consumes it (LIGHTS14) |
 | One mover for two players | `[S{D+1023&:P}':g@+:,%1%.]` | Both players share every line but the steering (DUEL) |
 
 [↑ Back to top](#b8script-idioms-tips-and-tricks)
@@ -302,11 +302,11 @@ The 26 variables hold one cell each; anything bigger lives on the heap, reached 
 
 | Name | Code | What it does |
 | --- | --- | --- |
-| Border ring | `100_b!` for an 8×8 board in 10×10 | Neighbours are fixed offsets and walks stop at the border, with no edge tests (REVERSI, MINES, BATTLE, LIFE, GREED, DUNGEON, MINE390) |
+| Border ring | `100_b!` for an 8×8 board in 10×10 | Neighbours are fixed offsets and walks stop at the border, with no edge tests (REVERSI, MINES, BATTLE, LIFE, GREED, DUNGEON) |
 | A spare column | 9 columns for 7 cells | A step off the right edge lands on a dead cell, never the next row (CONNECT4) |
 | Torus by mask | `1023&` after each step | A 64×16 grid that wraps with one AND (TRON) |
 | Index to row and column | `[P 72/Y]` with `[Y"/~"$]` | One `/` gives row and column in the order `/~` takes them, so a board as wide as the screen needs no arithmetic at all (GREED; ROBOTS and BATTLE add offsets first) |
-| Neighbour offsets as text | `"345EGWXY"+,70-`, `[O"012:<DEF"+,59-a@+]` | The offsets stored as characters plus a bias (MINES, MINE390) |
+| Neighbour offsets as text | `"345EGWXY"+,70-` | The offsets stored as characters plus a bias (MINES) |
 | Allocate and clear in one loop | `0_g!1024 1(0 1_.1-:);` | Takes the heap a byte at a time, storing 0 (TRON, SNAKE, DUEL) |
 | Fixed-width records in a string | `"Sol     Vega    Rigel   "u!` and `%8*+` | The data stays in the program text (TRADER, IDOL, HANGMAN) |
 | Several tables in one block | `996_v!`, then `v@356+`, `v@990+@` | One allocation for everything, addressed as v plus a constant (TINYBAS, IDOL) |
@@ -362,7 +362,7 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Wipe old digits | `s@# " "$`, or `/}` after the number | A shorter number leaves nothing behind (KLONDIKE, BREAKOUT) |
 | A live template | `"v/x;"g!`, then `1x! g@$ 2x! g@$` | The string's address is kept, and each `g@$` prints x as it is then: `v1;` and then `v2;`. The other side of the stored-message gotcha (tests.py) |
 | Status line in one string | `"/~DUNGEON  Level /l  HP /h//20  Gold /g  Potions /p  Sword "$` | Placed, with four variables, in one `$`; `/h//20` prints h, then a slash (DUNGEON) |
-| A buffer as a string | `34b@6+.`, then `b@$` | Store a quote after the text and `$` prints it (HANGMAN, MAZE, IDOL) |
+| A buffer as a string | `34b@6+.`, then `b@$` | Store a quote after the text and `$` prints it (HANGMN28, MAZE, IDOL) |
 | Rub out the last character | `8'32'8'` | BS, space, BS (TINYBAS) |
 | Grid lines by parity | `j@2M( cell line 0) j@2M0=( border line 0)` | One modulo picks the line (FIFTEEN, G2048) |
 
@@ -392,7 +392,6 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Number reader with no variable | `[N0 1(0?:13=\:'48-%10*+1);]` | The total rides on the stack; Return ends it (HILO) |
 | Number reader that ignores other keys | `[N 0n! 1( K c! c@47> c@58<&( c@' n@10*c@48-+n! 0) c@13= ~) n@]` | Only digits echo; K stirs the random seed while waiting (TRADER, SUPERTRK) |
 | Number from a typed line | `[N -3?a! 0n! 1( a@,48- d! d@-1> d@10<& :( n@10*d@+n! a@1+a! 0) ) L n@]` | Walks the line until a non-digit (WUMPUS) |
-| Two digits as an index | `0?48- 10*0?48-+g@+` | Row and column typed straight into a 10×10 grid (MINE390) |
 | Key to a number by position | `"wasd"i@+, c@=` in a loop | The index where the key matches is the command (G2048, ROBOTS, FIFTEEN) |
 | Keypad to a step | `v@1- 3/ 1-d! 1-o!` | Position 0–8 to dy and dx of −1…+1 (ROBOTS) |
 | i j k l as arrow keys | `0?3&"Q'Oy"+,80-` | The step for a 41-wide grid: +1, −41, −1 or +41 (MAZE in tweet280). See below |
@@ -432,7 +431,7 @@ B8Script's screen commands are five escapes inside the strings that `$` prints. 
 
 | Name | Code | What it does |
 | --- | --- | --- |
-| Home, don't clear | `0 0"/~"$` at the top of the draw | Overwrites the old picture in place, with no flicker (LIFE, TETRIS, MINE390) |
+| Home, don't clear | `0 0"/~"$` at the top of the draw | Overwrites the old picture in place, with no flicker (LIFE, TETRIS) |
 | Index straight to the cursor | `[P64/"/~"$]` | `/` leaves the quotient (the row) under the remainder (the column): the order `/~` takes them in (SNAKE, TRON, DUEL, DUNGEON) |
 | Cell to screen place | `[Q2*5+%4*29+Y]` | Scale and offset each half for Y (LIGHTS, BATTLE, G2048) |
 | Clear, then draw | `"/{IDOL/M/J/M/J..."$` | The clear and the first text in one string (IDOL) |
@@ -441,7 +440,7 @@ B8Script's screen commands are five escapes inside the strings that `$` prints. 
 | Redraw only what changed | Compare with a shadow copy, or XOR rows | After a move most of the screen is not sent again (IDOL, G2048, LIGHTS) |
 | Erase, move, redraw | Rub everything out, move it all, draw it all | Movers never overwrite each other's new places (ROBOTS) |
 | Sprites over a map | Draw the map, then place each live entity with the cursor | (DUNGEON) |
-| Paddle that erases its trail | `"  ====  "$` | Blanks at both ends cover the last position (BREAKOUT) |
+| Paddle that erases its trail | `"  ====  "$` | Blanks at both ends cover the last position (BRKOUT28) |
 | Overwrite a line | `"/M/}"$` | CR then clear to the end of the line hides what was shown (SIMON) |
 | Clear a panel | Print a row of spaces on each line | Clears part of the screen, not all of it (IDOL) |
 | Status at the bottom | `17 0"/~score /l"$` | Place, label and value in one string (SNAKE, TRON) |
@@ -450,8 +449,7 @@ B8Script's screen commands are five escapes inside the strings that `$` prints. 
 | Both walls in one string | `j@49j@0"/~\|/~\|"$` | The left and right bars of a frame row with one `$` (BREAKOUT, ROBOTS) |
 | Clear the line, put the border back | `%79"/}/~\|"$` | `/}` also erases the frame's right-hand bar, so a second `/~` in the same string redraws it (IDOL) |
 | Clear a line and step in | `0 0Y"/} "$` | To the start of the line, clear it, and a space: the text starts at column 1 on a clean line (IDOL) |
-| Zero a counter and home the cursor | `0:c!:"/~"$` | `0:` makes two zeros: one is stored in c, and `:` doubles the other into row 0, column 0 (MINE390) |
-| Mark the map and draw from one index | `96 1(1-:32+:g@+1%.32/1+"/~#"$:);` | The bricks lie one map row down, so the same index marks the map byte and, through `32/`, gives the screen row and column (BREAKOUT in tweet280) |
+| Mark the map and draw from one index | `96 1(1-:32+:g@+1%.32/1+"/~#"$:);` | The bricks lie one map row down, so the same index marks the map byte and, through `32/`, gives the screen row and column (BRKOUT28) |
 
 [↑ Back to top](#b8script-idioms-tips-and-tricks)
 
@@ -491,10 +489,10 @@ The games share a few shapes: a frame is one timed key wait, end conditions fold
 | Predict the player | `i@3*p@+9/%;` | Indexes what the player did last time after the same two moves (RPS) |
 | A puzzle by playing it | Shuffle from solved with legal moves | Always solvable (FIFTEEN, LIGHTS) |
 | Walk to a sentinel | `1( t@b@+,o@=0=\ t@d@+t! k@1+k! 1)` | Border bytes match nothing, so the walk stops at the edge (REVERSI) |
-| Bounce | `d@-1*d!`, or `[Z:@0%-%!]` then `dZ` | Negate a velocity (BREAKOUT) |
+| Bounce | `d@-1*d!`, or `[Z:@0%-%!]` then `dZ` | Negate a velocity (BREAKOUT, BRKOUT28) |
 | Smooth motion | `x@4/;` | Positions in quarter cells, drawn in whole ones (COPTER) |
 | Capped gravity | `v@1+:3>(;3 0)` | Falling speeds up to a limit (COPTER) |
-| Flood fill without recursion | Sweep until nothing changes, or keep an explicit stack | Recursion can pass the 64 return-stack entries every build guarantees (MINE390, MINES) |
+| Flood fill without recursion | Sweep until nothing changes, or keep an explicit stack | Recursion can pass the 64 return-stack entries every build guarantees (MINES) |
 | Catch up on arrival | Update a place from the day you last saw it | Nothing runs for places you aren't at (IDOL) |
 | Play again | `K 121=)` | The outer loop's flag is whether the key was y (all) |
 
@@ -503,7 +501,6 @@ The games share a few shapes: a frame is one timed key wait, end conditions fold
 | Name | Code | What it does |
 | --- | --- | --- |
 | Chances | `100R90>`, `4R0=`, `2R(` | 9 in 100, 1 in 4, a coin flip as its own flag (SUPERTRK, IDOL, DUNGEON) |
-| 1 in 8 from high bits | `:r!7168&0=` | No modulo needed (MINE390) |
 | −1 or +1 | `2R2*1-` | (BREAKOUT); `1 10R0=-` gives 1, or 2 one time in ten (G2048) |
 | Wobble by a percentage | `21R10- *100/;+` | A value moves by −10 to +10 percent (IDOL) |
 | 1 to n, other constants | `[Z s@25173*13849+:s! 16/;4095& %/%; 1+]` | Twelve bits from the middle of the state (TINYBAS) |
@@ -542,7 +539,7 @@ Every character costs a byte of memory and a dispatch each time it runs, so the 
 
 | Tip | Example |
 | --- | --- |
-| Keep a counter on the stack | `1-` is 2 bytes; `t@1-t!` is 6 (b8sms) |
+| Keep a counter on the stack | `1-` is 2 bytes; `t@1-t!` is 6 (HILO, REFLEX) |
 | Print one character with `'` | `32'` is 3 bytes; `" "$` is 4 |
 | Put variables in the text | `"Day /d"$` is 9 bytes; `"Day "$d@#` is 10, and each further number saves 4 more (most games) |
 | Place text with the escape, for a few places | `5 10"/~Hi"$` needs no word; past about eight places a cursor word `[Y"/~"$]` is shorter overall (IDOL keeps Y; MAZE and DUEL write the escape) |
@@ -586,7 +583,7 @@ The minus before a digit is the one that bites most, especially in the small gam
 | Counting polls is not a clock | `1?` lasts 15.6 ms on Windows without a high-resolution timer (REFLEX) |
 | The last cell of the last row | Writing it can scroll some terminals; stop one column short (IDOL) |
 | A digit at the start of an editor line | It's taken as a line number; start the line with a space (tutorial) |
-| Stray keys as indexes | Mask them into range, or they write outside a table (LIGHTS) |
+| Stray keys as indexes | Mask them into range, or they write outside a table (LIGHTS14) |
 
 [↑ Back to top](#b8script-idioms-tips-and-tricks)
 
@@ -609,9 +606,8 @@ Develop on a checked build, which stops with an error code, the line and column,
 ## Sources
 
 - [b8script.md](b8script.md): the spec's Idioms, Tips and Don't rely on
-- [tutorial.md](tutorial.md) and [b8sms.md](b8sms.md)
-- [games/](../games/): the commented .TXT sources of the 22 games, their README, and the size-contest games in b8sms, tweet140, tweet280 and longer
-- [design/trading-game.md](design/trading-game.md)
+- [tutorial.md](tutorial.md) and [tweets.md](tweets.md)
+- [games/](../games/): the commented .TXT sources of the 21 full-size games, their README, and the tweet-size games in tweet140 and tweet280
 
 Code quoted from a program was checked against its source; rows that describe a pattern in words have no code to check.
 

@@ -21,6 +21,14 @@ A postfix stack language for 64 KB 8-bit computers, by Robb Bates. Every instruc
 | [`docs/tweets.md`](docs/tweets.md) | Twenty-one tiny games, each in a tweet: ten in 140 characters and eleven in 280, with how each one fits |
 | [`editors/vscode-b8script/`](editors/vscode-b8script/) | Syntax highlighting for Visual Studio Code: words, variables, numbers, strings and their escapes, comments, and the command groups each in their own color |
 
+## Licence
+
+B8Script is copyright 2026 Robb Bates ([@robbbates](https://github.com/robbbates)), under the [PolyForm Noncommercial License 1.0.0](LICENSE.md).
+
+- **Free for any non-commercial use:** run it, study it, change it, port it to your own machine, and share it, changed or not.
+- **The licence and the credit go with every copy,** including the `Required Notice:` line at the top of [`LICENSE.md`](LICENSE.md). Don't present the work, or your changes to it, as anyone else's.
+- **Commercial use needs permission first:** putting it in a product, selling it, or anything else that makes money from it. [Open an issue](https://github.com/robbbates/B8Script/issues) to ask.
+
 > There once was a game small and sweet
 > That Mr. Bates crammed in a tweet
 > With all the fluff stripped

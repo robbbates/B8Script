@@ -48,7 +48,9 @@ class B8 {
     this.rs = [];
     this.inp = Array.from(o.inp || []);      // keys not yet read
     this.out = [];
-    this.error = null;                       // the letter of a checked build's error
+    this.outLimit = Infinity;
+    this.steps = 0;                          // steps run, for the page's 8-bit pace
+    this.error = null;                      // the letter of a checked build's error
     this.ended = false;
     this.why = '';                           // why the run ended, for the page
     this.waitAt = -1;                        // the ? that is waiting, and till when
@@ -165,14 +167,18 @@ class B8 {
     } else this.emits({ 0x60: '\x1b[?25l', 0x7B: '\x1b[H\x1b[J', 0x7C: '\x1b[?25h', 0x7D: '\x1b[K' }[c]);
   }
 
-  // Run up to n steps. Returns 'run' (steps used up), 'wait', 'end' or 'error'.
+  // Run up to n steps. Returns 'run' (steps used up), 'out' (outLimit bytes or
+  // more are waiting in out: the page sets it to pace output to a serial line),
+  // 'wait', 'end' or 'error'.
   run(n = 5000000) {
     try {
       for (let i = 0; i < n; i++) {
         this.at = this.ip;
+        this.steps++;
         this.step();
         if (this.checked && this.ds.length > DS_MAX) throw new Err('S', this.at);
         if (this.checked && this.rs.length > RS_MAX) throw new Err('R', this.at);
+        if (this.out.length >= this.outLimit) return 'out';
       }
       return 'run';
     } catch (e) {

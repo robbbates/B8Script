@@ -12,6 +12,19 @@ Every `.B8S` file is a complete program. Run it with any B8Script runner, the sa
 | `PI.B8S` | **The digits of pi**, by the spigot of Rabinowitz and Wagon, which needs nothing bigger than a 16-bit cell. | Type how many digits, 1 to 250. They come out in groups of ten, fifty to a line. 250 digits take a while on an 8-bit machine. |
 | `MANDEL.B8S` | **The Mandelbrot set**, drawn in characters, 78 × 22, with 16-bit fixed-point arithmetic. | Just run it. Denser characters mean the point took longer to escape; `@` is inside the set. |
 
+## The benchmarks
+
+SIEVE, PI and MANDEL are written for speed, each step measured on the Z80 build. SIEVE and PI keep their published algorithms unchanged, so their times compare with other languages'; MANDEL's arithmetic gives the same result as the plain way for every point, with its squares from a table. Each `.TXT` says how. Times on a Z80 at 7.3728 MHz (an RC2014), with the generic Z80 build, measured in an emulator with the output not counted:
+
+| Run | Time |
+|---|---|
+| SIEVE, 10 passes | 77.0 s |
+| PI, 100 digits | 42.9 s |
+| PI, 250 digits | 251.8 s |
+| MANDEL | 22.1 s |
+
+The time printing takes depends on the terminal: MANDEL prints 1,760 bytes, 1.8 s at 9600 baud, though on a serial line most of that overlaps the computing. MANDEL also needs 2 KB of heap for its table.
+
 ## MON
 
 MON starts where free memory starts, at the heap top, and says that address. At its `*` prompt, addresses and bytes are typed in hex (upper or lower case):

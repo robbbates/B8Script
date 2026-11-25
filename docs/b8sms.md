@@ -56,6 +56,8 @@ These come up again and again.
 - **An unsigned bounds test.** `32767&30<` is true only for 0–29: masking turns a negative number into a large positive one. Breakout clamps its paddle with it, one test instead of two.
 - **Watch the minus sign.** `1-3&` is 1 and then −3. It is the easiest slip to make in code this dense, and easy to miss on review: `0>-10*` looks like "negate, times ten" and is really "push −10". The fix is a space, `1- 3&`. A search of the code outside strings for a minus before a digit finds every case, and each one is either meant or a bug. The stripper (`b8strip.py`) keeps exactly the spaces B8Script needs, and every game here is already in its stripped form.
 
+[↑ Back to top](#b8sms-and-tweet-games)
+
 ## B8SMS: 160 characters
 
 ### Hi-Lo
@@ -186,6 +188,8 @@ This is the deepest game here. The puzzle is linear algebra over GF(2): the orde
 - A count of lit cells, made while drawing, is the win test.
 - `1- 31&` keeps every key inside the grid's 50 bytes, so a stray key can never write over the program. Most other keys just land on a cell or on the border, but z to `~`, Z to `^` and `:` to `>` land on the dead row below and toggle one bottom-row cell alone. That's a cheat, left in rather than spending characters to block it.
 
+[↑ Back to top](#b8sms-and-tweet-games)
+
 ## Tweet 140
 
 The same ten games, each cut by 11 to 21 characters. Most of the savings repeat:
@@ -207,6 +211,8 @@ The files are in [`games/tweet140/`](../games/tweet140/).
 ```
 
 That is Hi-Lo, at 139.
+
+[↑ Back to top](#b8sms-and-tweet-games)
 
 ## Tweet 280
 
@@ -348,6 +354,8 @@ A new 19 × 9 maze every game. You are `@`, in the gap at the top right; get out
 - **The keys are a table.** `key & 3` is 0–3 for l, i, j and k, so it indexes the string `"Q'Oy"`, whose characters minus 80 are the steps +1, −41, −1 and +41. A blocked move becomes a step of 0 (`32=&`), so moving and not moving are the same code.
 - **The catch.** A binary-tree maze has a bias: from any cell, north or east is always open. So the way out is always a staircase down and left of the same length (54 steps), and the maze's difficulty is all in its dead ends. Starting at the top right is what makes it a maze at all: from the bottom left, "always go up or right" would walk straight out. A less biased algorithm, such as sidewinder, doesn't fit in what's left.
 
+[↑ Back to top](#b8sms-and-tweet-games)
+
 ## Longer: MINE390
 
 Minesweeper, with the flood fill that opens blank areas. It doesn't fit in 280, and is here as an example of what a little more room buys. It is 390 characters. The repository's own Minesweeper, `MINES.B8S`, is the full-size version.
@@ -363,6 +371,8 @@ An 8 × 8 board with about one mine in eight. Type a row digit, then a column di
 - **Counts aren't stored.** `C` adds up the mine bits of the eight neighbours whenever a cell is drawn.
 - **The flood fill is the display.** `D` draws the board, and whenever it draws an open cell with a count of 0, it opens all eight neighbours (`E`). It returns how many cells are open. The game redraws until that number stops changing, so you can watch the flood spread. A recursive fill would be shorter to write, but on a 64-cell board it can need about 130 return-stack entries, and real builds have about 110.
 
+[↑ Back to top](#b8sms-and-tweet-games)
+
 ## More ideas
 
 Most of the ideas from the first round became the 280 games: Nim 3-5-7, Hamurabi (Kingdom), the one-key game (Copter), and the three I had called out of reach at 160 (Snake, Tron against the computer, full Mastermind), and a maze. Ones still open:
@@ -371,3 +381,5 @@ Most of the ideas from the first round became the 280 games: Nim 3-5-7, Hamurabi
 - **Bagels (Fermi/Pico) at 160.** Guess a 3-digit code and learn how many digits are in the right place. Simon's replay trick stores the code for free.
 - **Hurkle at 160.** Hi-Lo in 2D on a 10 × 10 grid, with hints like "NE".
 - **2048, Battleship, Sokoban.** Probably over 280 each, but untried.
+
+[↑ Back to top](#b8sms-and-tweet-games)

@@ -28,7 +28,22 @@ Every game in [`games/`](../games/) and every program in [`programs/`](../progra
   | The heap | after the program, up to FF00h |
 
   So a program of 60 KB fits.
-- **Timing:** `n?` waits n milliseconds by the clock. Between waits a program runs as fast as the browser can run it.
+- **The serial line:** most B8Script machines talk to their terminal over a serial line, and the speed menu sets one: 9600 baud, 115200 baud (where it starts), or full speed, with no line at all.
+  - A byte takes 10 bits (a start bit, 8 data bits and a stop bit), so 960 bytes a second at 9600 baud and 11,520 at 115200.
+  - While the line is busy, the program waits, as it would for a real UART that holds one byte while sending another. So a game's frame wait starts only once its drawing has gone out.
+  - The choice takes effect at once, even in a running program, and the page remembers it.
+- **8-bit CPU:** runs B8Script at the pace of a real 8-bit machine, about 24,600 steps a second.
+  - That's a Z80 at 7.3728 MHz (an RC2014), at the average of about 300 clock cycles a step measured on the Z80 build.
+  - It's an average, so one program's time can differ: a program of cheap steps (stack moves, `+`) runs faster on the real machine, and one heavy on `*` and `/` slower.
+
+    | Program | Here | On the Z80 build |
+    |---|---|---|
+    | MANDEL | 27 s | 22 s |
+    | PI, 250 digits | 216 s | 252 s |
+    | SIEVE, 10 passes | 106 s | 77 s |
+  - Off, a program runs as fast as the browser can run it.
+  - Like the line speed, it takes effect at once and is remembered.
+- **Timing:** `n?` waits n milliseconds by the clock.
 - **The screen** is 80 × 24, and understands the ANSI sequences the console escapes send.
 
 ## Files
@@ -42,4 +57,4 @@ Every game in [`games/`](../games/) and every program in [`programs/`](../progra
 
 The tests are in [`B8Script-interpreters/testing/`](../B8Script-interpreters/testing/):
 - **`test_web.py`** runs the test suite, Tiny BASIC, the programs and the scripted games on `b8s.js` under Node, and checks every run against `ref.py`, byte for byte.
-- **`test_page.js`** drives the page in Chromium (Playwright), as a computer and as phones: the screen, typing, the phone's keyboard, the pad, `n?`'s clock, the break key and checked reports.
+- **`test_page.js`** drives the page in Chromium (Playwright), as a computer and as phones: the screen, typing, the phone's keyboard, the pad, the serial line's speeds, the 8-bit CPU, `n?`'s clock, the break key and checked reports.

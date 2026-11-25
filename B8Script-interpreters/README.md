@@ -13,6 +13,23 @@ ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences (Z
 
 The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, and `b8s-6502-zp.asm` is a smaller interpreter that keeps it in zero page.
 
+**Contents**
+
+- [Sizes (bytes, measured)](#sizes-bytes-measured)
+- [Files](#files)
+- [The language](#the-language)
+- [Tuning `n?` under CP/M](#tuning-n-under-cpm)
+- [Building](#building)
+- [Layout rules the assembler can't check](#layout-rules-the-assembler-cant-check)
+- [Generic machine interface (edit the equates)](#generic-machine-interface-edit-the-equates)
+- [The break key](#the-break-key)
+- [The Z80 line editor (EDITOR = 1)](#the-z80-line-editor-editor--1)
+- [The Windows builds (`win32/`)](#the-windows-builds-win32)
+- [Checked builds](#checked-builds)
+- [Machine-code contracts (the grave)](#machine-code-contracts-the-grave)
+- [The two 6502 interpreters](#the-two-6502-interpreters)
+- [How they were tested](#how-they-were-tested)
+
 ## Sizes (bytes, measured)
 
 **Generic ROM images.** `ANSI = 0` is the default (the console escapes call the machine's routines); `ANSI = 1` sends ANSI sequences.
@@ -47,6 +64,8 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 - The CP/M size is the .COM file, which includes the program loader.
 - Where the bytes go, on the Z80: the console escapes take about 60 bytes with `ANSI = 0` and 110 with `ANSI = 1`; the break key 60 to 80 (about 30 of them the break-off cell and its wait for a second Ctrl-C); a checked build's checks and report about 380 more; the line editor about 520 (generic) or 630 (CP/M, with its file commands). The CP/M builds reach their five most-used routines with CALL and jumps instead of one-byte RSTs (page zero is the system's), which costs them about 60 bytes on the Z80 and 80 to 100 on the 8080.
 
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
+
 ## Files
 
 | File | What it is |
@@ -59,6 +78,8 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | `*.lst` | The assembler's listings |
 | `TIMING.B8S` | Times `n?` on your machine, to tune the CP/M builds' count (see The language) |
 
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
+
 ## The language
 
 The builds follow [`docs/b8script.md`](../docs/b8script.md) (2026-11-24). What the spec leaves to the implementation:
@@ -69,6 +90,8 @@ The builds follow [`docs/b8script.md`](../docs/b8script.md) (2026-11-24). What t
 - The CP/M builds print through BDOS 6, which can't print the bytes FFh and FEh: to BDOS 6, FFh means "read a key", and in Digital Research's CP/M 2.2 BDOS (an undocumented case, also in CP/M 3) FEh means "is a key waiting?". Neither reaches the screen. Found by running the test suite under real CP/M 2.2 (z80pack); see How they were tested.
 - **`n?` under CP/M** has no clock to go by: it counts keyboard checks (BDOS 6 calls), 4 a millisecond, which suits an RC2014 with RomWBW and ZPM3. On another machine it may run fast or slow: see Tuning `n?` under CP/M.
 - The memory maps, stack sizes, heap limits and system addresses are in the spec's appendices.
+
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
 ## Tuning `n?` under CP/M
 
@@ -117,6 +140,8 @@ CP/M has no clock a program can count on, so the CP/M builds time `n?` by counti
 
 Two other waits are built from the same count: Ctrl-C's 250 ms wait for a second Ctrl-C, and the editor's 5 ms wait after Esc. The patch doesn't change them, and they don't need it: a little off either way does no harm.
 
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
+
 ## Building
 
 The sources use asm80 1.11.14, from npm (`npm install -g asm80@1.11.14`):
@@ -145,6 +170,8 @@ asm80 has some quirks the sources work around:
 - `abs` is a function name and can't be a label.
 - Version 0.9.x assembles the inside of a false `IF`, so it can't build these.
 
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
+
 ## Layout rules the assembler can't check
 
 To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6809 and the zero-page 6502 keep one byte per punctuation character and work the rest of the handler's address out from the character's place in the table. That puts rules on where handlers sit:
@@ -155,6 +182,8 @@ To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6
 - **Z80, 8080:** the RST routines must sit at their vectors.
 
 `testing/chktab.py` (Z80, 8080), `testing/chktab09.py` (6809) and `testing/chktab6502.py` check all of this on the listings. Run them after any change; each says how many bytes are to spare. `b8s-6502.asm` has a table of whole addresses and no such rules.
+
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
 ## Generic machine interface (edit the equates)
 
@@ -181,6 +210,8 @@ To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6
 - The CP/M builds don't touch page zero: there the same routines are reached with CALL and JP, and on the Z80 "next character" is `JP (IX)`, with IX holding its address. Page zero is the system's: RomWBW's BIOS calls itself through RST 08h, and some systems take interrupts through RST 1 to RST 6.
 - The Z80 builds don't use the alternate registers: the return-stack pointer is IY. An interrupt routine may use the alternate registers freely; it must save IX and IY if it uses them, as it would any register.
 
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
+
 ## The break key
 
 Every build stops a running program on Ctrl-C. An unchecked build prints nothing and goes to EXIT (or back to the editor); a checked build reports `B`.
@@ -189,6 +220,8 @@ Every build stops a running program on Ctrl-C. An unchecked build prints nothing
 - **Other keys.** A key the check reads is held for the next `?`. A newer key replaces it, and `?` takes the held key before it looks at KEY. So one key typed ahead is kept, not more.
 - **The break-off cell** is the byte at offset 7Bh of the letter page: 827Bh on the generic Z80, 8080 and 6809, $047B on the 6502. A program that stores a non-zero byte there gets Ctrl-C as key 03h. When it does, the interpreter waits about 250 ms (250 x `MSLOOP` calls of KEY) for one more key: a second Ctrl-C stops the program all the same, and any other key becomes the held key. Each build clears the cell when it starts; the editor clears it before every line.
 - **The held key** is a cell of the interpreter's own. Most builds keep it in the byte below the break-off cell; the appendices say where.
+
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
 ## The Z80 line editor (EDITOR = 1)
 
@@ -244,6 +277,8 @@ A command key ends the line too, and takes what was typed before it as its argum
 
 The editor adds 520 bytes to the unchecked generic build and 629 to the CP/M one (523 and 634 to the checked ones).
 
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
+
 ## The Windows builds (`win32/`)
 
 Four programs for the Windows command shell, in 32-bit x86 assembly: `B8SWIN.EXE`, `B8SWINC.EXE` (checked), `B8SWINE.EXE` (with the line editor) and `B8SWINEC.EXE` (editor, checked). A 32-bit program runs on every Windows, the 64-bit and ARM ones included.
@@ -264,6 +299,8 @@ B8SWINE PROG.B8S
 - **The editor's files.** A name typed before ^R or ^W is a Windows path, as typed, and stays the name until another is typed. Nothing is said if a file can't be read or written: a read then gives no program.
 - **The header** is laid out by hand in the source, by the documented rules and nothing clever: one section, 512-byte file alignment, imports from `kernel32.dll` only (`GetStdHandle`, `GetConsoleMode`, `SetConsoleMode`, `GetCommandLineA`, `CreateFileA`, `ReadFile`, `WriteFile`, `WaitForMultipleObjects`, `CreateWaitableTimerExW`, `SetWaitableTimer`, `ReadConsoleInputA`, `ExitProcess`, and `CloseHandle` in the editor builds). `testing/chkpe.py` checks every file.
 - **Dispatch.** One byte per punctuation character, as on the Z80, but with a single range: every handler starts within 255 bytes of one address, and the assembler stops if one doesn't.
+
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
 ## Checked builds
 
@@ -305,6 +342,8 @@ R:0
 - **Unchecked builds and `[`.** A letter defines; anything else is taken as the space.
 - **Don't treat a checked run as proof.** What an unchecked build does with the same mistake is not defined. One example: an unclosed string in an unchecked build is skipped on through memory until some quote turns up.
 
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
+
 ## Machine-code contracts (the grave)
 
 - **Z80 / 8080:** as in the spec. Entered by CALL, with the data cells above the return address. The code must keep BC. On return, the top cell becomes TOS. The loader appends C9h.
@@ -318,6 +357,8 @@ R:0
   - U points at the top data cell, which becomes TOS on return. Cells on the data stack are big-endian (6809 order); cells in memory stay little-endian, as the spec says.
   - The code may change A, B, X, CC and U (consistently). It must keep Y (the IP) and DP, and leave S balanced.
 
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
+
 ## The two 6502 interpreters
 
 | | `b8s-6502.asm` | `b8s-6502-zp.asm` |
@@ -328,6 +369,8 @@ R:0
 | Size (`ANSI = 0`) | 1,208 / 1,707 checked | 1,155 / 1,673 checked |
 
 The zero-page one is smaller because a cell that holds an address is used as the pointer where it lies (`(0,X)`), a drop is two `INX`, and the 16-bit operators work a byte at a time through one short routine called twice. Machine code written for one needs changing for the other: see the contracts below.
+
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 
 ## How they were tested
 
@@ -345,5 +388,6 @@ The six CP/M .COM files have also run under real CP/M 2.2, Digital Research's ow
 
 The Windows builds run in the Unicorn emulator (`testing/harness_win32.py`): the .EXE is mapped as Windows would map it, and the dozen `kernel32` calls it makes are modelled. They go through the same suite as the others, the break-key tests and the editor sessions included, plus a few tests of their own (the report on standard error, redirected input, the arrow keys, the command line). That tests the interpreter, and the header against the rules; it can't show that Windows itself accepts the file, or that the model of each call is right.
 
-The other twenty games are also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`). Each game is in two files, `NAME.TXT` with comments that explain it and `NAME.B8S` stripped from it (`testing/b8strip.py`), and both are run, and the reference plays scripted games of the newest twelve (Wumpus, Robots, 2048, Minesweeper, Breakout, Qubic, Klondike, Lights Out, Fifteen, Greed, Reversi and Battleship) to a win, a loss or a known message (`testing/test_games.py`). The test setup is in `testing/` (see its README).
+Every game, and every program in `programs/` but MON, is also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`); SIEVE, PI, MANDEL and MON are run in full, and MON's R with each CPU's own return instruction (`testing/test_programs.py`). Each game is in two files, `NAME.TXT` with comments that explain it and `NAME.B8S` stripped from it (`testing/b8strip.py`), and both are run, and the reference plays scripted games of the newest twelve (Wumpus, Robots, 2048, Minesweeper, Breakout, Qubic, Klondike, Lights Out, Fifteen, Greed, Reversi and Battleship) to a win, a loss or a known message (`testing/test_games.py`). The test setup is in `testing/` (see its README).
 
+[↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)

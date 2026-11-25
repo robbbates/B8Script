@@ -13,6 +13,7 @@ Everything here runs from this folder.
 ```
 ./build.sh Z80   ../z80/b8s-z80.asm   out/z80       # all four variants
 VARIANTS=$'0 0 1\n0 1 1\n1 0 1\n1 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80   # and the four editor builds
+FAST=1 ./build.sh Z80 ../z80/b8s-z80.asm out/z80  # the four speed builds (b8s-z80-fast-...)
 python3 run_z80.py z80 out/z80                     # PASS/FAIL per variant
 ANSI=1 VARIANTS=$'0 0\n0 1\n0 0 1\n0 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80a   # the generic ones with ANSI = 1
 python3 run_z80.py z80 out/z80a                    # (do the same for each CPU)
@@ -73,7 +74,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `../../games/` | The games, at the root of the repository (its README says how to play each one). The programs are each in two files: `NAME.TXT`, with comments that explain how it works, and `NAME.B8S`, the same code stripped of comments and white space. `games/b8sms/`, `games/tweet140/`, `games/tweet280/` and `games/longer/` hold the tiny games, which are already stripped and have no `.TXT` |
 | `../../programs/` | Programs that aren't games, in the same two files: Tiny BASIC (`TINYBAS.B8S` is part of the suite), MON, SIEVE, PI and MANDEL |
 | `b8strip.py` | Strips a program of comments and white space (but keeps a comment that starts with `!`), keeping a space only where B8Script needs one (`b8strip.py ../../games/NAME.TXT ../../games/NAME.B8S` after editing a game). `--same A B` checks that two files hold the same code |
-| `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files next to each source |
+| `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files next to each source, and the Z80 speed builds to `../fast/` |
 | `patchinfo.py` | Where n?'s timing count sits in each CP/M .COM, to patch it for a machine whose BDOS is faster or slower (see `../TIMING.B8S`) |
 | `cpmsim.py` | Runs the CP/M builds under real CP/M 2.2 (Digital Research's BDOS and CCP) in z80pack's `cpmsim`: `cpmsim.py suite out B8SZ80 B8SZ80C` runs the suite's programs and compares each output with `ref.py`'s; `cpmsim.py type out STEP...` types at CP/M, for the editors. `-8` runs on an 8080 instead of the Z80 (which traps undocumented opcodes). Needs z80pack (set `Z80PACK`) and cpmtools; see its header. Not part of the regular run: it takes about ten minutes a build |
 

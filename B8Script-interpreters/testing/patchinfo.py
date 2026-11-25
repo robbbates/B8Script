@@ -13,7 +13,8 @@ import re, sys, os
 out = sys.argv[1] if len(sys.argv) > 1 else 'out'
 NAMES = [('z80/b8s-z80-cpm', 'B8SZ80.COM'), ('z80/b8s-z80-cpm-chk', 'B8SZ80C.COM'),
          ('z80/b8s-z80-cpm-ed', 'B8SZ80E.COM'), ('z80/b8s-z80-cpm-ed-chk', 'B8SZ80EC.COM'),
-         ('8080/b8s-8080-cpm', 'B8S8080.COM'), ('8080/b8s-8080-cpm-chk', 'B8S8080C.COM')]
+         ('8080/b8s-8080-cpm', 'B8S8080.COM'), ('8080/b8s-8080-cpm-chk', 'B8S8080C.COM'),
+         ('z80/b8s-z80-fast-cpm', 'B8SZ80F.COM'), ('z80/b8s-z80-fast-cpm-chk', 'B8SZ80FC.COM')]
 print(f'{"file":13} {"offset":>7} {"address":>8} {"value":>6} {"SAVE pages":>11} {"last address":>13}')
 for base, name in NAMES:
     lst = os.path.join(out, base + '.lst')

@@ -2054,7 +2054,7 @@ ptab:   PT h_store      ; !
 ;  dispatcher (NEXTF: MOVZX EAX,BYTE [ESI] / INC ESI / JMP [dtab+EAX*4]) is
 ;  `next` and is inline at the end of the fast build's own handlers. Those
 ;  are: one per letter and digit, which knows its cell or its value, and the
-;  commonest punctuation (fs_). The rest of the table is the regular
+;  commonest punctuation (fs_). The rest of the table is the shared
 ;  handlers, which end with JMP EBP, into `next`.
 ;
 ;  A digit's handler pushes its value; the character after it goes through
@@ -2121,7 +2121,7 @@ fv%[i]: cmp     byte [esi],'@'
 %assign i i+1
 %endrep
 
-; The commonest punctuation, written for the fast build (as the regular
+; The commonest punctuation, written for the fast build (as the shared
 ; handlers, but with the dispatcher inline; and '%' without XCHG with
 ; memory, which is locked, and slow).
 fs_add: pop     edx                     ; +

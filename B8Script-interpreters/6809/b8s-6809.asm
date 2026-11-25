@@ -149,7 +149,7 @@ PROG    EQU     8300h           ; where the loader puts the program text
 ROM     EQU     0F000h-FAST*1000h ; where the image starts (the fast build: E000h)
 HEAPLIM EQU     ROM/256-QK      ; the heap must stay below F000h (a page);
                                 ;   with base EF00h, the fast build DF00h
-CPAGE   EQU     HEAPLIM         ; the skip cache's page (base and the speed
+CPAGE   EQU     HEAPLIM         ; the skip cache's page (base and the fast
                                 ;   build): the page at the heap limit
 
 MSLOOP  EQU     20              ; n? inner loop count for about 1 ms; tune it

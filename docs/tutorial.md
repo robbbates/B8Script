@@ -27,16 +27,16 @@ You don't need any programming experience. You do need a willingness to read thi
 
 ### Getting B8Script running
 
-The interpreters live in this repo, in the [`B8Script-interpreters`](../B8Script-interpreters) folder. On Windows, the easiest one to learn with is **`B8SWINEC.EXE`**, in the `win32` folder:
+The interpreters live in this repo, in the [`B8Script-interpreters`](../B8Script-interpreters) folder. On Windows, the easiest one to learn with is **`B8SE.EXE`**, in the `win32/base` folder:
 
 - the **E** means it has a line editor, so you can type a line and it runs straight away;
-- the **C** means it's a *checked* build, so when you make a mistake it tells you what went wrong instead of doing something strange.
+- it's a *checked* build, so when you make a mistake it tells you what went wrong instead of doing something strange. (An unchecked build has a **U** at the end of its name.)
 
-Open a command window in that folder and type `B8SWINEC`. Now you can type B8Script and press Enter to run it.
+Open a command window in that folder and type `B8SE`. Now you can type B8Script and press Enter to run it.
 
 **One catch: start lines with a space.** In the editor, a line that begins with a digit is treated as a line number for a stored program. So when you try `2 3+#`, type it as ` 2 3+#`, with a space in front. Spaces are ignored by B8Script, so this costs nothing.
 
-You can also write a program in any text editor, save it as `HELLO.B8S`, and run it with `B8SWINC HELLO.B8S`. On other machines (CP/M, a 6502 or Z80 homebrew), see the appendices in the [spec](b8script.md).
+You can also write a program in any text editor, save it as `HELLO.B8S`, and run it with `B8S HELLO.B8S`. On other machines (CP/M, a 6502 or Z80 homebrew), see the appendices in the [spec](b8script.md).
 
 If a program runs away and won't stop, press **Ctrl-C**. That works in every version.
 
@@ -220,7 +220,7 @@ Two catches. It only works for a plain variable: to print a sum, or anything wor
 
 Adding one to a counter is so common that you'll see `i@1+i!` everywhere. Remember it; the loops in Lesson 6 use it.
 
-**Store before you read.** A variable starts out holding whatever junk was in memory, so always give it a value before you use it. The checked builds set them all to 0, but the small fast builds don't.
+**Store before you read.** A variable starts out holding whatever junk was in memory, so always give it a value before you use it. The checked builds set them all to 0, but the unchecked builds don't.
 
 **Challenge 4.** A rectangle is 12 wide and 7 high. Store those in `w` and `h`, then print `Area: 84` by working it out from the variables. Then print `12 by 7` using the shortcut.
 
@@ -428,7 +428,7 @@ Type 21 and press Enter, and it prints `Double that is 42`. (`:+` doubles: copy,
 
 ## Final project: Guess the number
 
-You now know enough to read a real game. This one is from the B8Script spec: the computer picks a number from 1 to 99, and you guess it with hints of "higher" and "lower". Save it in a text editor as `GUESS.B8S` and run it with `B8SWINC GUESS.B8S`.
+You now know enough to read a real game. This one is from the B8Script spec: the computer picks a number from 1 to 99, and you guess it with hints of "higher" and "lower". Save it in a text editor as `GUESS.B8S` and run it with `B8S GUESS.B8S`.
 
 ```text
 [M/%;]

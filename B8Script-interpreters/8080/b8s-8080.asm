@@ -295,7 +295,7 @@ DTPG    EQU     0
         .macro  XCHGC           ; (XCHG in a checked build)
         DS      CHECKED,0EBh
         .endm
-        .macro  NEXTQ           ; (the speed-ups' tails: NEXT, or in the speed
+        .macro  NEXTQ           ; (the speed-ups' tails: NEXT, or in the fast
         DS      (1-CPM)*(1-FAST),0F7h ; build the dispatcher inline)
         DS      CPM*(1-FAST),0C3h
         DS      CPM*(1-FAST),ANXT&0FFh

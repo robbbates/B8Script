@@ -9,7 +9,7 @@ the rest. So each handler must start where its index says, which the
 assembler can't check. For each page this prints how many bytes are to spare
 before its last handler would start too late.
 A listing with no N1 has the whole-address table, which has no such rules,
-and so has a speed build (FAST = 1), which dispatches through a full table.
+and so has the fast build (SPEED = 2), which dispatches through a full table.
 """
 import re, sys
 
@@ -18,7 +18,7 @@ def check(lst):
     sym = {m.group(1): int(m.group(2), 16)
            for m in re.finditer(r'^([A-Z_0-9.]+):\s+([0-9A-F]{4}) DEFINED', text, re.M)}
     name = lst.split('/')[-1]
-    if sym.get('FAST') == 1:        # the speed build dispatches through a full table: no rules
+    if sym.get('FAST') == 1:        # the fast build dispatches through a full table: no rules
         print(f'{name:28} ok   (speed build: a full table, no layout rules)')
         return 0
     if 'N1' not in sym:

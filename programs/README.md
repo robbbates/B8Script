@@ -2,7 +2,7 @@
 
 Programs for B8Script that aren't games: a BASIC interpreter, a memory monitor, a benchmark and two classic demonstrations of arithmetic. The games are in [`games/`](../games/).
 
-Every `.B8S` file is a complete program. Run it with any B8Script runner, the same way as a game (`B8SWIN PI.B8S`, `B8SZ80 PI.B8S`; see [`games/README.md`](../games/README.md#running-a-game)). Each one also has a `NAME.TXT` with comments that explain how it works. It runs the same as the `.B8S`, which is that file with the comments and spaces stripped out.
+Every `.B8S` file is a complete program. Run it with any B8Script runner, the same way as a game (`B8S PI.B8S`, on Windows or CP/M; see [`games/README.md`](../games/README.md#running-a-game)). Each one also has a `NAME.TXT` with comments that explain how it works. It runs the same as the `.B8S`, which is that file with the comments and spaces stripped out.
 
 | File | Program | How to use it |
 |---|---|---|
@@ -14,7 +14,7 @@ Every `.B8S` file is a complete program. Run it with any B8Script runner, the sa
 
 ## The benchmarks
 
-SIEVE, PI and MANDEL are written for speed, each step measured on the Z80 build. SIEVE and PI keep their published algorithms unchanged, so their times compare with other languages'; MANDEL's arithmetic gives the same result as the plain way for every point, with its squares from a table. Each `.TXT` says how. Times on a Z80 at 7.3728 MHz (an RC2014), with the generic Z80 build, measured in an emulator with the output not counted:
+SIEVE, PI and MANDEL are written for speed, each step measured on the Z80 build. SIEVE and PI keep their published algorithms unchanged, so their times compare with other languages'; MANDEL's arithmetic gives the same result as the plain way for every point, with its squares from a table. Each `.TXT` says how. Times on a Z80 at 7.3728 MHz (an RC2014), with the small generic Z80 build, measured in an emulator with the output not counted:
 
 | Run | Time |
 |---|---|

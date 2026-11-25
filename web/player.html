@@ -123,6 +123,7 @@ body.touch #keys, body.showkeys #keys { display: block; }
   <select id="speed" aria-label="Speed" title="The serial line to the terminal: how fast output goes">
     <option value="9600">9600 baud</option><option value="115200">115200 baud</option><option value="0">Full speed</option>
   </select>
+  <button id="cpu" title="Run at the pace of a real 8-bit machine: about 24,600 steps a second, a Z80 at 7.3728 MHz">8-bit CPU</button>
   <button id="chk" title="Run as a checked build: an error stops the program with a report">Checked</button>
   <button id="keysb" title="Show the on-screen keys">Keys</button>
   <button id="helpb" aria-label="Help">?</button>
@@ -199,7 +200,8 @@ body.touch #keys, body.showkeys #keys { display: block; }
       <li>There is no CPU here, so machine code can't run: a grave that would execute code stops the program. The hex loader still stores bytes, and writes the RET byte C9h.</li>
       <li>Memory: the letter cells at 0100h, the line buffer at 0200h, the program at 0400h, then the heap, up to FF00h.</li>
       <li>The speed menu sets the serial line to the terminal, as on most B8Script machines: 9600 or 115200 baud, or full speed, with no line at all. A byte takes 10 bits (start, 8 data, stop), and while the line is busy the program waits, as it would for a real UART. It takes effect at once, even in a running program.</li>
-      <li><code>n?</code> waits n milliseconds by the clock. Apart from its output, a program runs as fast as the browser can run it.</li>
+      <li><b>8-bit CPU</b> runs B8Script at the pace of a real 8-bit machine: about 24,600 steps a second, as a Z80 at 7.3728 MHz (an RC2014) does. Off, it runs as fast as the browser can. It too takes effect at once.</li>
+      <li><code>n?</code> waits n milliseconds by the clock.</li>
       <li>The screen is 80 × 24 and understands the ANSI sequences the console escapes send.</li>
     </ul>
   </div>
@@ -286,7 +288,8 @@ const term = {
   text(s) { this.write(Array.from(s, ch => ch.charCodeAt(0) & 0xFF)); },
 };
 const esc = { 38: '&amp;', 60: '&lt;', 62: '&gt;' };
-function render() {
+function render() { draw(); requestAnimationFrame(render); }
+function draw() {
   if (term.dirty) {
     term.dirty = false;
     let h = '';
@@ -300,7 +303,6 @@ function render() {
     }
     $('screen').innerHTML = h;
   }
-  requestAnimationFrame(render);
 }
 
 // The screen fills its space: the largest font that fits 80 x 24.
@@ -361,6 +363,17 @@ function linePump(now) {               // show the bytes whose time has come
   if (n) { term.write(line.q.slice(0, n)); line.q.splice(0, n); }
 }
 
+// The 8-bit CPU: a step budget that fills at a real machine's pace. A Z80 at
+// 7.3728 MHz (an RC2014) takes about 300 clock cycles a step, measured on the
+// Z80 build, so about 24,600 steps a second. The budget is spent in batches of
+// about 10 ms, and can't save up more than 20 ms, so that after a wait the
+// program doesn't race to catch up.
+const RATE = 7372800 / 300 / 1000;    // steps a millisecond
+const BATCH = 10 * RATE, SAVE = 20 * RATE;
+let cpu = store.get('cpu') === '1';
+const budget = { n: 0, at: 0 };
+function refill(now) { budget.n = Math.min(SAVE, budget.n + (now - budget.at) * RATE); budget.at = now; }
+
 let core = null, scheduled = false, timer = 0, startedAt = 0, result = null;
 const chan = new MessageChannel();
 chan.port1.onmessage = tick;
@@ -369,7 +382,8 @@ let checked = store.get('checked') !== '0';
 function status(s) { $('st').textContent = s; }
 let shown = '';                        // the running program's name, for the status bar
 function where() {
-  $('where').textContent = shown ? shown + (checked ? ' (checked)' : '') + ' · ' + SPEEDS[baud] : SPEEDS[baud];
+  const speed = SPEEDS[baud] + (cpu ? ' · 8-bit CPU' : '');
+  $('where').textContent = shown ? shown + (checked ? ' (checked)' : '') + ' · ' + speed : speed;
 }
 function run(src, name) {
   halt();
@@ -382,6 +396,7 @@ function run(src, name) {
   if (baud) core.outLimit = 1;          // stop at each byte, to wait for the line
   result = null;
   startedAt = performance.now();
+  budget.n = BATCH; budget.at = startedAt;
   shown = name; where();
   status('Running');
   kick();
@@ -403,18 +418,31 @@ function tick() {
   for (;;) {
     let now = performance.now();
     linePump(now);
-    // the interpreter runs while the UART has room
+    if (cpu && line.q.length >= 2) budget.at = now;   // waiting at the UART earns no steps
+    // the interpreter runs while the UART has room, and (8-bit) while the budget lasts
+    let cpuWake = Infinity;
     if (!result && line.q.length < 2) {
-      const st = core.run(baud ? 2000 : 20000);
-      flush(performance.now());
-      if (st === 'end' || st === 'error') result = st;
-      else if (st !== 'wait') { if (performance.now() >= end) { status('Running'); kick(); return; } continue; }
+      let n = baud ? 2000 : 20000;
+      if (cpu) {
+        refill(now);
+        if (budget.n < 1) {
+          n = 0; cpuWake = now + (BATCH - budget.n) / RATE;
+        } else n = Math.min(n, Math.floor(budget.n));
+      }
+      if (n) {
+        const s0 = core.steps;
+        const st = core.run(n);
+        if (cpu) budget.n -= core.steps - s0;
+        flush(performance.now());
+        if (st === 'end' || st === 'error') result = st;
+        else if (st !== 'wait') { if (performance.now() >= end) { status('Running'); kick(); return; } continue; }
+      }
     }
     if (result && !line.q.length) { done(result); return; }
     // nothing to do until the line sends a byte, a timed ? runs out, or a key comes
     now = performance.now();
-    let wake = Infinity;
-    if (line.q.length) wake = line.next;
+    let wake = cpuWake;
+    if (line.q.length) wake = Math.min(wake, line.next);
     if (!result && line.q.length < 2 && core.waitAt >= 0) wake = Math.min(wake, core.waitUntil);
     if (wake === Infinity) { status(core.line ? 'Waiting for a line' : 'Waiting for a key'); return; }
     if (now >= end) { kick(); return; }
@@ -424,6 +452,7 @@ function tick() {
   }
 }
 function done(st) {
+  draw();                              // the screen is up to date when the status says it ended
   const t = ((performance.now() - startedAt) / 1000).toFixed(1) + ' s';
   if (st === 'error') status('Stopped: error ' + core.error + ' (the report is on the screen) after ' + t);
   else if (core.why === 'mc') status('Stopped: machine code can\'t run in a browser');
@@ -540,6 +569,9 @@ if (store.get('pad') === '1') { document.body.classList.add('pad'); $('padb').cl
 function setChecked(v) { checked = v; $('chk').classList.toggle('on', v); store.set('checked', v ? '1' : '0'); }
 setChecked(checked);
 $('chk').onclick = () => { setChecked(!checked); focusKeys(); };
+function setCpu(v) { cpu = v; $('cpu').classList.toggle('on', v); store.set('cpu', v ? '1' : '0'); where(); }
+setCpu(cpu);
+$('cpu').onclick = () => { budget.n = BATCH; budget.at = performance.now(); setCpu(!cpu); focusKeys(); kick(); };
 $('speed').value = String(baud);
 $('speed').onchange = () => {
   // takes effect at once, even in a running program

@@ -49,6 +49,7 @@ class B8 {
     this.inp = Array.from(o.inp || []);      // keys not yet read
     this.out = [];
     this.outLimit = Infinity;
+    this.steps = 0;                          // steps run, for the page's 8-bit pace
     this.error = null;                      // the letter of a checked build's error
     this.ended = false;
     this.why = '';                           // why the run ended, for the page
@@ -173,6 +174,7 @@ class B8 {
     try {
       for (let i = 0; i < n; i++) {
         this.at = this.ip;
+        this.steps++;
         this.step();
         if (this.checked && this.ds.length > DS_MAX) throw new Err('S', this.at);
         if (this.checked && this.rs.length > RS_MAX) throw new Err('R', this.at);

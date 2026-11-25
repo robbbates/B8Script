@@ -12,7 +12,7 @@ The files are in `games/` (at the root of the repository): [`tweet140/`](../game
 | Game | 140 | Kind | You press |
 |---|---|---|---|
 | [Hi-Lo](#hi-lo) | 139 | Guessing | Digits, Return |
-| [Lander](#lander) | 136 | Physics, turn by turn | 0–9 |
+| [Lander](#lander) | 135 | Physics, turn by turn | 0–9 |
 | [Nim](#nim) | 137 | Strategy against a perfect opponent | 1–3 |
 | [Reflex](#reflex) | 138 | Reaction time | Any key |
 | [Ski](#ski) | 137 | Real-time scroller | j, l |
@@ -28,11 +28,11 @@ The files are in `games/` (at the root of the repository): [`tweet140/`](../game
 | [Mastermind](#mastermind) | 271 | Deduction | Four digits, Return |
 | [Nim 3-5-7](#nim-3-5-7) | 273 | Strategy against a perfect opponent | Heap, then count |
 | [Duel](#duel) | 275 | Real-time, against the computer | `,` and `.` |
-| [Kingdom](#kingdom) | 276 | Economic strategy | A number, Return |
-| [Tic-tac-toe](#tic-tac-toe) | 277 | Against an unbeatable opponent | 1–9 |
+| [Kingdom](#kingdom) | 275 | Economic strategy | A number, Return |
+| [Tic-tac-toe](#tic-tac-toe) | 276 | Against an unbeatable opponent | 1–9 |
 | [Blackjack](#blackjack) | 276 | Cards | h, any key |
 | [Copter](#copter) | 250 | Real-time, one key | Any key |
-| [Breakout](#breakout) | 276 | Real-time arcade | j, l |
+| [Breakout](#breakout) | 275 | Real-time arcade | j, l |
 | [Hangman](#hangman) | 271 | Words | Letters |
 | [Maze](#maze) | 276 | A new maze every game | i j k l |
 
@@ -79,7 +79,7 @@ Press a key to start, then type guesses and press Return. The number is 0–127 
 ### Lander
 
 ```text
-"LANDER burn 0-9, v<5"$1000h!0v!99f!1("/M/Jh/h v/v f/f ?"$0?:'15&:f@>(;f@0):f@%-f!v@%- 3+v!h@v@-h!h@0>)" v/v"$" CRASH"v@5<(;" LANDED"0)$
+"LANDER burn 0-9, v<5"$1000h!0v!99f!1("/M/Jh/h v/v f/f ?"$0?:'15&:f@>(;f@0):f@%-f!v@%- 3+v!h@v@-:h!0>)" v/v"$" CRASH"v@5<(;" LANDED"0)$
 ```
 
 You start at height 1000 with no speed and 99 fuel. Each turn press 0–9 to burn that much fuel. Gravity adds 3 to your downward speed and a burn takes it off. Touch down at under 5 to land. The last line shows your speed at touchdown and whether you landed or crashed.
@@ -255,7 +255,7 @@ Tron for two: you are `O`, the computer is `X`, and you start facing each other.
 ### Kingdom
 
 ```text
-[N0 1(0?:13=\:'48-%10*+1);][M:g@>(;g@0)]"KINGDOM: eat 20, plant 10 each"$99p!4999g!0r!1y!1("/M/J/y: pop /p grain /g feed? "$N:r@+r!M:g@%-g!20/;:p@2/;<:q!\p@-:0>(2/;0)p@+p!p@10*M:999>(;999 0)r@75*74+:r!256/;3&1+:" yield "$1+#*g@+g!y@1+:y!11<)q@(;" Overthrown"$0)"/M/Jscore /p"$
+[N0 1(0?:13=\:'48-%10*+1);][M:g@>(;g@0)]"KINGDOM: eat 20, plant 10 each"$99p!4999g!0r!1y!1("/M/J/y: pop /p grain /g feed? "$N:r@+r!M:g@%-g!20/;:p@2/;<:q!\p@-:0>(2/;0)p@+:p!10*M:999>(;999 0)r@75*74+:r!256/;3&1+:" yield "$1+#*g@+g!y@1+:y!11<)q@(;" Overthrown"$0)"/M/Jscore /p"$
 ```
 
 Hamurabi in a tweet. Each year, type how much grain to feed your people. Each person needs 20. Whatever is left is planted: each person can plant 10, on at most 999 acres, and each planted bushel returns 2–5. If fewer than half are fed, you are overthrown. Food beyond 20 a head draws newcomers: half the surplus in people. The score, on a line of its own at the end, is your population.
@@ -268,7 +268,7 @@ The tension: people are labour, but the land caps the harvest at 999 acres, so m
 ### Tic-tac-toe
 
 ```text
-[V:w@&=|][Ww!0 7V56V448V73V146V292V273V84V][Tm@e@m!e!][N2v!1::(:m@e@|&0=(:m@|m!m@W:0=(;v@{TN;0v@-T}v!0)%:m@^m!%:v@<(:v!{%;:}0);0):+:512<v@-1>&);v@:2<&v!][D1:(:73&(13'10'0)::m@&0>33&%e@&0>42&+46+':+:512<);]0e!16m!4:(D1 0?48-:(%:+%1-:);2/;e@|e!Nm@|:m!W\1-:)D" draw"%(;" I win"0)$
+[V:w@&=|][Ww!0 7V56V448V73V146V292V273V84V][Tm@e@m!e!][N2v!1::(:m@e@|&0=(:m@|:m!W:0=(;v@{TN;0v@-T}v!0)%:m@^m!%:v@<(:v!{%;:}0);0):+:512<v@-1>&);v@:2<&v!][D1:(:73&(13'10'0)::m@&0>33&%e@&0>42&+46+':+:512<);]0e!16m!4:(D1 0?48-:(%:+%1-:);2/;e@|e!Nm@|:m!W\1-:)D" draw"%(;" I win"0)$
 ```
 
 The computer can't be beaten. It is `O` and opens in the centre. You are `X`: press 1–9 for the cells, row by row from the top left. The best you can do is draw. Playing all 201 legal games against it gives 194 losses and 7 draws, and `test_tweets.py --all` checks that again.
@@ -304,7 +304,7 @@ The one-key game. A cave scrolls past, and gravity pulls your craft, `H`, to the
 ### Breakout
 
 ```text
-[Z:@0%-%!]"/{"$0_g!736 1(0 1_.1-:);96 1(1-:32+:g@+1%.32/1+"/~#"$:);11:y!x!1d!-1e!0s!0p!1(250?:106=%108=-:+p@+:32767&30<(:p!0);19p@"/~  ====  "$y@x@"/~ "$x@1=x@32=|(dZ0)y@0=(eZ0)x@d@+x!y@e@+y!y@32*x@+1-g@+:,(:0%.eZs@1+s!0);x@p@- 2+4/;1=y@19=&(eZ0)21 0y@x@"/~o/~score /s"$y@20<)
+[Z:@0%-%!]"/{"$0_g!736 1(0 1_.1-:);96 1(1-:32+:g@+1%.32/1+"/~#"$:);11:y!x!1d!-1e!0s!0p!1(250?:106=%108=-:+p@+:32767&30<(:p!0);19p@"/~  ====  "$y@x@"/~ "$x@1=x@32=|(dZ0)y@0=(eZ0)x@d@+x!y@e@+:y!32*x@+1-g@+:,(:0%.eZs@1+s!0);x@p@- 2+4/;1=y@19=&(eZ0)21 0y@x@"/~o/~score /s"$y@20<)
 ```
 
 Three rows of 32 bricks; j and l move the paddle. Keep the ball in play. The score, below the paddle, is the number of bricks broken.

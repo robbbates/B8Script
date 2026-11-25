@@ -24,9 +24,7 @@ B8Script is a postfix stack language for 64 KB 8-bit computers. Every instructio
 - [Appendix B: 8080](#appendix-b-8080)
 - [Appendix C: 6502](#appendix-c-6502)
 - [Appendix D: 6809](#appendix-d-6809)
-- [Appendix E: B8SIC](#appendix-e-b8sic)
-- [Appendix F: the B8Script TTL computer](#appendix-f-the-b8script-ttl-computer)
-- [Appendix G: Windows (32-bit x86)](#appendix-g-windows-32-bit-x86)
+- [Appendix E: Windows (32-bit x86)](#appendix-e-windows-32-bit-x86)
 
 ## Execution model
 
@@ -408,7 +406,7 @@ What the other control codes do (TAB and ESC among them) is implementation-defin
 - **How a build does it** is up to the build, and its appendix says. The existing interpreters have a build switch, `ANSI`:
   - `ANSI = 1` sends ANSI (VT100) sequences: ESC `[H` ESC `[J` for `/{`, ESC `[K` for `/}`, ESC `[?25h` and ESC `[?25l` for `/|` and `` /` ``, and ESC `[` row+1 `;` col+1 `H` for `/~`.
   - `ANSI = 0` calls four routines of the machine's own instead: clear the screen, clear to the end of the line, cursor on or off, and cursor to a row and column. Each appendix gives their interface.
-  - The generic builds default to `ANSI = 0`; the CP/M builds always send ANSI; the Windows builds send ANSI, which the console understands in the mode they set (Appendix G).
+  - The generic builds default to `ANSI = 0`; the CP/M builds always send ANSI; the Windows builds send ANSI, which the console understands in the mode they set (Appendix E).
 - **Screen size** is implementation-defined and given in the appendix; 80 × 24 is the usual. Programs that assume a size should say so.
 - **More than this** (colours, reverse video, scrolling regions) has no escape. A program can still send a terminal's own sequences, with `/[` or `27'`, but they then work only on that kind of terminal. Keep them optional.
 
@@ -663,8 +661,8 @@ Measured in Z80 clock cycles on the generic builds, against the small build (sam
 | SIEVE, 1 pass | 56.8 M | 1.09× | 2.24× |
 | PI, 100 digits | 316.2 M | 1.21× | 2.05× |
 | MANDEL | 163.2 M | 1.36× | 2.53× |
-| Tiny BASIC, a short program | 115.4 M | 1.38× | 2.40× |
-| Robots, scripted play | 8.3 M | 1.18× | 2.11× |
+| Tiny BASIC, a short program | 114.0 M | 1.42× | 2.56× |
+| Robots, scripted play | 8.2 M | 1.18× | 2.10× |
 | Reversi, scripted play | 43.9 M | 1.47× | 2.56× |
 | Qubic, scripted play | 61.4 M | 1.26× | 2.35× |
 | Tetris, scripted play | 10.9 M | 1.13× | 1.69× |
@@ -695,10 +693,10 @@ Against the small build of the same CPU, on the same eight runs (in clock cycles
 |---|---|---|---|---|
 | Z80 | 180–230 bytes | 1.09–1.47× | 1.69–2.56× | 4,352–4,864 bytes |
 | 8080 | 180–212 bytes | 1.09–1.49× | 1.76–2.69× | 4,352–4,864 bytes |
-| 6502, stack in pages 2–3 | 269–326 bytes | 1.10–1.49× | 1.78–2.66× | 5,506–7,448 bytes |
-| 6502, stack in zero page | 273–328 bytes | 1.11–1.51× | 1.76–2.72× | 5,069–6,949 bytes |
+| 6502, stack in pages 2–3 | 269–326 bytes | 1.10–1.49× | 1.78–2.71× | 5,506–7,448 bytes |
+| 6502, stack in zero page | 273–328 bytes | 1.11–1.51× | 1.76–2.74× | 5,069–6,949 bytes |
 | 6809 | 116–153 bytes | 1.10–1.52× | 1.94–2.95× | 4,257–4,654 bytes |
-| Windows (x86) | 144–190 bytes of code | 1.10–1.50× | 2.68–4.31× | 7,680–8,704-byte files |
+| Windows (x86) | 144–190 bytes of code | 1.10–1.57× | 2.68–4.61× | 7,680–8,704-byte files |
 
 The interpreters README has every run on every CPU.
 
@@ -976,7 +974,7 @@ Each build comes in the three tiers, in `B8Script-interpreters/z80/small/`, `bas
 | CP/M with the line editor, checked | `B8SE.COM` | 2,048, 2,227, none | `B8SE PROG.B8S`, or with no file |
 | The same, unchecked | `B8SUE.COM` | 1,646, 1,860, none |  |
 
-A small file has `small` in place of `base` (`b8s-z80-small-rom-0000.bin`) or an S after `B8S` (`B8SS.COM`, `B8SUSE.COM`); a fast one has `fast` or an F (`b8s-z80-fast-rom-0000.bin`, `B8SF.COM`, `B8SUF.COM`). Base is 180 to 230 bytes bigger than small and 1.1 to 1.5 times as fast; fast is about twice as fast as small, and has no editor. See [Speed](#speed) and the interpreters README.
+A small file has `small` in place of `base` (`b8s-z80-small-rom-0000.bin`) or an S after `B8S` (`B8SS.COM`, `B8SUSE.COM`); a fast one has `fast` or an F (`b8s-z80-fast-rom-0000.bin`, `B8SF.COM`, `B8SUF.COM`). Base is 180 to 230 bytes bigger than small and 1.1 to 1.6 times as fast; fast is about twice as fast as small, and has no editor. See [Speed](#speed) and the interpreters README.
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), IY is the return-stack pointer. A and DE are scratch. In the CP/M builds and the fast builds IX holds the inner loop's address, so a handler ends with `JP (IX)`. The alternate registers are not used, so an interrupt routine may use them.
 
@@ -1102,100 +1100,7 @@ Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`, 
 
 [↑ Back to top](#b8script-spec)
 
-## Appendix E: B8SIC
-
-Source: `asm/lib/b8script/` in the B8SIC repository (`b8s-core.b8a`, `b8s-e.b8a`, `b8s-ec.b8a`). B8SIC is a microcoded 8-bit
-stack machine, built with B8Script in mind: its microcode reads, sorts and dispatches the characters itself. One
-instruction, `B8S`, reads the program text, passes over ignored bytes, pushes a variable's address, calls a word and
-reads a number by itself, and jumps through the packed table in page 0 only for punctuation and NUL, each handler
-ending with `B8S`; a second, `B8SKIP`, is the skipper. The B8Script stacks are the machine's own two stacks.
-The interpreters are B8SDOS programs, loaded at 0000h. The environment is a runner (`B8SCRIPT PROG.B8S`), planned: until
-it is built they run under the B8SIC's tests.
-
-**Builds**
-
-| Build | File | Bytes | Notes |
-|---|---|---|---|
-| Pure | `b8s-e.b8a` | 800 | Unchecked. The program text follows at 0320h |
-| Checked | `b8s-ec.b8a` | 1,773 | The spec's checked build, and the default under B8SDOS. The program text follows at 06EDh. `/U` in the command tail runs a program unchecked: `B8SCRIPT /U PROG.B8S` |
-
-Both share one file for the packed table, the handlers and the skipping, byte for byte. The console is B8SDOS's (output
-by `CONOUT`, keys by `CONIN` and `CONST`), so its code is not counted.
-
-**Registers.** PR is the reading position, TOS is the machine's top-of-stack register and the rest of the data stack is
-the machine's data stack ((SP) is NOS), the return stack is the machine's return stack. AR, X, Y and FR are scratch.
-
-**Memory map**
-
-| Item | Hex | Unsigned | Signed |
-|---|---|---|---|
-| NUL's table cell | 0002h | 2 | 2 |
-| Word cells A-Z, two bytes each (the packed table's cells, `2c - 4`) | 007Eh | 126 | 126 |
-| Variable cells a-z, two bytes each | 00BEh | 190 | 190 |
-| The interpreter's code and variables | 0100h up to the program | 256 | 256 |
-| Program text, pure build | 0320h | 800 | 800 |
-| Program text, checked build | 06EDh | 1773 | 1773 |
-| `-n?` line buffer (127 characters and CR), MEMTOP − 128 | EF70h | 61296 | −4240 |
-| MEMTOP, the first byte past a program's space; the heap limit is the line buffer | EFF0h | 61424 | −4112 |
-
-The heap starts just past the program's NUL and ends at the line buffer; a checked build stops with `H` past it or
-below its start. The data stack holds 252 cells (251 in the checked build, which keeps one spare cell under the program's, so that a pop past empty and a push after it, which the stack-limit interrupt does not see yet, touch nothing the OS keeps) and the return stack 250 entries (more than the 64 and 64 the spec asks):
-each stack is 256 cells with the four deepest the hardware's guard zone, and the OS keeps room for itself in them.
-Before the program runs, the cell of a variable holds a byte of the startup code in the pure build (the spec's undefined
-start) and 0 in the checked one; a word's cell likewise holds startup bytes in the pure build and points at an internal
-stop in the checked one. `[` and a lowercase letter stores the body's address in that variable's cell, so a variable is
-the cell of its letter (a-z at 00BEh, 2 bytes each). MEMTOP is the OS's and is the same for every program.
-
-A program's space for `!` and `.` (a checked build stops with `O` outside it) is the letters' cells and everything from
-the program text up to MEMTOP: the heap and the line buffer included, the interpreter, the table's punctuation cells and
-the OS not.
-
-**System addresses.** None. The B8SIC has no cell a program reads for the heap limit or free memory (the heap's limit is
-the line buffer's address, EF70h, which `0_` and the program's end give), and no break-off cell: the break key is the OS's.
-
-**The break key.** The OS's own break check is the poll: Ctrl-C on the console and the keyboard's B8S+B stop a running
-program in every build, at the next clock tick. A checked build reports
-`B` with the place (one character late at most); the pure build prints the OS's own message. A program never sees
-Ctrl-C and cannot turn the key off, and there is no held key (the OS keeps its own key ring).
-
-**The console.** Output goes through `CONOUT`, which sends a character to every output of the console's set (the UART,
-the display, the panel's LCD). The console escapes of `$` are sent as ANSI sequences (`ANSI = 1`): ESC `[H` ESC `[J` for
-`/{`, ESC `[K` for `/}`, ESC `[?25h` and ESC `[?25l` for `/|` and `` /` ``, and ESC `[` row+1 `;` col+1 `H` for `/~`, the
-numbers printed as `#` prints them; the B8SIC's terminal (Cards' console card) and a serial terminal take them. The
-interpreters call no screen routine of the machine's own. The screen is the console card's, and the interpreters do
-not know its size.
-
-**The checked build's report** is the spec's, to the console. Besides the spec's wording: more than eight stack values
-show as ` ...` (three dots) and the top eight. A stop from the OS (`S`, `s`, `R`, `r`, `B`) reports the depths and no
-values, since the stack-limit interrupt and the break check arrive through the fault hook with no room to read the
-stack; the place may be one character late. The data stack's limit is the guard zone, so an underflow is seen only
-past the empty cell (a first excess pop is not a stop). The other codes report the stacks as the character found them,
-its operands still on the data stack. A `$` is looked at whole before it prints (`Q`, and `s` for the cells its `/~`
-escapes need). A reserved byte (80h-FFh) outside a string is found by a look at the text before it runs, and reported as
-`X` with an empty stack; a byte that a program writes into its own text later is ignored. A trap in machine code is
-reported as `T` (not a spec code).
-
-**Implementation-defined choices.** `-n?` caps its count at 127; Backspace and Delete erase and echo BS, space, BS; the
-other control keys are ignored; a full line takes only Backspace, Delete and CR; the CR is stored and not echoed. `n?`
-for n > 0 waits up to about n milliseconds. `_` moves the top by at most
-32767 bytes in one call, as the spec says. Dividing by 0 in the pure build leaves the dividend and 65535 (two cells with
-no meaning). Division by 2 and −2 is a shift.
-
-**Machine-code contract.** The grave runs the code at the address on top as a subroutine (`CALLT`): the return address
-is on the return stack and the data stack is B8Script's, with B8Script's TOS in TOS (the address already consumed). The
-code returns with `RET` (opcode 02h, which the loader writes). It must keep PR, the stack pair and the return stack
-below its return address; it may change AR, X, Y, FR and the flags, and it may leave the data stack deeper or
-shallower. The loader's RET byte is 02h. Example: `` 4_:d! `61 ; 21 d@` # `` prints 42 (SL0.w, RET).
-
-[↑ Back to top](#b8script-spec)
-
-## Appendix F: the B8Script TTL computer
-
-Also built with B8Script in mind. On this machine the hex loader's RET byte is `]`. This appendix is to come.
-
-[↑ Back to top](#b8script-spec)
-
-## Appendix G: Windows (32-bit x86)
+## Appendix E: Windows (32-bit x86)
 
 Source: `B8Script-interpreters/win32/b8s-win32.asm` (NASM). Switches: `CHECKED`, `EDITOR`, and for speed `SPEED`, as on the Z80 (see [Speed](#speed)). These programs run in the Windows command shell; a program is a file named on the command line. They are tested in an emulator and have not yet been run on Windows itself.
 

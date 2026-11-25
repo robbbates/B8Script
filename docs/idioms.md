@@ -234,7 +234,7 @@ v 1(
 | Fast switch with its own break | `:16=:(;;+ 1 0)\` | The body drops flag and selector, works, and pushes 1 for the `\` (TINYBAS) |
 | While, tested at both ends | `n@( body n@)` | Runs zero or more times with no break (TINYBAS) |
 | Zero-or-more with a count | `1( :( body 0) 1-: 0>)` | The copied count is the if-flag (SUPERTRK) |
-| The data is the loop flag | `1( 8R 8R C a! a@, )` | Repeat while the fetched byte is nonzero (SUPERTRK, CONNECT4) |
+| The data is the loop flag | `1( 8R 8R C :a!, )` | Repeat while the fetched byte is nonzero (SUPERTRK, CONNECT4) |
 | Search, record, break | `-1j! ... 1( ... G:( i@j! 0)\ ... 1)` | j stays −1 if nothing is found (KLONDIKE) |
 | Why the loop ended | `0q! 1( ... q@0=) q@1=( ... 0) q@2=( ... 0)` | One variable is both the loop test and the reason (IDOL, LIGHTS) |
 | Check everything, decide at the end | `1n@1(%0?:'D=&%1-:);` | Each test is ANDed into one flag under the counter (SIMON) |
@@ -390,13 +390,13 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Name | Code | What it does |
 | --- | --- | --- |
 | Number reader with no variable | `[N0 1(0?:13=\:'48-%10*+1);]` | The total rides on the stack; Return ends it (HILO) |
-| Number reader that ignores other keys | `[N 0n! 1( K c! c@47> c@58<&( c@' n@10*c@48-+n! 0) c@13= ~) n@]` | Only digits echo; K stirs the random seed while waiting (TRADER, SUPERTRK) |
-| Number from a typed line | `[N -3?a! 0n! 1( a@,48- d! d@-1> d@10<& :( n@10*d@+n! a@1+a! 0) ) L n@]` | Walks the line until a non-digit (WUMPUS) |
+| Number reader that ignores other keys | `[N 0n! 1( K :c!47> c@58<&( c@' n@10*c@48-+n! 0) c@13= ~) n@]` | Only digits echo; K stirs the random seed while waiting (TRADER, SUPERTRK) |
+| Number from a typed line | `[N -3?a! 0n! 1( a@,48- :d!-1> d@10<& :( n@10*d@+n! a@1+a! 0) ) L n@]` | Walks the line until a non-digit (WUMPUS) |
 | Key to a number by position | `"wasd"i@+, c@=` in a loop | The index where the key matches is the command (G2048, ROBOTS, FIFTEEN) |
 | Keypad to a step | `v@1- 3/ 1-d! 1-o!` | Position 0–8 to dy and dx of −1…+1 (ROBOTS) |
 | i j k l as arrow keys | `0?3&"Q'Oy"+,80-` | The step for a 41-wide grid: +1, −41, −1 or +41 (MAZE in tweet280). See below |
 | j k l as −1, 0, +1 | `0?107-` | k is the middle letter, so subtracting its code leaves −1, 0 or +1; check the range (`:1+32767&3<`) unless every key may move. No game uses it yet: SKI uses the two-test form above |
-| Ask until valid | `1( K 48- c! c@0> c@8<&:( ; c@F 0) 0= )` | A bad key leaves the false flag, so the loop asks again (CONNECT4, KLONDIKE) |
+| Ask until valid | `1( K 48- :c!0> c@8<&:( ; c@F 0) 0= )` | A bad key leaves the false flag, so the loop asks again (CONNECT4, KLONDIKE) |
 | Echo printable keys only | `:32>(:' 0)` | (KLONDIKE, WUMPUS, QUBIC) |
 | Letter, then digit | Remember a letter key in l; a digit after it fires | Two-key commands like B7 (BATTLE) |
 | A pause | `999?;` | About a second, cut short by a key (SIMON) |
@@ -476,7 +476,7 @@ The games share a few shapes: a frame is one timed key wait, end conditions fold
 
 | Name | Code | What it does |
 | --- | --- | --- |
-| Frame loop | `1( 20? c! c@( Y 0) n@1+:n! s@>( 0n! G 0) d@0=)` | Keys act at once; gravity every s+1 frames (TETRIS) |
+| Frame loop | `1( 20? :c!( Y 0) n@1+:n! s@>( 0n! G 0) d@0=)` | Keys act at once; gravity every s+1 frames (TETRIS) |
 | The wait is the frame | `99?` for about 10 steps a second, `20?` for 50 | The timed wait is also the input (README, all real-time games) |
 | Speed from what's left | `b@24/;2+v!` | Fewer bricks, fewer frames per ball step (BREAKOUT) |
 | All end conditions in the flag | `1( D K c! ... V h@0> c@113=~& )` | Go on while alive and the key wasn't q (DUNGEON) |
@@ -506,7 +506,7 @@ The games share a few shapes: a frame is one timed key wait, end conditions fold
 | 1 to n, other constants | `[Z s@25173*13849+:s! 16/;4095& %/%; 1+]` | Twelve bits from the middle of the state (TINYBAS) |
 | Shuffle | `51i! 1( i@1+R j! i@d@+, j@d@+, i@d@+. j@d@+. i@1-:i! 0>)` | Fisher–Yates, swapping by fetching both bytes first (KLONDIKE) |
 | Random empty cell | Count the empties, draw below the count, count down to it | Never loops forever on a full board (G2048, BATTLE) |
-| Retry until empty | `1( 8R 8R C a! a@, )` | Simplest when the board is mostly empty (SUPERTRK) |
+| Retry until empty | `1( 8R 8R C :a!, )` | Simplest when the board is mostly empty (SUPERTRK) |
 | Seed on the stack | `0 1(1+1?0=)7&20+n!` | The wait's count is the seed, masked into range (NIM, HILO) |
 | Stir in the player | `99?:r@+r!` | Each frame's key goes into the state (SKI, KINGDOM) |
 | Replay a sequence | `s@r!`, then the same draws | Store only the seed (SIMON) |

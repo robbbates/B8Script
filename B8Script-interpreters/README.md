@@ -15,8 +15,8 @@ The Windows source takes its switches (`CHECKED`, `EDITOR`, `SPEED`) as NASM def
 `SPEED` picks one of three tiers, which every CPU has (see [Speed](#speed)):
 
 - **small** (`SPEED = 0`) is tuned for size: the smallest build of each CPU.
-- **base** (`SPEED = 1`, the default) adds the speed-ups that cost least: about 120 to 330 bytes more than small, for 1.1 to 1.5 times its speed.
-- **fast** (`SPEED = 2`) is base and everything else, size no object: 4 to 9 KB, and 1.7 to 4.3 times the speed of small. It goes with every build except the Z80's line editor.
+- **base** (`SPEED = 1`, the default) adds the speed-ups that cost least: about 120 to 330 bytes more than small, for 1.1 to 1.6 times its speed.
+- **fast** (`SPEED = 2`) is base and everything else, size no object: 4 to 9 KB, and 1.7 to 4.6 times the speed of small. It goes with every build except the Z80's line editor.
 
 `ANSI` decides what the console escapes of `$` (`/{` `/}` `/|` `` /` `` `/~`) do. With `ANSI = 1` they send ANSI (VT100) sequences through `CONOUT`. With `ANSI = 0` they call four routines of the machine's own (see the machine interface below). The generic builds default to `ANSI = 0`; the CP/M builds always send ANSI, whatever the switch says; the Windows builds always send ANSI, in the console mode they set.
 
@@ -361,7 +361,7 @@ B8SE PROG.B8S
 ```
 
 - **They have not been run on Windows yet.** They are tested in an emulator, with the Windows calls they make modelled by hand, and their headers are checked against the documented rules (see How they were tested). The first run on a real machine is still to do.
-- **The machine is the spec's:** 64 KB of memory, 16-bit cells and addresses. The memory map is in the spec's Appendix G. The language, the break key, the checked builds' errors and report, and the editor are the Z80's, key for key.
+- **The machine is the spec's:** 64 KB of memory, 16-bit cells and addresses. The memory map is in the spec's Appendix E. The language, the break key, the checked builds' errors and report, and the editor are the Z80's, key for key.
 - **The file.** A runner loads the file named on the command line, runs it and exits. With no file, or one that can't be opened, it exits without a word. An editor build starts with that file as its program, or empty. A file can hold up to 64,765 bytes.
 - **Output** goes to standard output, so it can be redirected. A checked build's report goes to standard error.
 - **Keys** are read from the console raw: no echo, and Ctrl-C arrives as a key, so the interpreter's own break rules apply. The console's mode is put back on every way out. The left and right arrow keys work in the editor: they are read as the codes 1Ch and 1Eh, which a program reading keys with `?` sees too. The Delete key does nothing; Backspace deletes.
@@ -448,8 +448,8 @@ The zero-page one is smaller because a cell that holds an address is used as the
 Every source builds in three tiers, set by `SPEED`. They come from the same source, pass the same tests and run any program the same way, with the same machine interface but for the differences named below; the spec's [Speed](../docs/b8script.md#speed) section says what each idea does and why.
 
 - **small** (`SPEED = 0`) is tuned for size. Its files are in each CPU's `small/`.
-- **base** (`SPEED = 1`, the default) adds the speed-ups that cost least, about 120 to 330 bytes, and is 1.1 to 1.5 times as fast as small. It goes with every build. Its files are in each CPU's `base/`.
-- **fast** (`SPEED = 2`) is base and everything else, size no object: 4 to 9 KB, 1.7 to 3 times as fast as small on the 8-bit CPUs and 2.7 to 4.3 times on Windows. It goes with every build except the Z80's line editor; Windows has fast editor builds. Its files are in each CPU's `fast/`.
+- **base** (`SPEED = 1`, the default) adds the speed-ups that cost least, about 120 to 330 bytes, and is 1.1 to 1.6 times as fast as small. It goes with every build. Its files are in each CPU's `base/`.
+- **fast** (`SPEED = 2`) is base and everything else, size no object: 4 to 9 KB, 1.7 to 3 times as fast as small on the 8-bit CPUs and 2.7 to 4.6 times on Windows. It goes with every build except the Z80's line editor; Windows has fast editor builds. Its files are in each CPU's `fast/`.
 
 **What base adds:**
 
@@ -501,8 +501,8 @@ A checked fast build can be smaller than its unchecked one: the unchecked one's 
 | SIEVE, 1 pass | 1.09× | 1.09× | 1.10× | 1.11× | 1.10× | 1.11× |
 | PI, 100 digits | 1.21× | 1.16× | 1.20× | 1.21× | 1.14× | 1.12× |
 | MANDEL | 1.36× | 1.40× | 1.37× | 1.38× | 1.40× | 1.22× |
-| Tiny BASIC, a short program | 1.38× | 1.39× | 1.47× | 1.49× | 1.39× | 1.50× |
-| Robots, scripted play | 1.18× | 1.19× | 1.18× | 1.19× | 1.17× | 1.20× |
+| Tiny BASIC, a short program | 1.42× | 1.44× | 1.49× | 1.51× | 1.42× | 1.57× |
+| Robots, scripted play | 1.18× | 1.18× | 1.17× | 1.18× | 1.16× | 1.19× |
 | Reversi, scripted play | 1.47× | 1.49× | 1.49× | 1.51× | 1.52× | 1.49× |
 | Qubic, scripted play | 1.26× | 1.28× | 1.28× | 1.29× | 1.28× | 1.28× |
 | Tetris, scripted play | 1.13× | 1.12× | 1.16× | 1.16× | 1.16× | 1.10× |
@@ -510,8 +510,8 @@ A checked fast build can be smaller than its unchecked one: the unchecked one's 
 | SIEVE, 1 pass | 2.24× | 2.30× | 2.18× | 2.23× | 2.26× | 3.32× |
 | PI, 100 digits | 2.05× | 1.98× | 1.90× | 1.87× | 1.94× | 3.12× |
 | MANDEL | 2.53× | 2.69× | 2.45× | 2.52× | 2.50× | 3.47× |
-| Tiny BASIC, a short program | 2.40× | 2.43× | 2.62× | 2.64× | 2.65× | 4.31× |
-| Robots, scripted play | 2.11× | 2.26× | 1.98× | 1.98× | 2.19× | 2.83× |
+| Tiny BASIC, a short program | 2.56× | 2.59× | 2.71× | 2.74× | 2.81× | 4.61× |
+| Robots, scripted play | 2.10× | 2.24× | 1.96× | 1.96× | 2.18× | 2.81× |
 | Reversi, scripted play | 2.56× | 2.65× | 2.66× | 2.72× | 2.95× | 3.92× |
 | Qubic, scripted play | 2.35× | 2.48× | 2.48× | 2.55× | 2.64× | 3.70× |
 | Tetris, scripted play | 1.69× | 1.76× | 1.78× | 1.76× | 2.05× | 2.68× |

@@ -515,7 +515,7 @@ Every character costs a byte of memory and a dispatch each time it runs, so the 
 
 ## Gotchas
 
-The minus before a digit is the one that bites most: it got into 9 of the 31 small games, 12 times.
+The minus before a digit is the one that bites most, especially in the small games.
 
 | Gotcha | What to do |
 | --- | --- |
@@ -529,7 +529,7 @@ The minus before a digit is the one that bites most: it got into 9 of the 31 sma
 | A variable escape in a stored message | `/x` reads x when the string is printed, so text copied into a buffer and shown later prints the later value; keep `#` for numbers there (IDOL) |
 | `&` and `\|` don't short-circuit | Both sides always run, so the second must be safe when the first is false (BATTLE) |
 | Do-while runs at least once | Test first, or use the copied-count form, when zero passes is possible (SUPERTRK) |
-| Words sharing scratch variables | Note which word uses which letter; prefer the stack inside reusable words (BATTLE, REVERSI, TINYBAS). SUPERTRK once kept its command key in z, which its number reader also used, so the test that let the Klingons fire never held |
+| Words sharing scratch variables | Note which word uses which letter; prefer the stack inside reusable words (BATTLE, REVERSI, TINYBAS). A word that reuses a variable its caller still needs breaks the caller quietly: a key kept in z is lost if the number reader also uses z |
 | Divide by zero still runs on an unchecked build | Guard it yourself; never call R with 0 (TINYBAS, G2048) |
 | Values past 32767 wrap | Cap them, or keep two cells (KINGDOM, G2048) |
 | R's byte is one higher when the state is negative | Truncation toward zero; harmless, the result is still 0–255 (all games) |

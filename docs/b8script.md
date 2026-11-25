@@ -63,7 +63,7 @@ Operands follow written order: `a b -` is a − b. Effects are written `( before
 
 **Strings.** `"` pushes the address of the text after it and skips to the closing `"`. The text stays inline and nothing is copied. `$` prints it: `"Hi"$`.
 
-Inside a string, `/` and the character after it are an escape. Escapes are decoded only when `$` prints the string; `>` is an ordinary character in strings.
+Inside a string, `/` and the character after it are an escape. Escapes are decoded only when `$` prints the string.
 
 | Escape | Gives | Examples |
 |---|---|---|
@@ -712,7 +712,7 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 - **Without page zero, a register can hold "next".** The Z80 CP/M builds keep the address of the inner loop in IX for the whole run, so a handler ends with `JP (IX)`: two bytes, and faster than `JP`. Restore it after anything that may change it (the BDOS, machine code).
 - **Tail calls.** A routine that ends by calling another and returning can jump to it instead (`CALL putc / RET` is `JP putc`), and a routine whose last act is a call can be placed so that it falls into it.
 - **Use an index register for the return stack.** The Z80 keeps the return-stack pointer in IY. The data stack is the CPU stack, which is what the machine-code contract wants anyway.
-- **Leave the alternate registers alone.** Interrupt routines often use the Z80's alternate registers as their own, without saving them. An interpreter that kept state in them (as the Z80 one once kept its return-stack pointer in HL') can be corrupted at any moment on such a machine.
+- **Leave the alternate registers alone.** Interrupt routines often use the Z80's alternate registers as their own, without saving them. An interpreter that keeps state in them can be corrupted at any moment on such a machine.
 
 **Dispatch tables**
 

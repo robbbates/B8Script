@@ -15,41 +15,37 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 
 ## Sizes (bytes, measured)
 
-**Generic ROM images.** `ANSI = 0` is the default (the console escapes call the machine's routines); `ANSI = 1` sends ANSI sequences. "Before" is the last build without the escapes (commit `9c7f40c`).
+**Generic ROM images.** `ANSI = 0` is the default (the console escapes call the machine's routines); `ANSI = 1` sends ANSI sequences.
 
-| CPU | Before | `ANSI = 0` | `ANSI = 1` | Checked, before | Checked, `ANSI = 0` | Checked, `ANSI = 1` |
-|---|---|---|---|---|---|---|
-| Z80 | 765 | 835 | 886 | 1,163 | 1,219 | 1,266 |
-| Z80 with the line editor | 1,488 | 1,355 | 1,405 | 1,796 | 1,742 | 1,788 |
-| 8080 | 854 | 926 | 980 | 1,299 | 1,348 | 1,402 |
-| 6502, stack in pages 2-3 | 1,175 | 1,208 | 1,265 | 1,706 | 1,707 | 1,750 |
-| 6502, stack in zero page | 1,095 | 1,155 | 1,217 | 1,628 | 1,673 | 1,721 |
-| 6809 | 825 | 873 | 934 | 1,220 | 1,264 | 1,313 |
+| CPU | `ANSI = 0` | `ANSI = 1` | Checked, `ANSI = 0` | Checked, `ANSI = 1` |
+|---|---|---|---|---|
+| Z80 | 835 | 886 | 1,219 | 1,266 |
+| Z80 with the line editor | 1,355 | 1,405 | 1,742 | 1,788 |
+| 8080 | 926 | 980 | 1,348 | 1,402 |
+| 6502, stack in pages 2-3 | 1,208 | 1,265 | 1,707 | 1,750 |
+| 6502, stack in zero page | 1,155 | 1,217 | 1,673 | 1,721 |
+| 6809 | 873 | 934 | 1,264 | 1,313 |
 
 **CP/M .COM files** (always ANSI):
 
-| CPU | Before | Now | Checked, before | Checked, now |
-|---|---|---|---|---|
-| Z80 | 831 | 1,017 | 1,243 | 1,414 |
-| Z80 with the line editor | 1,663 | 1,646 | 1,987 | 2,048 |
-| 8080 | 904 | 1,129 | 1,364 | 1,583 |
+| CPU | Unchecked | Checked |
+|---|---|---|
+| Z80 | 1,017 | 1,414 |
+| Z80 with the line editor | 1,646 | 2,048 |
+| 8080 | 1,129 | 1,583 |
 
 **Windows .EXE files** (always ANSI):
 
 | | Unchecked | Checked | With the editor | Editor, checked |
 |---|---|---|---|---|
-| The file, before | 2,560 | 3,072 | 3,584 | 4,096 |
-| The file, now | 2,560 | 3,072 | 3,072 | 3,584 |
-| Code and table, before | 1,286 | 1,816 | 2,298 | 2,728 |
-| Code and table, now | 1,319 | 1,829 | 2,021 | 2,543 |
+| The file | 2,560 | 3,072 | 3,072 | 3,584 |
+| Code and table | 1,319 | 1,829 | 2,021 | 2,543 |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
 - A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four have 357, 359, 143 and 133 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
 - The CP/M size is the .COM file, which includes the program loader.
-- Where the bytes went with the escapes: on the Z80 the escapes cost an unchecked generic build 60 bytes with `ANSI = 0` and 111 with `ANSI = 1`, and the checked one about 70 and 117 (a checked `/~` looks that its two cells are there before it prints anything). The CP/M builds also read `-n?` themselves now (15 bytes on the Z80, 19 on the 8080; see The language). The editor builds lost ^V, which saved about 170 bytes in the unchecked ones (the stack listing was there only for it) and 100 in the checked ones.
-- Then, for real machines (an RC2014 with RomWBW): the Z80's return stack moved from HL' to IY, out of the alternate registers (about +10 bytes on every Z80 build), and the CP/M builds stopped writing page zero, so their one-byte RST calls became CALLs and jumps (about +60 on the Z80, where "next" is a two-byte `JP (IX)`, and +80 to +100 on the 8080, where it is a three-byte `JMP`). The checked builds won some back with a shorter report, which lost the line of program text and says `D:` and `R:` (about 30 bytes on every CPU), and the editors with ^B and ^F gone and a single ^N (about 15). A size pass did the rest: `B8SZ80EC.COM` is exactly 2,048 bytes.
-- Where the bytes went since the builds of the 2026-10-09 spec: the break key in every build costs an unchecked build 60 to 80 bytes (about 30 of them are the break-off cell and its wait for a second Ctrl-C); the checked builds grew by 280 to 470 bytes in all, most of it the report with its line, column, text and both stacks (about 200 bytes on the Z80, 300 on the 6502).
+- Where the bytes go, on the Z80: the console escapes take about 60 bytes with `ANSI = 0` and 110 with `ANSI = 1`; the break key 60 to 80 (about 30 of them the break-off cell and its wait for a second Ctrl-C); a checked build's checks and report about 380 more; the line editor about 520 (generic) or 630 (CP/M, with its file commands). The CP/M builds reach their five most-used routines with CALL and jumps instead of one-byte RSTs (page zero is the system's), which costs them about 60 bytes on the Z80 and 80 to 100 on the 8080.
 
 ## Files
 
@@ -92,7 +88,7 @@ CP/M has no clock a program can count on, so the CP/M builds time `n?` by counti
 
    These move when the code changes: `testing/patchinfo.py` prints the table for the current builds.
 3. **Patch it**, in hex (8 is `08`, 12 is `0C`). Any one of these:
-   - **On a PC**, with a hex editor: the byte at the file offset (it holds `04` now).
+   - **On a PC**, with a hex editor: the byte at the file offset (`04` as built).
    - **CP/M 2.2**, with DDT, for `B8SZ80.COM`:
      ```
      A>DDT B8SZ80.COM
@@ -177,12 +173,12 @@ To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6
 | CONAT (FF15h) | cursor to row HL, column DE, both from 0 | row A, column Y | row X, column D |
 | The four must keep | BC (and IY on the Z80); HL too, all but CONAT | X | Y, U, DP |
 
-- There is one input routine, KEY. It replaces the earlier CONST and CONIN: `0?` waits by calling KEY until a key comes.
+- There is one input routine, KEY: `0?` waits by calling KEY until a key comes.
 - KEY is also called while a program runs, for the break key: once in every 256 word calls and loop-backs. A key it returns then is taken, so KEY must not wait, and should be quick.
 - The Z80 builds with the editor have one more address, `LEAVE`: where ^X goes. A program that ends goes back to the editor.
 - Your loader puts the program text, ending in a NUL, at `PROG`. The heap starts after the NUL.
 - The generic Z80 and 8080 images start at 0000h and use RST 08h, 18h, 20h, 28h and 30h as one-byte calls.
-- The CP/M builds don't touch page zero: there the same routines are reached with CALL and JP, and on the Z80 "next character" is `JP (IX)`, with IX holding its address. (They used to copy the routines to 0008h-0033h, which broke on RomWBW, whose BIOS calls itself through RST 08h, and would on any system whose interrupts use RST 1 to RST 6.)
+- The CP/M builds don't touch page zero: there the same routines are reached with CALL and JP, and on the Z80 "next character" is `JP (IX)`, with IX holding its address. Page zero is the system's: RomWBW's BIOS calls itself through RST 08h, and some systems take interrupts through RST 1 to RST 6.
 - The Z80 builds don't use the alternate registers: the return-stack pointer is IY. An interrupt routine may use the alternate registers freely; it must save IX and IY if it uses them, as it would any register.
 
 ## The break key
@@ -246,7 +242,7 @@ A command key ends the line too, and takes what was typed before it as its argum
 - A program that is stopped, by an error or by Ctrl-C, prints its report and comes back to the editor, with both stacks empty.
 - A line typed at the editor is line 0 in the report; the column is the place in the line.
 
-The editor adds 536 bytes to the unchecked generic build and 637 to the CP/M one (540 and 639 to the checked ones). It has no ^V (view): taking it out saved about 170 bytes in an unchecked build, which needed the stack listing only for it, and kept the CP/M checked editor inside 2,048 bytes. The first editor, which brought the whole image to 768 bytes with the leaner language of that day, is commit `4fbf418`; the one before this rewrite (183 bytes, no cursor, no files) is commit `ddc1a4c`.
+The editor adds 520 bytes to the unchecked generic build and 629 to the CP/M one (523 and 634 to the checked ones).
 
 ## The Windows builds (`win32/`)
 
@@ -343,7 +339,7 @@ Every build runs, in an emulator, against a reference interpreter written from t
 - the break key, on unchecked and checked builds alike: Ctrl-C in a loop, in a chain of word calls and in `?`; the held key, the newest key winning, `?` taking the held key first; the break-off cell, with one Ctrl-C, two quick ones and two slow ones; and a count of how often KEY is called;
 - for checked builds, every error in the table, several ways each, with the whole report compared byte for byte against the reference (run with that build's own addresses); the stack overruns are compared against patterns, since stack sizes differ.
 
-The four editor builds are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the arrow keys, ^B and ^F doing nothing, Esc, editing a line in place, new, ^V doing nothing, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
+The four editor builds are tested by typing at them (`testing/test_editor.py`), each step when the editor is waiting for it, against a model of the editor that follows the source key for key, echo included: entering, inserting, deleting, listing from any line, holding the list and ending it with Ctrl-C, running, 300 lines, full-length lines, the arrow keys, Esc, editing a line in place, new, the data stack lasting between lines, and programs that read lines and keys. The generic ones also paste a program in (with every kind of line end) and print it out; the CP/M ones read and write files on a small emulated disk; the checked ones also hit errors and Ctrl-C and carry on in the editor.
 
 The six CP/M .COM files have also run under real CP/M 2.2, Digital Research's own BDOS and CCP, in z80pack's `cpmsim` (`testing/cpmsim.py`). There the suite's programs (all but two that need a clock or Z80 machine code) gave the reference's output on every build, on a Z80 that traps undocumented opcodes, and the 8080 builds also on an 8080. The one difference, everywhere, was the byte FEh in a string, which that BDOS doesn't print (see The language). Both editor builds were also driven by hand there: listing, running, a typed line, `/~`, an error, Ctrl-C, writing a file and reading it back. The Z80 builds don't run on an 8080 or 8085 (they use Z80 instructions throughout); use the 8080 builds there.
 
@@ -351,7 +347,3 @@ The Windows builds run in the Unicorn emulator (`testing/harness_win32.py`): the
 
 The other twenty games are also run on every build against the reference, for as far as a short run gets (`testing/gamecheck.py`). Each game is in two files, `NAME.TXT` with comments that explain it and `NAME.B8S` stripped from it (`testing/b8strip.py`), and both are run, and the reference plays scripted games of the newest twelve (Wumpus, Robots, 2048, Minesweeper, Breakout, Qubic, Klondike, Lights Out, Fifteen, Greed, Reversi and Battleship) to a win, a loss or a known message (`testing/test_games.py`). The test setup is in `testing/` (see its README).
 
-## Converting older programs
-
-- `testing/esc2slash.py FILE...` rewrites sources that still use `>` as the string escape. Printed strings (`"..."$`) get the full conversion, so they print what they did before. Comments (`"...";`) and data strings are only touched where the closing quote would move. It lists every data string that holds a `/` or `>`, so you can check those by hand.
-- `-n` reports without changing anything.

@@ -54,7 +54,7 @@ These come up again and again.
 - **`1:(` is a value and a true flag.** `(` needs a flag, and a nonzero count is one, so `4:(` starts a loop with 4 on the stack in three characters. Tic-tac-toe uses it three times.
 - **Allocate and clear in one go.** `0_g!` notes the heap top, then `1024 1(0 1_.1-:)` allocates one byte at a time and stores a 0 in each. That is cheaper than allocating the block and clearing it with an index. Tron, Snake, Duel, Breakout and Lights Out use it.
 - **An unsigned bounds test.** `32767&30<` is true only for 0–29: masking turns a negative number into a large positive one. Breakout clamps its paddle with it, one test instead of two.
-- **Watch the minus sign.** `1-3&` is 1 and then −3. It got into nine of these thirty-one games, twelve times in all, and it is easy to miss on review: `0>-10*` looks like "negate, times ten" and is really "push −10". The fix is a space, `1- 3&`. A search of the code outside strings for a minus before a digit finds every case, and each one is either meant or a bug. The stripper (`b8strip.py`) keeps exactly the spaces B8Script needs, and every game here is already in its stripped form.
+- **Watch the minus sign.** `1-3&` is 1 and then −3. It is the easiest slip to make in code this dense, and easy to miss on review: `0>-10*` looks like "negate, times ten" and is really "push −10". The fix is a space, `1- 3&`. A search of the code outside strings for a minus before a digit finds every case, and each one is either meant or a bug. The stripper (`b8strip.py`) keeps exactly the spaces B8Script needs, and every game here is already in its stripped form.
 
 ## B8SMS: 160 characters
 
@@ -197,7 +197,7 @@ The same ten games, each cut by 11 to 21 characters. Most of the savings repeat:
 
 What the cuts cost:
 
-- Pig no longer shows the turn number on each line, only at the end.
+- Pig shows the turn number only at the end, not on each line.
 - Ski shows no title.
 
 The files are in [`games/tweet140/`](../games/tweet140/).

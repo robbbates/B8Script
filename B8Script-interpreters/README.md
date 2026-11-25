@@ -164,9 +164,9 @@ CP/M has no clock a program can count on, so the CP/M builds time `n?` by counti
    | `8080/fast/B8SFU.COM` | 17Eh | 27Eh | 18 | 12FFh |
 
    These move when the code changes: `testing/patchinfo.py` prints the table for the current builds.
-3. **Patch it**, in hex (8 is `08`, 12 is `0C`). Any one of these:
-   - **On a PC**, with a hex editor: the byte at the file offset (`04` as built).
-   - **CP/M 2.2**, with DDT, for the Z80's `B8S.COM`:
+3. **Patch it**, in hex (8 is `08`, 12 is `0C`). Use **either** a hex editor on a PC **or** the CP/M tools on the machine itself; you need only one of the three ways below.
+   - **On a PC, with a hex editor:** change the byte at the file offset (`04` as built), then copy the file to the machine.
+   - **Or on CP/M 2.2, with DDT**, for the Z80's `B8S.COM`:
      ```
      A>DDT B8S.COM
      -S2CE
@@ -176,7 +176,7 @@ CP/M has no clock a program can count on, so the CP/M builds time `n?` by counti
      A>SAVE 7 B8S.COM
      ```
      `S` shows the byte and takes the new one; `.` ends; `G0` leaves DDT; `SAVE` takes the page count from the table.
-   - **CP/M 3 or ZPM3**, where SAVE is a program run first, then the debugger (SAVE waits, and when the debugger exits it asks where to save memory, before anything is cleared):
+   - **Or on CP/M 3 or ZPM3**, where SAVE is a program run first, then the debugger (SAVE waits, and when the debugger exits it asks where to save memory, before anything is cleared):
      ```
      A>SAVE
      A>SID B8S.COM
@@ -192,7 +192,7 @@ CP/M has no clock a program can count on, so the CP/M builds time `n?` by counti
      ZSID, DDTZ (which RomWBW ships) and DDT work the same way: any debugger that loads the file at 0100h and leaves with `G0`, which is the exit SAVE waits for. Its prompt may differ; `?` lists a debugger's commands.
 4. **Check.** Run `TIMING.B8S` again: step 1 should now take about 10 seconds.
 
-Two other waits are built from the same count: Ctrl-C's 250 ms wait for a second Ctrl-C, and the editor's 5 ms wait after Esc. The patch doesn't change them, and they don't need it: a little off either way does no harm.
+Two other waits are built from the same count: Ctrl-C's 250 ms wait for a second Ctrl-C, and the editor's 5 ms wait after Esc, which is how it tells an arrow key (Esc `[` and a letter, sent together) from a lone Esc. The patch doesn't change them, and they don't need it: a little off either way does no harm.
 
 [↑ Back to top](#b8script-interpreters-z80-8080-6502-6809-and-windows)
 

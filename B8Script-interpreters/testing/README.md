@@ -33,6 +33,7 @@ python3 chktab6502.py out/6502/*.lst
 python3 chkbr6502.py out/6502/*.lst                # asm80 misses some bad 6502 branches
 python3 gamecheck.py out                           # every game on every build, briefly
 python3 test_games.py                              # scripted games played to an end on ref.py
+python3 test_programs.py out                       # SIEVE, PI, MANDEL and MON on ref.py and every build
 python3 b8strip.py ../../games/NAME.TXT ../../games/NAME.B8S    # after editing a game's commented version
 python3 sizes.py out/z80                           # bytes per variant
 python3 mkrel.py                                   # copy out/ to the .bin, .COM and .lst files
@@ -59,12 +60,14 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `harness_win32.py` | Runs a Windows .EXE in the Unicorn emulator: maps the file as Windows would, models the `kernel32` calls it makes, gives it a command line, a console (or redirected input) and a few files. Same interface as the others |
 | `run_win32.py` | Runs every Windows build through `check()`, the editor builds through `test_editor.py`, and all of them through a few Windows-only tests |
 | `chkpe.py` | Checks a Windows .EXE's header against the rules: alignments, sizes, the section, the entry point, the import table |
-| `gamecheck.py` | Runs every game, both `.B8S` and `.TXT`, on every build for a short while and compares the output with `ref.py` |
-| `test_games.py` | Types a fixed key sequence at a game on a checked `ref.py` and checks for the messages it should reach: a win, a loss or another known message. It runs both versions, which must print the same. `test_games.py NAME` runs one game's tests |
+| `gamecheck.py` | Runs every game, and every program in `programs/` but MON, both `.B8S` and `.TXT`, on every build for a short while and compares the output with `ref.py` |
+| `test_programs.py` | Checks SIEVE, PI, MANDEL and MON on `ref.py` against models written in Python (PI's digits are themselves checked against Machin's formula), then, given `out`, runs each on every build and compares the output with `ref.py`'s. MON's R runs one return instruction of the build's CPU |
+| `test_games.py` | Types a fixed key sequence at a game on a checked `ref.py` and checks for the messages it should reach: a win, a loss or another known message. It runs both versions, which must print the same, and checks that every `.B8S` in `games/` and `programs/` holds the code of its `.TXT`. `test_games.py NAME` runs one game's tests |
 | `chktab.py`, `chktab09.py`, `chktab6502.py` | Check the dispatch-table layout rules on Z80/8080, 6809 and zero-page 6502 listings |
 | `chkbr6502.py` | Checks every 6502 branch against its target |
 | `test_tweets.py` | Plays the tiny games in `games/b8sms/`, `games/tweet140/`, `games/tweet280/` and `games/longer/` the same way, and checks each against its folder's limit: 160, 140, 280 or 390 characters (see `docs/b8sms.md`). `test_tweets.py NAME` runs one game's tests; `--all` adds the slow check that Tic-tac-toe never loses |
-| `../../games/` | The games, at the root of the repository (its README says how to play each one). The programs are each in two files: `NAME.TXT`, with comments that explain how it works, and `NAME.B8S`, the same code stripped of comments and white space. `TINYBAS.B8S` is part of the suite. `games/b8sms/`, `games/tweet140/`, `games/tweet280/` and `games/longer/` hold the tiny games, which are already stripped and have no `.TXT` |
+| `../../games/` | The games, at the root of the repository (its README says how to play each one). The programs are each in two files: `NAME.TXT`, with comments that explain how it works, and `NAME.B8S`, the same code stripped of comments and white space. `games/b8sms/`, `games/tweet140/`, `games/tweet280/` and `games/longer/` hold the tiny games, which are already stripped and have no `.TXT` |
+| `../../programs/` | Programs that aren't games, in the same two files: Tiny BASIC (`TINYBAS.B8S` is part of the suite), MON, SIEVE, PI and MANDEL |
 | `b8strip.py` | Strips a program of comments and white space (but keeps a comment that starts with `!`), keeping a space only where B8Script needs one (`b8strip.py ../../games/NAME.TXT ../../games/NAME.B8S` after editing a game). `--same A B` checks that two files hold the same code |
 | `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files next to each source |
 | `patchinfo.py` | Where n?'s timing count sits in each CP/M .COM, to patch it for a machine whose BDOS is faster or slower (see `../TIMING.B8S`) |

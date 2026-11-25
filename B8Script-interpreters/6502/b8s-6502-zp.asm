@@ -11,7 +11,7 @@
 ;  addressing modes make nearly every handler smaller. The language is the
 ;  same; the memory map and the machine-code contract differ.
 ;
-;  Two switches, set in the EQU lines below:
+;  The switches, set in the EQU lines below:
 ;    CHECKED  0 = no checks: whatever the spec calls unsafe is not caught
 ;             1 = a checked build, as in the spec's "Errors and checked
 ;                 builds": at startup every word cell points at 0000h (see
@@ -29,12 +29,24 @@
 ;             1 = send ANSI (VT100) sequences through CONOUT
 ;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
 ;                 CONAT (see the equates)
+;    QUICK    1 = the speed-ups that cost bytes: a skip cache, a faster skip,
+;                 '*' and '/' quicker for small and power-of-two operands, and
+;                 more (see "Speed-ups"). 0, the default, is the smallest build.
+;    FAST     1 = the speed build: QUICK and a dispatch table besides, with
+;                 no size limit (see "The speed build").
+;  QUICK and FAST builds keep the skip cache in the page at $0200, which no
+;  other build uses (this interpreter's data stack is in zero page).
 ;
 ;  Assembler: asm80, C6502 mode.
 ; =============================================================================
 
 CHECKED EQU     0               ; 1 = checked build
 ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
+QUICK   EQU     0               ; 1 = the speed-ups that cost bytes (see "Speed-ups")
+FAST    EQU     0               ; 1 = the speed build: see "The speed build"
+QK      EQU     QUICK+FAST-QUICK*FAST ; (the speed-ups: QUICK, or the speed build)
+QUICKU  EQU     QK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
+                                ;  builds take; the speed build has its own)
 
 ; -----------------------------------------------------------------------------
 ;  Registers and zero page
@@ -62,7 +74,9 @@ ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
 ;  to it). The high byte comes from the character: the handlers of the first
 ;  N1 characters start in the image's first page, those of the characters from
 ;  N1 up to N2 in its second, and the rest in its third. The layout below
-;  keeps to that, and testing/chktab6502.py checks it in every build.
+;  keeps to that, and testing/chktab6502.py checks it in every build but the
+;  speed build (FAST = 1), which dispatches through a full table instead:
+;  see "The speed build" at the end.
 ;
 ;  Every punctuation handler starts with the carry clear (the dispatcher
 ;  leaves it so). Several of them count on that, where the comments say.
@@ -84,6 +98,7 @@ T1      EQU     05h
 T2      EQU     06h
 D0      EQU     T1              ; 05-06 the divisor (division, number printing)
 D1      EQU     T2
+V       EQU     T0              ; (FAST) 04-05 the dispatcher's jump vector
         IF      CHECKED
 PLACE   EQU     08h             ; 08-09 the address of the character being
                                 ;   run, for the error report. No handler
@@ -103,6 +118,7 @@ LN      EQU     0Ah             ; 0A-0B the line being reported
 ;    0010-00EF  the data stack: 112 cells. X = F0 when it is empty. (0E and
 ;               0F are the scratch under the top cell when it is full.)
 ;    0100-01FF  hardware stack = return stack, S starts at FF
+;    0200       CPAGE (QK builds only): the skip cache
 ;    0400       LET  letter cells: A..Z at +00..+33, a..z at +40..+73 (a word
 ;               cell is 64 bytes below its variable), heap pointer at +7C,
 ;               the -n? line buffer at +80..+FF. The checked build's cells
@@ -110,7 +126,8 @@ LN      EQU     0Ah             ; 0A-0B the line being reported
 ;               and every build's: the countdown CDOWN at +79, KEYBUF (the
 ;               held key) at +7A, BRKOFF (the break-off cell) at +7B.
 ;    0500       PROG the program text, NUL-terminated; the heap follows
-;    E000       the interpreter (ROM)
+;    E000       the interpreter (ROM). In the speed build its first two
+;               pages are the dispatch table, and start is at E200
 ;
 ;  The stacks sit below the letter page, so "the program's own space" (what
 ;  the checked build lets ! and . write) is the page range LETPAGE..HEAPLIM-1.
@@ -147,6 +164,7 @@ RSV     EQU     LET+35h         ; checked: S as it was before this character
 PEND    EQU     LET+38h         ; checked: the program's end, where the heap
                                 ;   starts: it may not be released below it
 LINEBUF EQU     LET+80h         ; -n? text, ending in CR
+CPAGE   EQU     02h             ; (QK) the skip cache's page
 RSLIM   EQU     20h             ; lowest S allowed (checked build)
 MSLOOP  EQU     40              ; n? inner loop count for about 1 ms; tune it
                                 ;   (each pass calls KEY once; the wait for a
@@ -158,6 +176,106 @@ HALFPG  EQU     BASE/512        ; (the dispatcher doubles this to get a page)
 N1      EQU     8               ; ! " # $ % & ' (  start in the first page,
 N2      EQU     21              ; ) * + , - . / : ; < = > ?  in the second,
                                 ; @ [ \ ] ^ _ ` { | } ~  in the third
+
+; The speed build's dispatcher (FAST = 1; see "The speed build"), inline at
+; the end of its own entries. NEXTF reads the next character and jumps
+; through the table:
+;     LDY #0 / LDA (IP),Y / INC IP / BNE $+4 / INC IP+1 / TAY /
+;     LDA DTL,Y / STA V / LDA DTH,Y / STA V+1 / JMP (V)
+; NEXTA is the same from INC IP on: the character is already in A, and IP is
+; still at it (it skips the LDY and the LDA); NEXTY is the same with the
+; character in Y (it skips the TAY too). In the checked build all three are
+; JMP fnext, which checks the stacks first. (The bytes are written out with
+; DS, because asm80 does not nest an IF in a macro inside another IF; and
+; DS takes the addresses as these equates.)
+        IF      FAST
+ADTL    EQU     DTL
+ADTH    EQU     DTH
+AFNX    EQU     fnext
+        ENDIF
+        IF      1-FAST
+ADTL    EQU     0
+ADTH    EQU     0
+AFNX    EQU     0
+        ENDIF
+.macro  NEXTF
+        DS      1-CHECKED,0A0h  ; LDY #0
+        DS      1-CHECKED,0
+        DS      1-CHECKED,0B1h  ; LDA (IP),Y
+        DS      1-CHECKED,IP
+        DS      1-CHECKED,0E6h  ; INC IP
+        DS      1-CHECKED,IP
+        DS      1-CHECKED,0D0h  ; BNE $+4
+        DS      1-CHECKED,2
+        DS      1-CHECKED,0E6h  ; INC IP+1
+        DS      1-CHECKED,IP+1
+        DS      1-CHECKED,0A8h  ; TAY
+        DS      1-CHECKED,0B9h  ; LDA DTL,Y
+        DS      1-CHECKED,ADTL&0FFh
+        DS      1-CHECKED,ADTL/256
+        DS      1-CHECKED,85h   ; STA V
+        DS      1-CHECKED,V
+        DS      1-CHECKED,0B9h  ; LDA DTH,Y
+        DS      1-CHECKED,ADTH&0FFh
+        DS      1-CHECKED,ADTH/256
+        DS      1-CHECKED,85h   ; STA V+1
+        DS      1-CHECKED,V+1
+        DS      1-CHECKED,6Ch   ; JMP (V)
+        DS      1-CHECKED,V
+        DS      1-CHECKED,0
+        DS      CHECKED,4Ch     ; JMP fnext (checked)
+        DS      CHECKED,AFNX&0FFh
+        DS      CHECKED,AFNX/256
+.endm
+.macro  NEXTA
+        DS      1-CHECKED,0E6h  ; INC IP
+        DS      1-CHECKED,IP
+        DS      1-CHECKED,0D0h  ; BNE $+4
+        DS      1-CHECKED,2
+        DS      1-CHECKED,0E6h  ; INC IP+1
+        DS      1-CHECKED,IP+1
+        DS      1-CHECKED,0A8h  ; TAY
+        DS      1-CHECKED,0B9h  ; LDA DTL,Y
+        DS      1-CHECKED,ADTL&0FFh
+        DS      1-CHECKED,ADTL/256
+        DS      1-CHECKED,85h   ; STA V
+        DS      1-CHECKED,V
+        DS      1-CHECKED,0B9h  ; LDA DTH,Y
+        DS      1-CHECKED,ADTH&0FFh
+        DS      1-CHECKED,ADTH/256
+        DS      1-CHECKED,85h   ; STA V+1
+        DS      1-CHECKED,V+1
+        DS      1-CHECKED,6Ch   ; JMP (V)
+        DS      1-CHECKED,V
+        DS      1-CHECKED,0
+        DS      CHECKED,4Ch     ; JMP fnext (checked)
+        DS      CHECKED,AFNX&0FFh
+        DS      CHECKED,AFNX/256
+.endm
+.macro  NEXTY
+        DS      1-CHECKED,0E6h  ; INC IP
+        DS      1-CHECKED,IP
+        DS      1-CHECKED,0D0h  ; BNE $+4
+        DS      1-CHECKED,2
+        DS      1-CHECKED,0E6h  ; INC IP+1
+        DS      1-CHECKED,IP+1
+        DS      1-CHECKED,0B9h  ; LDA DTL,Y
+        DS      1-CHECKED,ADTL&0FFh
+        DS      1-CHECKED,ADTL/256
+        DS      1-CHECKED,85h   ; STA V
+        DS      1-CHECKED,V
+        DS      1-CHECKED,0B9h  ; LDA DTH,Y
+        DS      1-CHECKED,ADTH&0FFh
+        DS      1-CHECKED,ADTH/256
+        DS      1-CHECKED,85h   ; STA V+1
+        DS      1-CHECKED,V+1
+        DS      1-CHECKED,6Ch   ; JMP (V)
+        DS      1-CHECKED,V
+        DS      1-CHECKED,0
+        DS      CHECKED,4Ch     ; JMP fnext (checked)
+        DS      CHECKED,AFNX&0FFh
+        DS      CHECKED,AFNX/256
+.endm
 
 ; udiv: unsigned TOS / D (D <= 8000h). TOS becomes the quotient; the
 ; remainder is left in the scratch under it, at $FE,X and $FF,X.
@@ -196,7 +314,390 @@ ud2:    DEY
         RTS
 .endm
 
-        ORG     BASE
+; (QK) '*' with an operand below 256 takes 8 rounds, not 16: that one
+; becomes the multiplier, so the product's low byte comes out of the NOS
+; cell's low byte and its high byte is left in T0. Most multiplications have
+; one: a count or a small constant. (A macro, as it sits in a different
+; place in the checked and the unchecked builds, to keep the handlers'
+; pages.)
+.macro  MULQ
+mulq:   LDA     3,X
+        BEQ     mq8             ; the multiplier is below 256
+        LDA     1,X
+        BNE     mq16
+        JSR     h_swap          ; the multiplicand is: it becomes the multiplier
+mq8:    LDY     #8
+        LDA     #0
+        STA     T0
+        LSR     2,X
+mq1:    BCC     mq2
+        STA     T1
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        LDA     T1
+        ADC     1,X
+mq2:    ROR
+        ROR     T0
+        ROR     2,X
+        DEY
+        BNE     mq1
+        LDA     T0
+        STA     3,X
+        INX
+        INX
+        RTS
+mq16:   LDY     #16             ; 16 rounds, as h_mul does without QK
+        LDA     #0
+        STA     T0
+        LSR     3,X
+        ROR     2,X
+mq3:    BCC     mq4
+        STA     T1
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        LDA     T1
+        ADC     1,X
+mq4:    ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        DEY
+        BNE     mq3
+        INX
+        INX
+        RTS
+.endm
+; (MULF: the same for the speed build, the rounds unrolled, with Y for the
+; upper half's high byte while the low one is added)
+.macro  MULF
+mulq:   LDA     3,X
+        BEQ     mq8             ; the multiplier is below 256
+        LDA     1,X
+        BEQ     mqs
+        JMP     mq16            ; (out of a branch's reach)
+mqs:    JSR     h_swap          ; the multiplicand is: it becomes the multiplier
+mq8:    LDA     #0
+        STA     T0
+        LSR     2,X
+        BCC     mu0
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mu0:    ROR
+        ROR     T0
+        ROR     2,X
+        BCC     mu1
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mu1:    ROR
+        ROR     T0
+        ROR     2,X
+        BCC     mu2
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mu2:    ROR
+        ROR     T0
+        ROR     2,X
+        BCC     mu3
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mu3:    ROR
+        ROR     T0
+        ROR     2,X
+        BCC     mu4
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mu4:    ROR
+        ROR     T0
+        ROR     2,X
+        BCC     mu5
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mu5:    ROR
+        ROR     T0
+        ROR     2,X
+        BCC     mu6
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mu6:    ROR
+        ROR     T0
+        ROR     2,X
+        BCC     mu7
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mu7:    ROR
+        ROR     T0
+        ROR     2,X
+        LDA     T0
+        STA     3,X
+        INX
+        INX
+        RTS
+mq16:   LDA     #0
+        STA     T0
+        LSR     3,X
+        ROR     2,X
+        BCC     mw0
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw0:    ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw1
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw1:    ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw2
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw2:    ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw3
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw3:    ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw4
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw4:    ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw5
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw5:    ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw6
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw6:    ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw7
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw7:    ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw8
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw8:    ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw9
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw9:    ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw10
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw10:   ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw11
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw11:   ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw12
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw12:   ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw13
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw13:   ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw14
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw14:   ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        BCC     mw15
+        TAY
+        CLC
+        LDA     T0
+        ADC     0,X
+        STA     T0
+        TYA
+        ADC     1,X
+mw15:   ROR
+        ROR     T0
+        ROR     3,X
+        ROR     2,X
+        INX
+        INX
+        RTS
+.endm
+
+; (QK) A true ')' reads the block start where it is, under the step frame,
+; instead of popping it and pushing it back. The break key is looked at as
+; pnext would. (A macro, for the same reason.)
+.macro  CLOSEQ
+closeq: TXA                     ; (TSX trashes X)
+        TSX
+        LDY     103h,X
+        STY     IP
+        LDY     104h,X
+        STY     IP+1
+        TAX
+        DEC     CDOWN
+        BEQ     cq1
+        RTS                     ; into the loop
+cq1:    PLA
+        PLA                     ; the step frame
+        JMP     pkey
+.endm
+
+FTAB    EQU     BASE            ; (FAST: the speed build's table, two pages,
+        ORG     BASE+FAST*512   ;   comes first, and the code after it)
 
 ; =============================================================================
 ;  Page 1 of 3. Startup: find the NUL, the heap starts after it
@@ -214,6 +715,13 @@ start:  LDX     #0FFh
 stz:    STA     LET,Y
         DEY
         BPL     stz
+        ENDIF
+        IF      QK
+        LDA     #0              ; an empty skip cache (a start of 0000h
+        TAY                     ;   matches no skip)
+skc:    STA     CPAGE*256,Y
+        INY
+        BNE     skc
         ENDIF
         JSR     rstip
 st1:    JSR     getc
@@ -256,12 +764,18 @@ st1:    JSR     getc
 ; falls in here too, which does no harm.)
 pnext:  DEC     CDOWN
         BNE     next
-        JSR     KEY
+pkey:   JSR     KEY
         BEQ     next            ; no key
         STA     KEYBUF          ; held for the next '?'
         JSR     chk3            ; (Ctrl-C: back only if the break key is off)
-next:   JSR     step
+next:
+        ENDIF
+        IF      (1-CHECKED)*(1-FAST)
+        JSR     step
         JMP     next
+        ENDIF
+        IF      (1-CHECKED)*FAST
+        JMP     fnext           ; (the speed build: see "The speed build")
         ENDIF
         IF      CHECKED
         JMP     next
@@ -416,10 +930,10 @@ an1:    LDA     0,X
 ; '(' ( flag -- ): true pushes the block start and enters; false skips to
 ; the matching ')'.
 h_open: JSR     flag            ; (keeps the carry clear)
-        IF      1-CHECKED
+        IF      (1-CHECKED)*(1-QK)
         BEQ     skip
         ENDIF
-        IF      CHECKED
+        IF      CHECKED+QK
         BEQ     skpar
         ENDIF
 ; pushn: take the step frame off, push the reading position on the return
@@ -444,7 +958,7 @@ nxt:    JMP     pnext
 ; skip: read past text to the closer at this level, and return it in A.
 ; Brackets of both kinds count together; strings are stepped over whole. A
 ; NUL first ends the program. (The checked build's skip is further down.)
-        IF      1-CHECKED
+        IF      (1-CHECKED)*(1-QK)
 skip:   LDA     #0
         STA     T2              ; depth
 sk1:    JSR     getc
@@ -471,6 +985,12 @@ endprog:JMP     EXIT
 ; A false ( skips: the wrong closer for it is ].
 skpar:  LDA     #']'
         JMP     skip
+        ENDIF
+        IF      (1-CHECKED)*QK
+skpar:  JMP     skip            ; (QK: the skip is further down)
+        ENDIF
+        IF      (1-CHECKED)*QK*(1-FAST)
+        MULQ                    ; (QK: here, where the skip was)
         ENDIF
 
 
@@ -553,6 +1073,7 @@ bool:   LDA     #0
 ; leaves from the bottom while the product comes in at the top, through
 ; A:T0 above it; after 16 rounds the cell holds the low 16 bits, which are
 ; all that is kept. Dropping TOS (the multiplicand) leaves it on top.
+        IF      1-QK
 h_mul:  LDY     #16             ; the round count
         LDA     #0
         STA     T0              ; A:T0 = the upper half
@@ -575,6 +1096,10 @@ ml2:    ROR
         INX
         INX
         RTS
+        ENDIF
+        IF      QK
+h_mul:  JMP     mulq            ; (QK: see Speed-ups)
+        ENDIF
 
 ; '/' ( a b -- q r ): the remainder is on top. Truncates toward zero; r takes
 ; a's sign. Divide |a| by |b|, then q gets the sign of a XOR b and r the sign
@@ -623,7 +1148,12 @@ seta:   STA     0,X             ; TOS = A
 ; carry clear, as it is here, the address popped is pushed back.
 h_close:JSR     flag
         BEQ     rdrop
+        IF      1-QK
         BNE     ret1            ; always
+        ENDIF
+        IF      QK
+        JMP     closeq          ; (QK: see Speed-ups)
+        ENDIF
 
 ; '?' ( n -- c ) or ( -n -- addr )
 ;   n > 0: wait about n ms for a key; 0 if none came
@@ -915,7 +1445,496 @@ chkst:  PHA
 ;  The rest: no handler starts past this point
 ; =============================================================================
 
+        IF      1-QK
         UDIV
+        ENDIF
+        IF      QK
+;  ---- Speed-ups (QK builds) ---------------------------------------------
+;  '*' is at mulq (in page 1 unchecked, to keep the handlers' pages; here
+;  checked and in the speed build), x@ and x! (unchecked) at lowq.
+        ENDIF
+        IF      CHECKED*QK*(1-FAST)
+        MULQ
+        ENDIF
+        IF      FAST
+        MULF
+        ENDIF
+        IF      QK
+        CLOSEQ
+        ENDIF
+        IF      QUICKU
+; a-z, in the unchecked QK builds: a variable followed by '@' or '!' is
+; fetched or stored in the same step (x@ is the commonest pair in most
+; programs). A checked build checks the stacks between the two, so it keeps
+; them apart. (pvar calls lowp, which only pushes.)
+lowq:   ASL
+        STA     T0              ; the cell's offset in the letter page
+        LDY     #0
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     lwf
+        CMP     #'!'
+        BEQ     lws
+        LDA     T0
+        LDY     #>LET
+        JMP     pushay          ; the address
+lwf:    JSR     incip           ; x@: TOS = the cell's value
+        LDY     T0
+        DEX
+        DEX
+        LDA     LET,Y
+        STA     0,X
+        LDA     LET+1,Y
+        STA     1,X
+        RTS
+lws:    JSR     incip           ; x!: the cell = TOS, and it is dropped
+        LDY     T0
+        LDA     0,X
+        STA     LET,Y
+        LDA     1,X
+        STA     LET+1,Y
+        INX
+        INX
+        RTS
+        ENDIF
+        IF      QK
+; The skip cache. Nearly every skip is one that has happened before (a loop
+; skips the same false block on every pass), so the first scan from each
+; place is remembered: 64 entries of {start, the closer's address}, in CPAGE,
+; found by the start's low byte times 4. Only skips that start in the
+; program text are kept (the line buffer changes); the cache is emptied when
+; the program starts. A program that changes its own text while it runs is
+; not looked after. Where the skip started is kept in the scratch under the
+; top cell, $FE,X and $FF,X. (The checked build: A holds the wrong closer on
+; the way in, as at the checked skip above.)
+skip:
+        ENDIF
+        IF      CHECKED*QK
+        STA     T0
+        ENDIF
+        IF      QK
+        LDA     IP+1
+        CMP     #>PROG
+        BCC     sks             ; below the program text: no cache
+        LDA     IP
+        ASL
+        ASL
+        TAY                     ; Y -> the entry
+        LDA     IP
+        CMP     CPAGE*256,Y
+        BNE     sks
+        LDA     IP+1
+        CMP     CPAGE*256+1,Y
+        BNE     sks
+        LDA     CPAGE*256+2,Y   ; a hit: the IP goes to the closer, which is
+        STA     IP              ;   read
+        LDA     CPAGE*256+3,Y
+        STA     IP+1
+        LDY     #0
+        LDA     (IP),Y
+        JMP     incip
+sks:    LDA     IP
+        STA     0FEh,X
+        LDA     IP+1
+        STA     0FFh,X
+        LDY     #0
+        STY     T2              ; depth
+; The scan reads at IP+Y. Most characters are nothing to it, and two range
+; tests rule them out: * to Z, and ^ and up. Only NUL " ( ) [ ] count.
+sq1:    LDA     (IP),Y
+        INY
+        BEQ     sqw
+sq2:    CMP     #5Eh
+        BCS     sq1             ; ^ _ ` a-z { | } ~ and up: nothing
+        CMP     #5Bh
+        BCS     sqb             ; [ \ ]
+        CMP     #2Ah
+        BCS     sq1             ; * to Z: nothing
+        CMP     #28h
+        BEQ     sqo             ; (
+        BCS     sqc             ; )
+        CMP     #22h
+        BEQ     sqq             ; a string
+        CMP     #1
+        BCS     sq1             ; the rest below '(': nothing
+        ENDIF
+        IF      QK*(1-CHECKED)
+        JMP     EXIT            ; NUL: the end of the program
+        ENDIF
+        IF      QK*CHECKED
+        JMP     sknul
+        ENDIF
+        IF      QK
+sqw:    INC     IP+1            ; Y went round: on into the next page
+        BNE     sq2             ; always
+sqq:    JSR     sqip            ; a string: step over it
+        JSR     skipstr
+        ENDIF
+        IF      QK*CHECKED
+        BNE     sqq1
+        JMP     sknul           ; the string ran into the end
+sqq1:
+        ENDIF
+        IF      QK
+        LDY     #0
+        BEQ     sq1             ; always
+sqo:    INC     T2              ; an opener
+        JMP     sq1
+sqb:    CMP     #5Ch
+        BEQ     sq1             ; '\' is nothing here
+        BCC     sqo             ; [
+sqc:    DEC     T2              ; ) ]
+        BPL     sq1
+        JSR     sqip            ; the closer at this level: the IP past it
+        ENDIF
+        IF      QK*CHECKED
+        CMP     T0
+        BNE     sqc1
+        JMP     e_nest          ; the wrong kind
+sqc1:
+        ENDIF
+        IF      QK
+        PHA
+        LDA     0FFh,X          ; remember the skip, if it started in the
+        CMP     #>PROG          ;   program text
+        BCC     sq9
+        LDA     0FEh,X
+        ASL
+        ASL
+        TAY
+        LDA     0FEh,X
+        STA     CPAGE*256,Y
+        LDA     0FFh,X
+        STA     CPAGE*256+1,Y
+        LDA     IP
+        SEC
+        SBC     #1
+        STA     CPAGE*256+2,Y   ; the closer's address
+        LDA     IP+1
+        SBC     #0
+        STA     CPAGE*256+3,Y
+sq9:    PLA
+        RTS                     ; the closer at this level
+; sqip: IP = IP + Y. Keeps A.
+sqip:   PHA
+        TYA
+        CLC
+        ADC     IP
+        STA     IP
+        BCC     sp1
+        INC     IP+1
+sp1:    PLA
+        RTS
+
+; udiv (QK): as the macro UDIV, and any power of two is shifts: 2, and 32,
+; 64, 256 and the like, which fixed point and byte work use all the time.
+udiv:   LDA     #0
+        STA     0FEh,X
+        STA     0FFh,X
+        LDY     D0
+        LDA     D1
+        BNE     uq1             ; 256 and up
+        TYA
+        BEQ     ud0             ; by 0: the long way (it means nothing anyway)
+        DEY
+        TYA
+        AND     D0
+        BNE     ud0             ; not a power of two
+        TYA                     ; by 2^k below 256: r = a & (2^k - 1),
+        AND     0,X
+        STA     0FEh,X
+        LDA     D0              ;   and q = a >> k
+        BNE     uq2             ; always
+uq1:    TYA
+        BNE     ud0             ; not a power of two
+        LDY     D1
+        DEY
+        TYA
+        AND     D1
+        BNE     ud0             ; not a power of two
+        TYA                     ; by 2^k, 256 and up: r = a & (2^k - 1),
+        AND     1,X
+        STA     0FFh,X
+        LDA     0,X
+        STA     0FEh,X
+        LDA     1,X             ;   and q = (a >> 8) >> (k - 8)
+        STA     0,X
+        LDA     #0
+        STA     1,X
+        LDA     D1
+uq2:    LSR                     ; a bit of 2^k: one shift for each 0 below
+        BCS     uq9             ;   the 1
+uq3:    LSR     1,X
+        ROR     0,X
+        LSR
+        BCC     uq3
+uq9:    RTS
+        ENDIF
+        IF      QK*(1-FAST)
+ud0:    LDY     #16
+ud1:    ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        STA     T0
+        LDA     0FFh,X
+        SBC     D1
+        BCC     ud2
+        STA     0FFh,X
+        LDA     T0
+        STA     0FEh,X
+        INC     0,X             ; the quotient bit (bit 0 is free)
+ud2:    DEY
+        BNE     ud1
+        RTS
+        ENDIF
+        IF      FAST
+ud0:                            ; (the speed build: the 16 rounds unrolled)
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv0
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv0:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv1
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv1:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv2
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv2:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv3
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv3:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv4
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv4:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv5
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv5:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv6
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv6:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv7
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv7:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv8
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv8:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv9
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv9:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv10
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv10:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv11
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv11:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv12
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv12:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv13
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv13:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv14
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv14:
+        ASL     0,X
+        ROL     1,X
+        ROL     0FEh,X
+        ROL     0FFh,X
+        SEC
+        LDA     0FEh,X
+        SBC     D0
+        TAY
+        LDA     0FFh,X
+        SBC     D1
+        BCC     uv15
+        STA     0FFh,X
+        STY     0FEh,X
+        INC     0,X
+uv15:
+        RTS
+        ENDIF
 
 ; pesc: the escapes of '$'. A = the character after the '/', 60h to 7Eh, and
 ; the carry is clear. Each returns into the loop.
@@ -945,7 +1964,7 @@ pcur:   JMP     CONCUR          ; `  hide: the carry is clear
 ; lower: that pushes the variable's address, '@' fetches it, and '#' prints
 ; it and drops it: TOS is the string's address again.
 pvar:   ADC     #39h
-        JSR     lower
+        JSR     lowp
         JSR     h_fetch
         JMP     h_num
 
@@ -1025,11 +2044,16 @@ nip:    JSR     h_swap          ; nip: ( a b -- b )
 ; falls in here too, which does no harm.)
 pnext:  DEC     CDOWN
         BNE     next
-        JSR     KEY
+pkey:   JSR     KEY
         BEQ     next            ; no key
         STA     KEYBUF          ; held for the next '?'
         JSR     chk3            ; (Ctrl-C: back only if the break key is off)
 next:
+        ENDIF
+        IF      CHECKED*FAST
+        JMP     fnext           ; (the speed build: see "The speed build")
+        ENDIF
+        IF      CHECKED*(1-FAST)
         ; Both stacks are checked once per character, after it has run. The
         ; return stack has overrun when S is below RSLIM: an overflow leaves
         ; it at 1Eh or 1Fh, an underflow wraps it to 01h (no handler pulls
@@ -1057,6 +2081,8 @@ next:
         STA     PLACE+1
         JSR     step
         JMP     next
+        ENDIF
+        IF      CHECKED
 ; S/R are overflows, s/r underflows. After an underflow that stack counts as
 ; empty.
 e_rstack:LDA    RSV
@@ -1078,6 +2104,8 @@ ejmp:   JMP     error
 ; which takes either. Meeting the wrong closer at this level, or the end
 ; (a NUL, or a string that runs into it), stops with N, except for \,
 ; which then ends the program as before.
+        ENDIF
+        IF      CHECKED*(1-QK)
 skip:   STA     T0
         LDA     #0
         STA     T2              ; depth
@@ -1102,6 +2130,8 @@ sk4:    DEC     T2
         RTS                     ; the closer at this level
 sk3:    INC     T2
         BNE     sk1
+        ENDIF
+        IF      CHECKED
 sknul:  LDA     T0
         BNE     e_nest          ; ( and [ stop with N
         JMP     EXIT            ; \ ends the program
@@ -1181,6 +2211,7 @@ e_undef:PLA
         BNE     ejmp2           ; always
         ENDIF
 
+
 ; step: read one character and sort it by range.
 ;    00h          end of program
 ;    01h-20h, 7Fh-FFh   ignored
@@ -1252,7 +2283,16 @@ puship: LDA     IP              ; push the reading position
         BNE     pushay          ; always: no program is in page zero
 
 ; a-z: push the cell's address (the cell is the variable)
-lower:  ASL
+;  (the unchecked QK builds do x@ and x! in one step: lowq)
+        IF      QUICKU
+lower:  JMP     lowq
+lowp:
+        ENDIF
+        IF      1-QUICKU
+lower:
+lowp:
+        ENDIF
+        ASL
         LDY     #>LET
 ; pushay: push a cell: A = its low byte, Y = its high byte
 pushay: DEX
@@ -1267,6 +2307,7 @@ flag:   INX
         LDA     0FEh,X
         ORA     0FFh,X
         RTS
+
 
 ; =============================================================================
 ;  Dispatch table: the low byte of (handler - 1) for each punctuation
@@ -1529,3 +2570,1522 @@ lc9:    LDA     P
         INC     CO+1
 lc8:    RTS
         ENDIF
+
+; =============================================================================
+;  The speed build (FAST = 1)
+;
+;  The inner loop is a table: 256 entries, the low bytes of the handlers'
+;  addresses in one page (DTL) and the high bytes in the next (DTH). The
+;  dispatcher, NEXTF, is inline at the end of the speed build's own entries,
+;  so there is no JSR and no RTS per character:
+;      LDY #0 / LDA (IP),Y / INC IP / BNE $+4 / INC IP+1 / TAY /
+;      LDA DTL,Y / STA V / LDA DTH,Y / STA V+1 / JMP (V)
+;  The letters and digits have one entry each, which knows its cell or its
+;  value already; the commonest punctuation is written for the table; the
+;  rest reach the ordinary handlers through a thunk (CLC / JSR handler /
+;  NEXTF, or JMP fnext for the rare ones), which gives them the step frame
+;  and the clear carry they expect.
+;  The ordinary handlers that end at next or pnext go to fnext, the same
+;  dispatcher. In the checked build NEXTF is JMP fnext, which checks the
+;  stacks first, as next does in the other builds.
+;  Everything here is read-only: the image can be ROM, as the others are.
+;  The table takes the image's first two pages (E000h-E1FFh); the code
+;  starts after it.
+; =============================================================================
+        IF      FAST
+; fnext: the dispatcher, after the checks of the checked build
+fnext:
+        ENDIF
+        IF      FAST*CHECKED
+        ; (the same checks as next in the other checked builds)
+        TXA                     ; TSX trashes X: keep it in A
+        TSX
+        STX     RSV
+        CPX     #RSLIM
+        TAX
+        BCS     fn1
+        JMP     e_rstack
+fn1:    CPX     #DSE+1
+        BCS     fn2
+        CPX     #DSFULL
+        BCS     fn3
+        JMP     e_sovr
+fn2:    JMP     e_sund
+fn3:    LDA     IP
+        STA     PLACE
+        LDA     IP+1
+        STA     PLACE+1
+        ENDIF
+        IF      FAST
+        LDY     #0
+        LDA     (IP),Y
+        INC     IP
+        BNE     fn4
+        INC     IP+1
+fn4:    TAY
+        LDA     DTL,Y
+        STA     V
+        LDA     DTH,Y
+        STA     V+1
+        JMP     (V)
+
+; fpoll: the break check of pnext, as a subroutine, for the entries that
+; look at the keyboard (a word call, a true ( and a true ))
+fpoll:  JSR     KEY
+        BEQ     fp9             ; no key
+        STA     KEYBUF          ; held for the next '?'
+        JMP     chk3            ; (Ctrl-C: back only if the break key is off)
+fp9:    RTS
+
+; The thunks: the rest of the punctuation, through the ordinary handlers
+ft_str: CLC                     ; "
+        JSR     h_str
+        JMP     fnext           ; (rare enough: the shared dispatcher)
+ft_num: CLC                     ; #
+        JSR     h_num
+        JMP     fnext           ; (rare enough: the shared dispatcher)
+ft_prt: CLC                     ; $
+        JSR     h_print
+        JMP     fnext           ; (rare enough: the shared dispatcher)
+ft_emit:CLC                     ; '
+        JSR     h_emit
+        JMP     fnext           ; (rare enough: the shared dispatcher)
+ft_div: CLC                     ; /
+        JSR     h_div
+        NEXTF
+ft_key: CLC                     ; ?
+        JSR     h_key
+        JMP     fnext           ; (rare enough: the shared dispatcher)
+ft_def: CLC                     ; [
+        JSR     h_def
+        NEXTF
+ft_brk: CLC                     ; \
+        JSR     h_break
+        NEXTF
+ft_alc: CLC                     ; _
+        JSR     h_alloc
+        JMP     fnext           ; (rare enough: the shared dispatcher)
+ft_grv: CLC                     ; `
+        JSR     h_grave
+        JMP     fnext           ; (rare enough: the shared dispatcher)
+ft_tor: CLC                     ; {
+        JSR     h_tor
+        JMP     fnext           ; (rare enough: the shared dispatcher)
+ft_frr: CLC                     ; }
+        JSR     h_fromr
+        JMP     fnext           ; (rare enough: the shared dispatcher)
+        ENDIF
+        IF      FAST*CHECKED
+ft_sto: CLC                     ; ! (checked: it checks the address)
+        JSR     h_store
+        JMP     fnext
+ft_cst: CLC                     ; . (the same)
+        JSR     h_cstore
+        JMP     fnext
+        ENDIF
+        IF      FAST
+
+; The commonest punctuation, written for the table
+fs_add: CLC                     ; +
+        LDA     0,X
+        ADC     2,X
+        STA     2,X
+        LDA     1,X
+        ADC     3,X
+        STA     3,X
+        INX
+        INX
+        NEXTF
+fs_sub: LDY     #0              ; -
+        LDA     (IP),Y
+        CMP     #3Ah
+        BCS     fsb1
+        CMP     #30h
+        BCS     fsb2            ; a digit next: a negative number
+fsb1:   SEC
+        LDA     2,X
+        SBC     0,X
+        STA     2,X
+        LDA     3,X
+        SBC     1,X
+        STA     3,X
+        INX
+        INX
+        NEXTF
+fsb2:   JSR     negnum
+        NEXTF
+fs_dup: LDA     0,X             ; :
+        LDY     1,X
+        DEX
+        DEX
+        STA     0,X
+        STY     1,X
+        NEXTF
+fs_drp: INX                     ; ;
+        INX
+        NEXTF
+fs_swp: LDA     0,X             ; %
+        LDY     2,X
+        STY     0,X
+        STA     2,X
+        LDA     1,X
+        LDY     3,X
+        STY     1,X
+        STA     3,X
+        NEXTF
+fs_fet: LDA     (0,X)           ; @
+        TAY
+        INC     0,X
+        BNE     fft1
+        INC     1,X
+fft1:   LDA     (0,X)
+        STA     1,X
+        STY     0,X
+        NEXTF
+fs_cft: LDA     (0,X)           ; ,
+        STA     0,X
+        LDA     #0
+        STA     1,X
+        NEXTF
+fs_lt:  LDA     2,X             ; < (as h_lt)
+        CMP     0,X
+        LDA     3,X
+        SBC     1,X
+        BVS     flt1
+        EOR     #80h
+flt1:   ASL
+        INX
+        INX
+        LDA     #0
+        ADC     #0FFh
+        STA     0,X
+        STA     1,X
+        NEXTF
+fs_gt:  LDA     0,X             ; > (b < a)
+        CMP     2,X
+        LDA     1,X
+        SBC     3,X
+        BVS     fgt1
+        EOR     #80h
+fgt1:   ASL
+        INX
+        INX
+        LDA     #0
+        ADC     #0FFh
+        STA     0,X
+        STA     1,X
+        NEXTF
+fs_eq:  LDY     #0              ; =
+        LDA     2,X
+        CMP     0,X
+        BNE     feq1
+        LDA     3,X
+        CMP     1,X
+        BNE     feq1
+        DEY
+feq1:   INX
+        INX
+        STY     0,X
+        STY     1,X
+        NEXTF
+fs_and: LDA     0,X             ; &
+        AND     2,X
+        STA     2,X
+        LDA     1,X
+        AND     3,X
+        STA     3,X
+        INX
+        INX
+        NEXTF
+fs_or:  LDA     0,X             ; |
+        ORA     2,X
+        STA     2,X
+        LDA     1,X
+        ORA     3,X
+        STA     3,X
+        INX
+        INX
+        NEXTF
+fs_xor: LDA     0,X             ; ^
+        EOR     2,X
+        STA     2,X
+        LDA     1,X
+        EOR     3,X
+        STA     3,X
+        INX
+        INX
+        NEXTF
+fs_not: LDA     0,X             ; ~
+        EOR     #0FFh
+        STA     0,X
+        LDA     1,X
+        EOR     #0FFh
+        STA     1,X
+        NEXTF
+fs_mul: JSR     h_mul           ; *
+        NEXTF
+fs_opn: INX                     ; (
+        INX
+        LDA     0FEh,X
+        ORA     0FFh,X
+        BEQ     fop1
+        LDA     IP+1            ; true: the block starts at the IP
+        PHA
+        LDA     IP
+        PHA
+        DEC     CDOWN
+        BNE     fop2
+        JSR     fpoll
+fop2:   NEXTF
+fop1:   JSR     skpo            ; false: skip to the matching )
+        NEXTF
+fs_cls: INX                     ; )
+        INX
+        LDA     0FEh,X
+        ORA     0FFh,X
+        BEQ     fcl1
+        TXA                     ; true: the block start, read where it is
+        TSX
+        LDY     101h,X
+        STY     IP
+        LDY     102h,X
+        STY     IP+1
+        TAX
+        DEC     CDOWN
+        BNE     fcl2
+        JSR     fpoll
+fcl2:   NEXTF
+fcl1:   PLA                     ; false: drop it
+        PLA
+        NEXTF
+fs_ret: PLA                     ; ]
+        STA     IP
+        PLA
+        STA     IP+1
+        NEXTF
+        ENDIF
+; skpo: a false ( skips (the checked build: ] is the wrong closer for it)
+        IF      FAST*CHECKED
+skpo:   LDA     #']'
+        JMP     skip
+        ENDIF
+        IF      FAST*(1-CHECKED)
+skpo:   JMP     skip
+; ! and . (unchecked)
+ft_sto: LDA     2,X             ; !
+        STA     (0,X)
+        INC     0,X
+        BNE     fst1
+        INC     1,X
+fst1:   LDA     3,X
+        STA     (0,X)
+        INX
+        INX
+        INX
+        INX
+        NEXTF
+ft_cst: LDA     2,X             ; .
+        STA     (0,X)
+        INX
+        INX
+        INX
+        INX
+        NEXTF
+        ENDIF
+        IF      FAST
+
+; 0-9: push the digit; more digits go on through rdnum. A character that
+; is not a digit is dispatched from A, as it has been read already.
+fd0:    DEX                     ; 0
+        DEX
+        LDA     #0
+        STA     0,X
+        LDA     #0
+        STA     1,X
+        TAY
+        LDA     (IP),Y
+        CMP     #3Ah
+        BCS     fd0a
+        CMP     #30h
+        BCC     fd0a
+        JMP     fdm             ; more digits
+fd0a:   NEXTA
+fd1:    DEX                     ; 1
+        DEX
+        LDA     #1
+        STA     0,X
+        LDA     #0
+        STA     1,X
+        TAY
+        LDA     (IP),Y
+        CMP     #3Ah
+        BCS     fd1a
+        CMP     #30h
+        BCC     fd1a
+        JMP     fdm             ; more digits
+fd1a:   NEXTA
+fd2:    DEX                     ; 2
+        DEX
+        LDA     #2
+        STA     0,X
+        LDA     #0
+        STA     1,X
+        TAY
+        LDA     (IP),Y
+        CMP     #3Ah
+        BCS     fd2a
+        CMP     #30h
+        BCC     fd2a
+        JMP     fdm             ; more digits
+fd2a:   NEXTA
+fd3:    DEX                     ; 3
+        DEX
+        LDA     #3
+        STA     0,X
+        LDA     #0
+        STA     1,X
+        TAY
+        LDA     (IP),Y
+        CMP     #3Ah
+        BCS     fd3a
+        CMP     #30h
+        BCC     fd3a
+        JMP     fdm             ; more digits
+fd3a:   NEXTA
+fd4:    DEX                     ; 4
+        DEX
+        LDA     #4
+        STA     0,X
+        LDA     #0
+        STA     1,X
+        TAY
+        LDA     (IP),Y
+        CMP     #3Ah
+        BCS     fd4a
+        CMP     #30h
+        BCC     fd4a
+        JMP     fdm             ; more digits
+fd4a:   NEXTA
+fd5:    DEX                     ; 5
+        DEX
+        LDA     #5
+        STA     0,X
+        LDA     #0
+        STA     1,X
+        TAY
+        LDA     (IP),Y
+        CMP     #3Ah
+        BCS     fd5a
+        CMP     #30h
+        BCC     fd5a
+        JMP     fdm             ; more digits
+fd5a:   NEXTA
+fd6:    DEX                     ; 6
+        DEX
+        LDA     #6
+        STA     0,X
+        LDA     #0
+        STA     1,X
+        TAY
+        LDA     (IP),Y
+        CMP     #3Ah
+        BCS     fd6a
+        CMP     #30h
+        BCC     fd6a
+        JMP     fdm             ; more digits
+fd6a:   NEXTA
+fd7:    DEX                     ; 7
+        DEX
+        LDA     #7
+        STA     0,X
+        LDA     #0
+        STA     1,X
+        TAY
+        LDA     (IP),Y
+        CMP     #3Ah
+        BCS     fd7a
+        CMP     #30h
+        BCC     fd7a
+        JMP     fdm             ; more digits
+fd7a:   NEXTA
+fd8:    DEX                     ; 8
+        DEX
+        LDA     #8
+        STA     0,X
+        LDA     #0
+        STA     1,X
+        TAY
+        LDA     (IP),Y
+        CMP     #3Ah
+        BCS     fd8a
+        CMP     #30h
+        BCC     fd8a
+        JMP     fdm             ; more digits
+fd8a:   NEXTA
+fd9:    DEX                     ; 9
+        DEX
+        LDA     #9
+        STA     0,X
+        LDA     #0
+        STA     1,X
+        TAY
+        LDA     (IP),Y
+        CMP     #3Ah
+        BCS     fd9a
+        CMP     #30h
+        BCC     fd9a
+        JMP     fdm             ; more digits
+fd9a:   NEXTA
+fdm:    JSR     rdnum           ; more digits
+        NEXTF
+
+; A-Z: call the word. The return address goes on the return stack, the
+; IP becomes the word's body, and the break key is looked at as pnext would.
+fuA:    LDA     IP+1            ; A
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+0
+        STA     IP
+        LDA     LET+1
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuAa
+        JSR     fpoll
+fuAa:   NEXTF
+fuB:    LDA     IP+1            ; B
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+2
+        STA     IP
+        LDA     LET+3
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuBa
+        JSR     fpoll
+fuBa:   NEXTF
+fuC:    LDA     IP+1            ; C
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+4
+        STA     IP
+        LDA     LET+5
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuCa
+        JSR     fpoll
+fuCa:   NEXTF
+fuD:    LDA     IP+1            ; D
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+6
+        STA     IP
+        LDA     LET+7
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuDa
+        JSR     fpoll
+fuDa:   NEXTF
+fuE:    LDA     IP+1            ; E
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+8
+        STA     IP
+        LDA     LET+9
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuEa
+        JSR     fpoll
+fuEa:   NEXTF
+fuF:    LDA     IP+1            ; F
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+10
+        STA     IP
+        LDA     LET+11
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuFa
+        JSR     fpoll
+fuFa:   NEXTF
+fuG:    LDA     IP+1            ; G
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+12
+        STA     IP
+        LDA     LET+13
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuGa
+        JSR     fpoll
+fuGa:   NEXTF
+fuH:    LDA     IP+1            ; H
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+14
+        STA     IP
+        LDA     LET+15
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuHa
+        JSR     fpoll
+fuHa:   NEXTF
+fuI:    LDA     IP+1            ; I
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+16
+        STA     IP
+        LDA     LET+17
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuIa
+        JSR     fpoll
+fuIa:   NEXTF
+fuJ:    LDA     IP+1            ; J
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+18
+        STA     IP
+        LDA     LET+19
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuJa
+        JSR     fpoll
+fuJa:   NEXTF
+fuK:    LDA     IP+1            ; K
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+20
+        STA     IP
+        LDA     LET+21
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuKa
+        JSR     fpoll
+fuKa:   NEXTF
+fuL:    LDA     IP+1            ; L
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+22
+        STA     IP
+        LDA     LET+23
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuLa
+        JSR     fpoll
+fuLa:   NEXTF
+fuM:    LDA     IP+1            ; M
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+24
+        STA     IP
+        LDA     LET+25
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuMa
+        JSR     fpoll
+fuMa:   NEXTF
+fuN:    LDA     IP+1            ; N
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+26
+        STA     IP
+        LDA     LET+27
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuNa
+        JSR     fpoll
+fuNa:   NEXTF
+fuO:    LDA     IP+1            ; O
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+28
+        STA     IP
+        LDA     LET+29
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuOa
+        JSR     fpoll
+fuOa:   NEXTF
+fuP:    LDA     IP+1            ; P
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+30
+        STA     IP
+        LDA     LET+31
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuPa
+        JSR     fpoll
+fuPa:   NEXTF
+fuQ:    LDA     IP+1            ; Q
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+32
+        STA     IP
+        LDA     LET+33
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuQa
+        JSR     fpoll
+fuQa:   NEXTF
+fuR:    LDA     IP+1            ; R
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+34
+        STA     IP
+        LDA     LET+35
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuRa
+        JSR     fpoll
+fuRa:   NEXTF
+fuS:    LDA     IP+1            ; S
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+36
+        STA     IP
+        LDA     LET+37
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuSa
+        JSR     fpoll
+fuSa:   NEXTF
+fuT:    LDA     IP+1            ; T
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+38
+        STA     IP
+        LDA     LET+39
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuTa
+        JSR     fpoll
+fuTa:   NEXTF
+fuU:    LDA     IP+1            ; U
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+40
+        STA     IP
+        LDA     LET+41
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuUa
+        JSR     fpoll
+fuUa:   NEXTF
+fuV:    LDA     IP+1            ; V
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+42
+        STA     IP
+        LDA     LET+43
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuVa
+        JSR     fpoll
+fuVa:   NEXTF
+fuW:    LDA     IP+1            ; W
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+44
+        STA     IP
+        LDA     LET+45
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuWa
+        JSR     fpoll
+fuWa:   NEXTF
+fuX:    LDA     IP+1            ; X
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+46
+        STA     IP
+        LDA     LET+47
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuXa
+        JSR     fpoll
+fuXa:   NEXTF
+fuY:    LDA     IP+1            ; Y
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+48
+        STA     IP
+        LDA     LET+49
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuYa
+        JSR     fpoll
+fuYa:   NEXTF
+fuZ:    LDA     IP+1            ; Z
+        PHA
+        LDA     IP
+        PHA
+        LDA     LET+50
+        STA     IP
+        LDA     LET+51
+        STA     IP+1
+        DEC     CDOWN
+        BNE     fuZa
+        JSR     fpoll
+fuZa:   NEXTF
+        ENDIF
+        IF      FAST*(1-CHECKED)
+; a-z, unchecked: a variable followed by @ or ! is fetched or stored in the
+; same step; otherwise its address is pushed, and the character after it,
+; read already, is dispatched from A or Y.
+fva:    LDY     #0              ; a
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvaf
+        CMP     #'!'
+        BEQ     fvas
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #40h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvaf:   LDY     #40h
+        JMP     fvat
+fvas:   LDY     #40h
+        JMP     fvst
+fvb:    LDY     #0              ; b
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvbf
+        CMP     #'!'
+        BEQ     fvbs
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #42h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvbf:   LDY     #42h
+        JMP     fvat
+fvbs:   LDY     #42h
+        JMP     fvst
+fvc:    LDY     #0              ; c
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvcf
+        CMP     #'!'
+        BEQ     fvcs
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #44h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvcf:   LDY     #44h
+        JMP     fvat
+fvcs:   LDY     #44h
+        JMP     fvst
+fvd:    LDY     #0              ; d
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvdf
+        CMP     #'!'
+        BEQ     fvds
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #46h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvdf:   LDY     #46h
+        JMP     fvat
+fvds:   LDY     #46h
+        JMP     fvst
+fve:    LDY     #0              ; e
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvef
+        CMP     #'!'
+        BEQ     fves
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #48h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvef:   LDY     #48h
+        JMP     fvat
+fves:   LDY     #48h
+        JMP     fvst
+fvf:    LDY     #0              ; f
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvff
+        CMP     #'!'
+        BEQ     fvfs
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #4Ah
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvff:   LDY     #4Ah
+        JMP     fvat
+fvfs:   LDY     #4Ah
+        JMP     fvst
+fvg:    LDY     #0              ; g
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvgf
+        CMP     #'!'
+        BEQ     fvgs
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #4Ch
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvgf:   LDY     #4Ch
+        JMP     fvat
+fvgs:   LDY     #4Ch
+        JMP     fvst
+fvh:    LDY     #0              ; h
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvhf
+        CMP     #'!'
+        BEQ     fvhs
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #4Eh
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvhf:   LDY     #4Eh
+        JMP     fvat
+fvhs:   LDY     #4Eh
+        JMP     fvst
+fvi:    LDY     #0              ; i
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvif
+        CMP     #'!'
+        BEQ     fvis
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #50h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvif:   LDY     #50h
+        JMP     fvat
+fvis:   LDY     #50h
+        JMP     fvst
+fvj:    LDY     #0              ; j
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvjf
+        CMP     #'!'
+        BEQ     fvjs
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #52h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvjf:   LDY     #52h
+        JMP     fvat
+fvjs:   LDY     #52h
+        JMP     fvst
+fvk:    LDY     #0              ; k
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvkf
+        CMP     #'!'
+        BEQ     fvks
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #54h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvkf:   LDY     #54h
+        JMP     fvat
+fvks:   LDY     #54h
+        JMP     fvst
+fvl:    LDY     #0              ; l
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvlf
+        CMP     #'!'
+        BEQ     fvls
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #56h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvlf:   LDY     #56h
+        JMP     fvat
+fvls:   LDY     #56h
+        JMP     fvst
+fvm:    LDY     #0              ; m
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvmf
+        CMP     #'!'
+        BEQ     fvms
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #58h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvmf:   LDY     #58h
+        JMP     fvat
+fvms:   LDY     #58h
+        JMP     fvst
+fvn:    LDY     #0              ; n
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvnf
+        CMP     #'!'
+        BEQ     fvns
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #5Ah
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvnf:   LDY     #5Ah
+        JMP     fvat
+fvns:   LDY     #5Ah
+        JMP     fvst
+fvo:    LDY     #0              ; o
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvof
+        CMP     #'!'
+        BEQ     fvos
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #5Ch
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvof:   LDY     #5Ch
+        JMP     fvat
+fvos:   LDY     #5Ch
+        JMP     fvst
+fvp:    LDY     #0              ; p
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvpf
+        CMP     #'!'
+        BEQ     fvps
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #5Eh
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvpf:   LDY     #5Eh
+        JMP     fvat
+fvps:   LDY     #5Eh
+        JMP     fvst
+fvq:    LDY     #0              ; q
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvqf
+        CMP     #'!'
+        BEQ     fvqs
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #60h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvqf:   LDY     #60h
+        JMP     fvat
+fvqs:   LDY     #60h
+        JMP     fvst
+fvr:    LDY     #0              ; r
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvrf
+        CMP     #'!'
+        BEQ     fvrs
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #62h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvrf:   LDY     #62h
+        JMP     fvat
+fvrs:   LDY     #62h
+        JMP     fvst
+fvs:    LDY     #0              ; s
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvsf
+        CMP     #'!'
+        BEQ     fvss
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #64h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvsf:   LDY     #64h
+        JMP     fvat
+fvss:   LDY     #64h
+        JMP     fvst
+fvt:    LDY     #0              ; t
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvtf
+        CMP     #'!'
+        BEQ     fvts
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #66h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvtf:   LDY     #66h
+        JMP     fvat
+fvts:   LDY     #66h
+        JMP     fvst
+fvu:    LDY     #0              ; u
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvuf
+        CMP     #'!'
+        BEQ     fvus
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #68h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvuf:   LDY     #68h
+        JMP     fvat
+fvus:   LDY     #68h
+        JMP     fvst
+fvv:    LDY     #0              ; v
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvvf
+        CMP     #'!'
+        BEQ     fvvs
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #6Ah
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvvf:   LDY     #6Ah
+        JMP     fvat
+fvvs:   LDY     #6Ah
+        JMP     fvst
+fvw:    LDY     #0              ; w
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvwf
+        CMP     #'!'
+        BEQ     fvws
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #6Ch
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvwf:   LDY     #6Ch
+        JMP     fvat
+fvws:   LDY     #6Ch
+        JMP     fvst
+fvx:    LDY     #0              ; x
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvxf
+        CMP     #'!'
+        BEQ     fvxs
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #6Eh
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvxf:   LDY     #6Eh
+        JMP     fvat
+fvxs:   LDY     #6Eh
+        JMP     fvst
+fvy:    LDY     #0              ; y
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvyf
+        CMP     #'!'
+        BEQ     fvys
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #70h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvyf:   LDY     #70h
+        JMP     fvat
+fvys:   LDY     #70h
+        JMP     fvst
+fvz:    LDY     #0              ; z
+        LDA     (IP),Y
+        CMP     #'@'
+        BEQ     fvzf
+        CMP     #'!'
+        BEQ     fvzs
+        DEX                     ; not @ or !: push the address
+        DEX
+        LDY     #72h
+        STY     0,X
+        LDY     #>LET
+        STY     1,X
+        NEXTA
+fvzf:   LDY     #72h
+        JMP     fvat
+fvzs:   LDY     #72h
+        JMP     fvst
+; fvat: x@, and fvst: x!, for the cell at LET+Y. The IP is at the @ or !.
+fvat:   INC     IP
+        BNE     fva1
+        INC     IP+1
+fva1:   DEX
+        DEX
+        LDA     LET,Y
+        STA     0,X
+        LDA     LET+1,Y
+        STA     1,X
+        NEXTF
+fvst:   INC     IP
+        BNE     fvs1
+        INC     IP+1
+fvs1:   LDA     0,X
+        STA     LET,Y
+        LDA     1,X
+        STA     LET+1,Y
+        INX
+        INX
+        NEXTF
+fnul    EQU     EXIT            ; NUL: the end of the program
+fhi     EQU     fign            ; 80h-FFh: nothing
+        ENDIF
+        IF      FAST*CHECKED
+; a-z, checked: push the cell's address (a checked build checks the stacks
+; between the variable and what follows it, so it keeps them apart)
+fva:    DEX                     ; a
+        DEX
+        LDA     #40h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvb:    DEX                     ; b
+        DEX
+        LDA     #42h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvc:    DEX                     ; c
+        DEX
+        LDA     #44h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvd:    DEX                     ; d
+        DEX
+        LDA     #46h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fve:    DEX                     ; e
+        DEX
+        LDA     #48h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvf:    DEX                     ; f
+        DEX
+        LDA     #4Ah
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvg:    DEX                     ; g
+        DEX
+        LDA     #4Ch
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvh:    DEX                     ; h
+        DEX
+        LDA     #4Eh
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvi:    DEX                     ; i
+        DEX
+        LDA     #50h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvj:    DEX                     ; j
+        DEX
+        LDA     #52h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvk:    DEX                     ; k
+        DEX
+        LDA     #54h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvl:    DEX                     ; l
+        DEX
+        LDA     #56h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvm:    DEX                     ; m
+        DEX
+        LDA     #58h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvn:    DEX                     ; n
+        DEX
+        LDA     #5Ah
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvo:    DEX                     ; o
+        DEX
+        LDA     #5Ch
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvp:    DEX                     ; p
+        DEX
+        LDA     #5Eh
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvq:    DEX                     ; q
+        DEX
+        LDA     #60h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvr:    DEX                     ; r
+        DEX
+        LDA     #62h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvs:    DEX                     ; s
+        DEX
+        LDA     #64h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvt:    DEX                     ; t
+        DEX
+        LDA     #66h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvu:    DEX                     ; u
+        DEX
+        LDA     #68h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvv:    DEX                     ; v
+        DEX
+        LDA     #6Ah
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvw:    DEX                     ; w
+        DEX
+        LDA     #6Ch
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvx:    DEX                     ; x
+        DEX
+        LDA     #6Eh
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvy:    DEX                     ; y
+        DEX
+        LDA     #70h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+fvz:    DEX                     ; z
+        DEX
+        LDA     #72h
+        STA     0,X
+        LDA     #>LET
+        STA     1,X
+        NEXTF
+; NUL: the end of the program, or an undefined word (see e_undef, which
+; takes a step frame off first: two bytes are pushed for it)
+fnul:   PHA
+        PHA
+        JMP     endp
+fhi     EQU     e_resv          ; 80h-FFh: reserved (X)
+        ENDIF
+        IF      FAST
+fign:   NEXTF                   ; 01h-20h and DEL: nothing
+; the table: low bytes, then high bytes, each a page, in the image's first
+; two pages (the code starts after them: see the ORG at start)
+        ORG     FTAB
+DTL:
+        DB      fnul&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh     ; 00h
+        DB      fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh     ; 08h
+        DB      fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh     ; 10h
+        DB      fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh,fign&0FFh     ; 18h
+        DB      fign&0FFh,ft_sto&0FFh,ft_str&0FFh,ft_num&0FFh,ft_prt&0FFh,fs_swp&0FFh,fs_and&0FFh,ft_emit&0FFh; 20h
+        DB      fs_opn&0FFh,fs_cls&0FFh,fs_mul&0FFh,fs_add&0FFh,fs_cft&0FFh,fs_sub&0FFh,ft_cst&0FFh,ft_div&0FFh; 28h
+        DB      fd0&0FFh,fd1&0FFh,fd2&0FFh,fd3&0FFh,fd4&0FFh,fd5&0FFh,fd6&0FFh,fd7&0FFh             ; 30h
+        DB      fd8&0FFh,fd9&0FFh,fs_dup&0FFh,fs_drp&0FFh,fs_lt&0FFh,fs_eq&0FFh,fs_gt&0FFh,ft_key&0FFh; 38h
+        DB      fs_fet&0FFh,fuA&0FFh,fuB&0FFh,fuC&0FFh,fuD&0FFh,fuE&0FFh,fuF&0FFh,fuG&0FFh          ; 40h
+        DB      fuH&0FFh,fuI&0FFh,fuJ&0FFh,fuK&0FFh,fuL&0FFh,fuM&0FFh,fuN&0FFh,fuO&0FFh             ; 48h
+        DB      fuP&0FFh,fuQ&0FFh,fuR&0FFh,fuS&0FFh,fuT&0FFh,fuU&0FFh,fuV&0FFh,fuW&0FFh             ; 50h
+        DB      fuX&0FFh,fuY&0FFh,fuZ&0FFh,ft_def&0FFh,ft_brk&0FFh,fs_ret&0FFh,fs_xor&0FFh,ft_alc&0FFh; 58h
+        DB      ft_grv&0FFh,fva&0FFh,fvb&0FFh,fvc&0FFh,fvd&0FFh,fve&0FFh,fvf&0FFh,fvg&0FFh          ; 60h
+        DB      fvh&0FFh,fvi&0FFh,fvj&0FFh,fvk&0FFh,fvl&0FFh,fvm&0FFh,fvn&0FFh,fvo&0FFh             ; 68h
+        DB      fvp&0FFh,fvq&0FFh,fvr&0FFh,fvs&0FFh,fvt&0FFh,fvu&0FFh,fvv&0FFh,fvw&0FFh             ; 70h
+        DB      fvx&0FFh,fvy&0FFh,fvz&0FFh,ft_tor&0FFh,fs_or&0FFh,ft_frr&0FFh,fs_not&0FFh,fign&0FFh ; 78h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; 80h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; 88h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; 90h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; 98h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; A0h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; A8h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; B0h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; B8h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; C0h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; C8h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; D0h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; D8h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; E0h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; E8h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; F0h
+        DB      fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh,fhi&0FFh             ; F8h
+DTH:
+        DB      fnul/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256             ; 00h
+        DB      fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256             ; 08h
+        DB      fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256             ; 10h
+        DB      fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256,fign/256             ; 18h
+        DB      fign/256,ft_sto/256,ft_str/256,ft_num/256,ft_prt/256,fs_swp/256,fs_and/256,ft_emit/256; 20h
+        DB      fs_opn/256,fs_cls/256,fs_mul/256,fs_add/256,fs_cft/256,fs_sub/256,ft_cst/256,ft_div/256; 28h
+        DB      fd0/256,fd1/256,fd2/256,fd3/256,fd4/256,fd5/256,fd6/256,fd7/256                     ; 30h
+        DB      fd8/256,fd9/256,fs_dup/256,fs_drp/256,fs_lt/256,fs_eq/256,fs_gt/256,ft_key/256      ; 38h
+        DB      fs_fet/256,fuA/256,fuB/256,fuC/256,fuD/256,fuE/256,fuF/256,fuG/256                  ; 40h
+        DB      fuH/256,fuI/256,fuJ/256,fuK/256,fuL/256,fuM/256,fuN/256,fuO/256                     ; 48h
+        DB      fuP/256,fuQ/256,fuR/256,fuS/256,fuT/256,fuU/256,fuV/256,fuW/256                     ; 50h
+        DB      fuX/256,fuY/256,fuZ/256,ft_def/256,ft_brk/256,fs_ret/256,fs_xor/256,ft_alc/256      ; 58h
+        DB      ft_grv/256,fva/256,fvb/256,fvc/256,fvd/256,fve/256,fvf/256,fvg/256                  ; 60h
+        DB      fvh/256,fvi/256,fvj/256,fvk/256,fvl/256,fvm/256,fvn/256,fvo/256                     ; 68h
+        DB      fvp/256,fvq/256,fvr/256,fvs/256,fvt/256,fvu/256,fvv/256,fvw/256                     ; 70h
+        DB      fvx/256,fvy/256,fvz/256,ft_tor/256,fs_or/256,ft_frr/256,fs_not/256,fign/256         ; 78h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; 80h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; 88h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; 90h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; 98h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; A0h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; A8h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; B0h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; B8h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; C0h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; C8h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; D0h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; D8h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; E0h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; E8h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; F0h
+        DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; F8h
+        ENDIF
+; ==== end of the speed build

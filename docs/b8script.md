@@ -262,6 +262,8 @@ Then `3#` runs and prints 3. Nothing else printed, and word A was never defined,
 
 **Brackets must balance.** Any text that may be skipped must balance by the skipper's count, and each opener must close with its own kind: `(` with `)`, `[` with `]`. Mixed kinds are unsafe. They balance for the skipper but run differently, and nothing useful comes of it. A checked build stops with `N` when a skip from `(` or `[` reaches NUL or reaches a closer of the wrong kind at its own level. A `\` that finds no closer still ends the program, as `1\` does.
 
+**A skip may be remembered.** The text of a running program doesn't change, so an implementation may remember where a skip from each place ended, and the next time skip there at once (the Z80's `QUICK` and speed builds do: see [Speed](#speed)). A program that changes its own text while it runs may then be skipped by the old text: that is unsafe.
+
 **The return stack is exposed.** It holds plain 16-bit addresses and values. `{` and `}` need not be balanced: `)` and `]` act on whatever is on top. That makes goto, eval and tail calls possible (see Idioms).
 
 [↑ Back to top](#b8script-spec)
@@ -304,7 +306,7 @@ B8Script comes in two kinds of build. An **unchecked** build checks nothing, for
 |---|---|
 | Required | Everything in this spec, for programs that stay inside it |
 | Implementation-defined | Stack sizes beyond the 64 data cells and 64 return-stack entries every build has, heap start and limit, memory layout, starting values of variables and words, how often the break key is polled, the -n? details listed under `?`, system addresses, the machine-code contract, and which environments a build offers |
-| Unsafe (anything may happen in an unchecked build) | Data or return stack underflow or overflow, heap collision, stores outside the program's space, calling an undefined word, unclosed strings, printing an address with no closing quote, `[` not followed by a letter or space, reserved bytes outside strings, dividing by zero, unbalanced or mismatched brackets, and anything machine code does |
+| Unsafe (anything may happen in an unchecked build) | Data or return stack underflow or overflow, heap collision, stores outside the program's space, changing the program's own text while it runs, calling an undefined word, unclosed strings, printing an address with no closing quote, `[` not followed by a letter or space, reserved bytes outside strings, dividing by zero, unbalanced or mismatched brackets, and anything machine code does |
 
 ### What a checked build adds
 
@@ -757,23 +759,51 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
 - Make the number reader step back onto the digit and read the whole number at once; no number state survives between characters.
 - Poll the break key every 256 loop-backs and calls rather than every time, especially where a key check is an OS call (BDOS 6 under CP/M is slow).
 
-### Ideas for speed
+### Speed
 
-The existing interpreters are tuned for size, and none of these ideas is used in them yet. They are kept here for a build that has bytes to spare, or for a speed option. The figures are for the Z80: how often each pattern occurs was counted on real runs of SIEVE, PI, MANDEL and Tetris, and the clock cycles each idea saves were read from the code, so they are estimates, and they overlap rather than add up.
+**Where the time goes.** On the Z80, `+` takes about 160 clock cycles, but its own work is three instructions, about 21. The rest is the inner loop: getting back to it, sorting the character by range, and the jump through the table. `*` and `/` take about 900 and 1,500 cycles, as each always runs 16 rounds, and a skip reads every character it passes, about 100 cycles each. So a faster interpreter makes each dispatch cheaper, does fewer dispatches, makes the slow commands faster, or skips less.
 
-**Where the time goes.** On the Z80, `+` takes about 160 clock cycles, but its own work is three instructions, about 21. The rest is the inner loop: getting back to it, sorting the character by range, and the jump through the table. `*` and `/` take about 900 and 1,500 cycles, as each always runs 16 rounds. So a faster interpreter makes each dispatch cheaper, does fewer dispatches, or makes the slow commands faster.
+**What the Z80 does.** Its builds are tuned for size, and two switches, both off by default, add speed:
 
-| Idea | What changes | Time saved | Cost on the Z80 |
+- **`QUICK`** adds the speed-ups that cost 180 to 230 bytes, to any of the eight builds:
+  - **A skip cache.** Nearly every skip has happened before: a loop skips the same false block on every pass. So the end of each skip is remembered, in a 256-byte page of 64 entries found by the start's low byte, and the next skip from there is one lookup. Only skips that start in the program text are kept (the line buffer changes), and the cache is emptied whenever a run starts.
+  - **A faster skip.** Two range tests rule out most characters (`*` to `Z`, and `^` and up) before the six that matter are tested.
+  - **`*` in 8 rounds** when either operand is below 256, which most multiplications have.
+  - **`/` by any power of two** as a shift, with the same sign rules: `256/` for a high byte, and the 32 or 64 of fixed point.
+  - **A true `)`** reads the block start where it is, instead of popping it and pushing it back.
+  - **A variable then `@` or `!`** in one step, in the unchecked builds. A checked build checks the stacks between the two, so it keeps them apart.
+- **The speed builds** (switch `FAST`, in `B8Script-interpreters/fast/`) take everything, with no size limit:
+  - **Dispatch through a full table.** 256 entries, the handlers' low bytes in one page and their high bytes in the next: read the character, two loads, and `JP (HL)`.
+  - **The dispatcher inline** at the end of every entry of the speed build's own, so there is no jump back to the loop.
+  - **One entry per letter and digit,** each knowing its cell or its value already: a variable is `LD HL,cell`, a word call reads its own cell, and a one-digit number needs no loop.
+  - **The commonest punctuation written for the table** (`+ - : ; % @ , < = > & | ^ ~ * ( ) ]`, and `!` and `.` unchecked), the rest reached through a two-instruction thunk.
+  - **`*` and `/` unrolled,** besides everything `QUICK` has.
+
+Measured in Z80 clock cycles on the generic builds, against the regular build (same output in every case):
+
+| Program | Regular | `QUICK` | Speed build |
 |---|---|---|---|
-| **Dispatch through a full table** | A 256-byte table in RAM, built at startup from the existing 32-byte one, takes each character straight to its handler, instead of the chain of range tests. Every handler's entry point must then lie in one 256-byte page. | 15–25% | About the same ROM (the startup loop replaces the range tests), 256 bytes of RAM, and a new layout |
-| **A variable then `@` or `!` in one step** | When the character after a lowercase letter is `@` or `!`, do the fetch or the store at once, without a second dispatch. `x@` is the commonest pair in most programs. | 7–17% | About 15 bytes |
-| **"Next" as `JP (IX)` in the generic builds too** | They use `RST 30h` for "next", one byte, and its routine throws away the return address: 13 cycles a character more than `JP (IX)`. | 4–6% | One byte at each of the 25 places, and 4 to set IX |
-| **`*` in 8 rounds when an operand is below 256** | Most multiplications have one small operand, such as 10, a loop counter or a coordinate. | Up to 9% (PI) | About 10 bytes |
-| **`/` by a power of two as a shift** | Dividing by 2 already is. Extend it to any power of two, with the same sign fix-up: `256/` for a high byte and the 32 or 64 of fixed point are common. | Up to 8% (fixed-point code) | About 20 bytes |
-| **Skip plain characters faster** | The skipper tests each character against six (NUL, `"`, `(`, `)`, `[`, `]`). Two range tests rule out most characters first (only below 2Ah or from 5Bh to 5Dh can matter). | 1–4% | About 8 bytes |
-| **Read the loop's address in place at a true `)`** | `)` pops the block start and pushes it back; it can read it where it is, as long as the break-key count still runs. | Under 2% | About 8 bytes |
+| SIEVE, 1 pass | 56.8 M | 1.09× | 2.24× |
+| PI, 100 digits | 316.2 M | 1.21× | 2.05× |
+| MANDEL | 163.2 M | 1.36× | 2.53× |
+| Tiny BASIC, a short program | 115.4 M | 1.38× | 2.40× |
+| Robots, scripted play | 8.3 M | 1.18× | 2.11× |
+| Reversi, scripted play | 43.9 M | 1.47× | 2.56× |
+| Qubic, scripted play | 61.4 M | 1.26× | 2.35× |
+| Tetris, scripted play | 10.9 M | 1.13× | 1.69× |
 
-A build that takes these ideas still has to stay within its size limit. Where one doesn't fit, an assembly switch can keep the size-tuned code for the builds that are full.
+Tetris gains least because much of its time is spent in `n?` waits, which are timed and rightly don't get shorter.
+
+**Ideas for the other CPUs.** None of the other interpreters has these yet. On the Z80, counting how often each pattern occurs on the runs above gave these estimates before any were built, and the measurements bore them out:
+
+| Idea | Time saved on the Z80 | Cost on the Z80 |
+|---|---|---|
+| A skip cache, and a faster skip | Up to 1.5× on programs full of skipped blocks | About 100 bytes, and a page of RAM |
+| A variable then `@` or `!` in one step | 7–17% | About 30 bytes |
+| `*` in 8 rounds when an operand is below 256 | Up to 9% (PI) | About 40 bytes, out of line |
+| `/` by a power of two as a shift | Up to 8% (fixed point) | About 50 bytes |
+| Reading the loop's address in place at a true `)` | Under 2% | About 20 bytes |
+| Dispatch through a full table, with the dispatcher inline | 15–25% more | 512 bytes of table, and the dispatcher's 12 to 15 bytes at every entry |
 
 ### Build options
 
@@ -1032,7 +1062,7 @@ q@0=)
 
 ## Appendix A: Z80
 
-Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`, `ANSI`.
+Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `EDITOR`, `ANSI`, and for speed `QUICK` and `FAST` (both off by default; see [Speed](#speed)).
 
 **Builds**
 
@@ -1047,7 +1077,9 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 | CP/M with the line editor | `B8SZ80E.COM` | 1,646 | `B8SZ80E PROG.B8S`, or with no file |
 | The same, checked | `B8SZ80EC.COM` | 2,048 |  |
 
-**Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), IY is the return-stack pointer. A and DE are scratch. In the CP/M builds IX holds the inner loop's address, so a handler ends with `JP (IX)`. The alternate registers are not used, so an interrupt routine may use them.
+Each of these also comes with `QUICK = 1`, in `B8Script-interpreters/quick/` (`B8SZ80Q.COM` and so on, a Q after the Z80), 180 to 230 bytes bigger and 1.1 to 1.5 times as fast; and there are four speed builds (`FAST = 1`) in `B8Script-interpreters/fast/`, `B8SZ80F.COM`, `B8SZ80FC.COM` and two generic ROMs, of 4,352 to 4,864 bytes, about twice as fast. See [Speed](#speed) and the interpreters README.
+
+**Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), IY is the return-stack pointer. A and DE are scratch. In the CP/M builds and the speed builds IX holds the inner loop's address, so a handler ends with `JP (IX)`. The alternate registers are not used, so an interrupt routine may use them.
 
 **Memory map (generic build)**
 
@@ -1059,11 +1091,12 @@ Source: `B8Script-interpreters/z80/b8s-z80.asm`. Switches: `CPM`, `CHECKED`, `ED
 | -n? line buffer (127 characters and CR) | 8280h | 33408 | −32128 |
 | Program text (`PROG`) | 8300h | 33536 | −32000 |
 | Heap limit (default `HEAPLIM`) | F000h | 61440 | −4096 |
+| Skip cache (`QUICK` and speed builds): the page at the heap limit | F000h | 61440 | −4096 |
 | Heap pointer cell | 827Ch | 33404 | −32132 |
 | Break-off cell | 827Bh | 33403 | −32133 |
 | Held key | 827Ah | 33402 | −32134 |
 
-Under CP/M the pages sit after the image and the heap limit is the BDOS. The break-off cell is still at offset 7Bh of the letter page, which is the page below the program text: 077Bh (1915) in `B8SZ80.COM`, 097Bh (2427) in `B8SZ80C.COM`, 0A7Bh (2683) in `B8SZ80E.COM` and 0B7Bh (2939) in `B8SZ80EC.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
+Under CP/M the pages sit after the image and the heap limit is the BDOS. The `QUICK` and speed builds have the skip cache's page first, before the return stack. The break-off cell is at offset 7Bh of the letter page, which is the page below the program text: 077Bh (1915) in `B8SZ80.COM`, 097Bh (2427) in `B8SZ80C.COM`, 0A7Bh (2683) in `B8SZ80E.COM` and 0B7Bh (2939) in `B8SZ80EC.COM`; 097Bh, 0B7Bh, 0C7Bh and 0D7Bh in their `QUICK` versions (`B8SZ80Q.COM` and so on); 167Bh (5755) and 177Bh (6011) in the speed builds `B8SZ80F.COM` and `B8SZ80FC.COM`. These move when the image changes size, so a program does better to work the address out. The letter page is the page below the text, and a string at the very start of a program lies 1 byte into the text, so a program that starts with `""134-` has the cell's address on the stack.
 
 **The break key.** The keyboard is looked at on every word call, block entry, true `)` and `{`, one time in 256. A program that stores a non-zero byte in the break-off cell gets Ctrl-C as key 3; two within about 250 ms still stop it. An unchecked build prints nothing when it is stopped.
 

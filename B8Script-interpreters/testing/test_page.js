@@ -295,18 +295,24 @@ async function runSrc(page, src) {
       ok(`${tag}: a key pressed with the keyboard down takes no focus`, await p.evaluate(() => document.activeElement.id !== 'kbd'));
     }
     if (!land) {
-      // upright: the menu button in the screen's corner hides everything but the screen
-      const h0 = await p.$eval('#wrap', e => e.getBoundingClientRect().height);
-      await p.tap('#menub');
-      await p.waitForTimeout(100);
-      const h1 = await p.$eval('#wrap', e => e.getBoundingClientRect().height);
-      const hidden = await p.evaluate(() => ['top', 'bottom'].every(id => getComputedStyle(document.getElementById(id)).display === 'none'));
-      const gone = await p.$eval('#menub', e => getComputedStyle(e).display === 'none');
-      ok(`${tag}: upright, ☰ hides all but the screen, itself too (its box ${Math.round(h0)} -> ${Math.round(h1)} px)`, hidden && gone && h1 > h0 + 100);
+      // upright: while the keyboard is up (opened by a tap on the screen), everything but
+      // the screen makes way, and comes back when it closes
+      const vp = p.viewportSize();
       await p.tap('#screen');
-      await p.waitForTimeout(100);
-      ok(`${tag}: a tap on the screen shows it all again, ☰ too`, await p.$eval('#top', e => getComputedStyle(e).display !== 'none')
-         && await p.$eval('#menub', e => getComputedStyle(e).display !== 'none'));
+      ok(`${tag}: a tap on the screen opens the keyboard`, await p.evaluate(() => document.activeElement.id === 'kbd'));
+      await p.setViewportSize({ width: vp.width, height: vp.height - 330 });   // the keyboard opens
+      await p.waitForTimeout(200);
+      const r = await p.evaluate(() => ({
+        hidden: ['top', 'bottom'].every(id => getComputedStyle(document.getElementById(id)).display === 'none'),
+        h: document.getElementById('wrap').getBoundingClientRect().height / innerHeight }));
+      ok(`${tag}: keyboard up: everything but the screen makes way (the screen's box ${(r.h * 100).toFixed(0)}% of what is left)`, r.hidden && r.h > 0.99);
+      await p.setViewportSize(vp);                                              // and closes
+      await p.waitForTimeout(200);
+      ok(`${tag}: keyboard down: it all comes back`, await p.$eval('#top', e => getComputedStyle(e).display !== 'none')
+         && await p.$eval('#bottom', e => getComputedStyle(e).display !== 'none'));
+      await p.tap('#screen');
+      ok(`${tag}: and a tap on the screen opens the keyboard again`, await p.evaluate(() => document.activeElement.id === 'kbd'));
+      await p.evaluate(() => document.activeElement.blur());
     }
 
     // the program's own keys: MINES has w a s d as a cross, Space, f and q

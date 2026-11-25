@@ -278,6 +278,35 @@ async function runSrc(page, src) {
     const g = await screen(p);
     ok(`${tag}: typed by input events (Backspace too) and the on-screen Return`, g[0] === '30' && g[1] === '51 48 13', g.slice(0, 2).join('|'));
 
+    // the phone's keyboard closed (the visible height comes back): the input lets go of
+    // the focus, so a pad key pressed after it doesn't bring the keyboard back
+    {
+      const vp = p.viewportSize();
+      await vis('[data-act=kbd]').tap();
+      const f0 = await p.evaluate(() => document.activeElement.id);
+      await p.setViewportSize({ width: vp.width, height: vp.height - 300 });   // the keyboard opens
+      await p.waitForTimeout(150);
+      await p.setViewportSize(vp);                                              // and closes
+      await p.waitForTimeout(150);
+      const f1 = await p.evaluate(() => document.activeElement.id);
+      ok(`${tag}: the keyboard closed, the input lets go (${f0} -> ${f1 || 'none'})`, f0 === 'kbd' && f1 !== 'kbd');
+      await vis('[data-act=kbd]').tap();                                        // focused, keyboard not up
+      await vis('button[data-key="13"]').tap();
+      ok(`${tag}: a key pressed with the keyboard down takes no focus`, await p.evaluate(() => document.activeElement.id !== 'kbd'));
+    }
+    if (!land) {
+      // upright: the menu button in the screen's corner hides everything but the screen
+      const h0 = await p.$eval('#wrap', e => e.getBoundingClientRect().height);
+      await p.tap('#menub');
+      await p.waitForTimeout(100);
+      const h1 = await p.$eval('#wrap', e => e.getBoundingClientRect().height);
+      const hidden = await p.evaluate(() => ['top', 'bottom'].every(id => getComputedStyle(document.getElementById(id)).display === 'none'));
+      ok(`${tag}: upright, ☰ hides all but the screen (its box ${Math.round(h0)} -> ${Math.round(h1)} px)`, hidden && h1 > h0 + 100);
+      await p.tap('#menub');
+      await p.waitForTimeout(100);
+      ok(`${tag}: and ☰ again shows it all`, await p.$eval('#top', e => getComputedStyle(e).display !== 'none'));
+    }
+
     // the program's own keys: MINES has w a s d as a cross, Space, f and q
     await openMenu();
     await p.selectOption('#prog', 'games/MINES.B8S');

@@ -34,7 +34,13 @@ Every game in [`games/`](../games/) and every program in [`programs/`](../progra
   - The choice takes effect at once, even in a running program, and the page remembers it.
 - **8-bit CPU:** runs B8Script at the pace of a real 8-bit machine, about 24,600 steps a second.
   - That's a Z80 at 7.3728 MHz (an RC2014), at the average of about 300 clock cycles a step measured on the Z80 build.
-  - It's an average. Programs heavy on `*` and `/` run about 10% slower on the real machine: MANDEL takes 43 s here and about 48 s there.
+  - It's an average, so one program's time can differ: a program of cheap steps (stack moves, `+`) runs faster on the real machine, and one heavy on `*` and `/` slower.
+
+    | Program | Here | On the Z80 build |
+    |---|---|---|
+    | MANDEL | 42 s | 42 s |
+    | PI, 250 digits | 289 s | 294 s |
+    | SIEVE, 10 passes | 154 s | 117 s |
   - Off, a program runs as fast as the browser can run it.
   - Like the line speed, it takes effect at once and is remembered.
 - **Timing:** `n?` waits n milliseconds by the clock.

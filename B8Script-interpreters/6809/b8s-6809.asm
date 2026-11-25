@@ -21,14 +21,15 @@
 ;             1 = send ANSI (VT100) sequences through CONOUT
 ;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
 ;                 CONAT (see the equates)
-;    QUICK    1 = the speed-ups that cost few bytes: a skip cache, a faster
-;                 skip, '*' quicker when a high byte is 0, '/' by any power
-;                 of two as a shift, and (unchecked) a variable and its '@'
-;                 or '!' in one step. See "Speed-ups". 0, the default, is the
-;                 smallest build. The heap limit is a page lower (EF00h): the
-;                 skip cache has the page above it.
-;    FAST     1 = the speed build: QUICK, and a dispatch table besides, with
-;                 no size limit. See "The speed build". The image starts at
+;    SPEED    0 = small: the smallest build
+;             1 = base, the default: the speed-ups that cost few bytes: a
+;                 skip cache, a faster skip, '*' quicker when a high byte is
+;                 0, '/' by any power of two as a shift, and (unchecked) a
+;                 variable and its '@' or '!' in one step. See "Speed-ups".
+;                 The heap limit is a page lower (EF00h): the skip cache has
+;                 the page above it.
+;             2 = fast: base, and a dispatch table besides, with
+;                 no size limit. See "The fast build". The image starts at
 ;                 E000h, the heap limit is DF00h and the skip cache is at
 ;                 DF00h-DFFFh.
 ;
@@ -42,11 +43,12 @@
 CPM     EQU     0               ; always 0 (no CP/M on the 6809)
 CHECKED EQU     0               ; 1 = checked build
 ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
-QUICK   EQU     0               ; 1 = the speed-ups that cost few bytes (see "Speed-ups")
-FAST    EQU     0               ; 1 = the speed build: see "The speed build"
-QK      EQU     QUICK+FAST-QUICK*FAST ; (the speed-ups: QUICK, or the speed build)
-QUICKU  EQU     QK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
-                                ;  QUICK build takes; the speed build has its own)
+SPEED   EQU     1               ; 0 = small, 1 = base, 2 = fast (see "Speed-ups")
+FAST    EQU     SPEED/2         ; (1: the fast build)
+SBASE   EQU     SPEED-FAST*2    ; (1: the base build)
+QK      EQU     SBASE+FAST-SBASE*FAST ; (the speed-ups: base, or the fast build)
+SBASEU  EQU     QK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
+                                ;  base build takes; the fast build has its own)
                                 ; (asm80 can't nest IF, and IF takes any value
                                 ;  but 0 as true, so IF CHECKED+QK means "either")
 
@@ -75,8 +77,8 @@ QUICKU  EQU     QK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
 ;  of the first NPG1 characters in the 256 bytes after that. The assembler
 ;  works NPG1 out from where five handlers landed, and testing/chktab09.py
 ;  checks the layout. The checked build is bigger than that reach, so its
-;  table holds whole addresses instead. (The speed build has neither: its
-;  table, FTAB, has an address for every byte. See "The speed build".)
+;  table holds whole addresses instead. (The fast build has neither: its
+;  table, FTAB, has an address for every byte. See "The fast build".)
 ; -----------------------------------------------------------------------------
 
 ; -----------------------------------------------------------------------------
@@ -105,12 +107,12 @@ QUICKU  EQU     QK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
 ;                 cell is at +7Bh (827Bh); +7Ah is free.
 ;    8300h-       PROG, the program text, NUL-terminated; the heap starts
 ;                 after the NUL and grows to HEAPLIM*256 (F000h; EF00h
-;                 with QUICK, DF00h in the speed build)
-;    EF00h-EFFFh  QUICK: the skip cache (CPAGE), the page at the heap limit,
-;                 which the heap never reaches. (Speed build: DF00h-DFFFh.)
+;                 with base, DF00h in the fast build)
+;    EF00h-EFFFh  base: the skip cache (CPAGE), the page at the heap limit,
+;                 which the heap never reaches. (Fast build: DF00h-DFFFh.)
 ;    F000h-       this image (ROM). The reset vector (FFFEh) must point to
 ;                 `start` (see the listing); the image does not contain it.
-;                 (The speed build's image starts at E000h.)
+;                 (The fast build's image starts at E000h.)
 ;    FF03h-FF17h  the console routines (CONOUT, KEY, and with ANSI = 0
 ;                 CONCLS, CONEOL, CONCUR, CONAT) and EXIT are supplied by
 ;                 the system and need no space here.
@@ -144,10 +146,10 @@ LETPAGE EQU     82h
 PROG    EQU     8300h           ; where the loader puts the program text
                                 ; (the checked startup counts on it being
                                 ; the page after LETPAGE)
-ROM     EQU     0F000h-FAST*1000h ; where the image starts (the speed build: E000h)
+ROM     EQU     0F000h-FAST*1000h ; where the image starts (the fast build: E000h)
 HEAPLIM EQU     ROM/256-QK      ; the heap must stay below F000h (a page);
-                                ;   with QUICK EF00h, the speed build DF00h
-CPAGE   EQU     HEAPLIM         ; the skip cache's page (QUICK and the speed
+                                ;   with base EF00h, the fast build DF00h
+CPAGE   EQU     HEAPLIM         ; the skip cache's page (base and the speed
                                 ;   build): the page at the heap limit
 
 MSLOOP  EQU     20              ; n? inner loop count for about 1 ms; tune it
@@ -175,8 +177,8 @@ RSREP   EQU     RSTOP-16        ; checked: S while the error report runs
 DSTOP   EQU     DSPAGE*256+100h-4*CHECKED ; empty data stack (a guard if checked)
 DSLIM   EQU     DSPAGE*256+2    ; checked: U may go no lower between characters
 
-; The speed build's dispatcher, inline at the end of each of its own entries
-; (see "The speed build", at the end). The checked one calls fchk first.
+; The fast build's dispatcher, inline at the end of each of its own entries
+; (see "The fast build", at the end). The checked one calls fchk first.
 ; (A count of 0 makes DS write nothing; DS needs fchk's address before the
 ; first use, so fchk comes first in that part.)
         IF      FAST*CHECKED
@@ -252,7 +254,7 @@ sc:     LDA     ,X+             ;   after the program's NUL
 ;    the rest     punctuation: JSR through PTAB, 32 entries, in code order
 ; =============================================================================
         IF      FAST
-        JMP     fnext           ; (the speed build has its own: see the end)
+        JMP     fnext           ; (the fast build has its own: see the end)
         ENDIF
         IF      1-FAST
 next:
@@ -329,14 +331,14 @@ digit:  LEAY    -1,Y
         ENDIF
 
 ; a-z: push the cell's address (the cell is the variable)
-;  (the unchecked QUICK build does x@ and x! in one step)
-        IF      (1-QUICKU)*(1-FAST)
+;  (the unchecked base build does x@ and x! in one step)
+        IF      (1-SBASEU)*(1-FAST)
 lower:  BSR     cellx
         PSHU    X
         BRA     next
         ENDIF
-        IF      QUICKU
-; a-z, unchecked QUICK: a variable followed by '@' or '!' is fetched or
+        IF      SBASEU
+; a-z, unchecked base: a variable followed by '@' or '!' is fetched or
 ; stored in the same step (x@ is the commonest pair in most programs). A
 ; checked build checks the stacks between the two, so it keeps them apart.
 lower:  ASLA                    ; (cellx, inline)
@@ -476,7 +478,7 @@ rd1:    BSR     isdig
 ; It looks at the keyboard only once in 256 calls.
 pollk:  DEC     <COUNT
         BNE     cc9
-pk1:    JSR     KEY             ; (the speed build counts down itself)
+pk1:    JSR     KEY             ; (the fast build counts down itself)
         BEQ     cc9             ; no key
         STA     <KEYBUF         ; held for the next '?'
         BRA     ctlc
@@ -524,7 +526,7 @@ brk     EQU     e_break         ;   the checked build reports B (the report
 ; return with the carry clear.
 ; (In the unchecked build it is here, ahead of the table, to leave room in
 ; the two ranges after it; the checked build has it next to the grave, and
-; so does the unchecked QUICK build, which needs its bytes there instead.)
+; so does the unchecked base build, which needs its bytes there instead.)
         IF      (1-CHECKED)*(1-QK)
 hexc:   BSR     isdig
         BLO     hv1             ; C = 1
@@ -550,9 +552,9 @@ hv9:    RTS
 ;  Checked build: it has more code than the two ranges hold, so its table
 ;  holds whole addresses and there are no rules about where handlers go.
 ;
-;  The unchecked QUICK build keeps to the same rules: its skip and udiv are
+;  The unchecked base build keeps to the same rules: its skip and udiv are
 ;  out in the tail, and hexc comes into the first range, where the checked
-;  build has it. The speed build has no PTAB (see "The speed build").
+;  build has it. The fast build has no PTAB (see "The fast build").
 ; =============================================================================
         IF      (1-CHECKED)*(1-FAST)
 PGRET   EQU     (h_ret-PTAB)/256        ; 0 = first range, 1 = second
@@ -752,7 +754,7 @@ h_break:LDD     ,U++
         ENDIF
         IF      QK
         BEQ     hv9             ; false: nothing to do (hexc's RTS)
-        JSR     skip            ; (QUICK: in the tail, with its cache)
+        JSR     skip            ; (base: in the tail, with its cache)
         ENDIF
         TSTA                    ; skip returns 0 for ')'
         IF      CHECKED
@@ -796,7 +798,7 @@ def2:   PSHU    Y               ; an anonymous block: push its address
         ; fall into skip
         ENDIF
         IF      QK*(1-CHECKED)
-        JMP     skip            ; (QUICK: in the tail, with its cache)
+        JMP     skip            ; (base: in the tail, with its cache)
         ENDIF
         IF      CHECKED
         ; Checked: the skip must end at a ']' (A = 2), or for a false '(',
@@ -813,7 +815,7 @@ opf:    BSR     skip
         BRA     ejmp
         ENDIF
         IF      CHECKED*QK
-        JSR     skip            ; (QUICK: in the tail, with its cache)
+        JSR     skip            ; (base: in the tail, with its cache)
         SUBA    #2
         BRA     of1
 opf:    JSR     skip
@@ -831,7 +833,7 @@ of1:    TSTA
 ; Checked: a NUL, or a string that runs into it, returns A = FFh, and the
 ; caller decides: '\' ends the program, '(' and '[' stop with N, as they do
 ; for a closer of the other kind. The place is the opener, still in AT.
-; (QUICK has its own, with the skip cache, in the tail: see "Speed-ups".)
+; (base has its own, with the skip cache, in the tail: see "Speed-ups".)
         IF      1-QK
 skip:   CLRB
 sk1:    LDA     ,Y+
@@ -955,7 +957,7 @@ h_open: LDD     ,U++
         BEQ     skip            ; tail call: skip ends in RTS
         ENDIF
         IF      QK*(1-CHECKED)
-        LBEQ    skip            ; (QUICK: in the tail)
+        LBEQ    skip            ; (base: in the tail)
         ENDIF
         IF      CHECKED
         LBEQ    opf             ; checked: skip, and check the closer
@@ -997,7 +999,7 @@ h_close:LDD     ,U++
 
 ; '*': three 8x8 multiplies; only the low 16 bits are kept.
 ; a = ah:al at 2,U.  b = bh:bl at ,U.
-; (QUICK leaves out a cross term whose high byte is 0, which most
+; (base leaves out a cross term whose high byte is 0, which most
 ; multiplications have: a count or a small constant.)
         IF      1-QK
 h_mul:  LDA     3,U
@@ -1275,10 +1277,10 @@ pdec:   LDD     #10
         IF      CHECKED*(1-QK)
         LBSR    udiv            ; (out of a BSR's reach here)
         ENDIF
-        IF      QUICKU
-        BSR     ud0             ; (QUICK: past the power-of-two test)
+        IF      SBASEU
+        BSR     ud0             ; (base: past the power-of-two test)
         ENDIF
-        IF      QK-QUICKU
+        IF      QK-SBASEU
         LBSR    ud0
         ENDIF
         PULU    D               ; the digit
@@ -1317,7 +1319,7 @@ h_div:
         BSR     udiv            ; NOS = q, TOS = r
         ENDIF
         IF      QK
-        JSR     udiv            ; (QUICK: with the speed-ups)
+        JSR     udiv            ; (base: with the speed-ups)
         ENDIF
         LEAX    2,U
         TST     ,S+
@@ -1392,7 +1394,7 @@ absx:   TST     ,X              ; absx: negate the cell at X if negative
 ; divisor the TOS cell, both <= 8000h; the NOS cell becomes the quotient and
 ; the TOS cell the remainder. The remainder is built in D (always < the
 ; divisor, so 2R+1 fits in 16 bits).
-; Dividing by 2 is one shift (the spec wants that fast). (QUICK divides
+; Dividing by 2 is one shift (the spec wants that fast). (base divides
 ; by any power of two with shifts: its udiv is with the speed-ups, and
 ; comes to ud0 for the rest; pdec, whose divisor is 10, goes straight there.)
         IF      1-QK
@@ -1418,7 +1420,7 @@ ud1:    ASL     3,U
         INC     3,U             ; a quotient bit
 ud2:    LEAX    -1,X
         BNE     ud1
-        ENDIF                   ; (the speed build's is unrolled: see the end)
+        ENDIF                   ; (the fast build's is unrolled: see the end)
 ud3:    STD     ,U
         RTS
 
@@ -1516,7 +1518,7 @@ pm:     JMP     pmsg
 
         IF      QK
 ; =============================================================================
-;  Speed-ups (QUICK, and the speed build)
+;  Speed-ups (base, and the fast build)
 ;
 ;  The rest of them are with their handlers: '*' (h_mul), the unchecked
 ;  a-z (lower), pdec (straight to the long divide) and the startup, which
@@ -1591,7 +1593,7 @@ sqc:    CLRA                    ; )
         STY     2,X             ; the closer at this level: the entry's end
         RTS
 
-; QUICK: a power of two, 2^k, is a shift: q = a >> k and r = a AND (2^k - 1).
+; base: a power of two, 2^k, is a shift: q = a >> k and r = a AND (2^k - 1).
 ; That is 2, and 256 for a high byte, and the 32 or 64 of fixed point.
 udiv:   LDD     ,U
         LBEQ    ud0             ; by 0: the long way (it means nothing anyway)
@@ -1626,11 +1628,11 @@ uq2:    STD     2,U             ; q
 
         IF      FAST
 ; =============================================================================
-;  The speed build (FAST = 1)
+;  The fast build (SPEED = 2)
 ;
 ;  The inner loop is a table of 256 handler addresses, FTAB, one for every
 ;  byte, and the dispatcher (NEXTF, at the top) is inline at the end of each
-;  of the speed build's own entries, so there is no return to a loop:
+;  of the fast build's own entries, so there is no return to a loop:
 ;
 ;      LDB ,Y+ / LDX #FTAB / ABX / ABX / JMP [,X]
 ;
@@ -1644,7 +1646,7 @@ uq2:    STD     2,U             ; q
 ; =============================================================================
         ENDIF
         IF      FAST*CHECKED
-; fchk: the checks of the inner loop, for the checked speed build (S is 2
+; fchk: the checks of the inner loop, for the checked fast build (S is 2
 ; lower in here than when the character starts).
 fchk:   LEAX    (0-DSLIM)&0FFFFh,U
         CMPX    #DSTOP-DSLIM
@@ -1701,7 +1703,7 @@ ft_tor: JSR     h_tor           ; {
         NEXTF
 ft_fromr:JSR    h_fromr         ; }
         NEXTF
-; The commonest punctuation, written for the speed build.
+; The commonest punctuation, written for the fast build.
 fs_add: PULU    D               ; +
         ADDD    ,U
         STD     ,U
@@ -1781,7 +1783,7 @@ fs_xor: PULU    D               ; ^
 fs_not: COM     ,U              ; ~
         COM     1,U
         NEXTF
-fs_mul: LDA     3,U             ; *  (as QUICK's h_mul)
+fs_mul: LDA     3,U             ; *  (as base's h_mul)
         LDB     ,U
         BEQ     fmu1
         MUL                     ; al*bh
@@ -2931,7 +2933,7 @@ fvz:    LDD     #LET+72h        ; z
         NEXTF
         ENDIF
         IF      FAST
-; (the speed build: the same 16 rounds, unrolled)
+; (the fast build: the same 16 rounds, unrolled)
 ud0:    CLRA
         CLRB
         ASL     3,U

@@ -16,6 +16,7 @@ VARIANTS=$'0 0 1\n0 1 1\n1 0 1\n1 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80
 QUICK=1 ./build.sh Z80 ../z80/b8s-z80.asm out/z80 # the same four with QUICK = 1 (b8s-z80-quick-...), and
 QUICK=1 VARIANTS=$'0 0 1\n0 1 1\n1 0 1\n1 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80   # the editor ones
 FAST=1 ./build.sh Z80 ../z80/b8s-z80.asm out/z80  # the four speed builds (b8s-z80-fast-...)
+QUICK=1 ./build.sh I8080 ../8080/b8s-8080.asm out/8080   # QUICK=1 and FAST=1 go with every CPU's build.sh line below
 python3 run_z80.py z80 out/z80                     # PASS/FAIL per variant
 ANSI=1 VARIANTS=$'0 0\n0 1\n0 0 1\n0 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80a   # the generic ones with ANSI = 1
 python3 run_z80.py z80 out/z80a                    # (do the same for each CPU)
@@ -27,7 +28,7 @@ python3 run_6502.py out/6502                       # --nogames skips Tiny BASIC
 VARIANTS=$'0 0\n0 1' ./build.sh M6809 ../6809/b8s-6809.asm out/6809
 python3 run_6809.py out/6809                       # -nogames skips Tiny BASIC
 
-./build_win32.sh                                   # the four Windows .EXE files (NASM), then chkpe.py
+./build_win32.sh                                   # the twelve Windows .EXE files (NASM), then chkpe.py
 python3 run_win32.py out/win32                     # --nogames skips Tiny BASIC
 
 python3 chktab.py out/z80/*.lst out/8080/*.lst     # layout rules (see the main README)
@@ -61,7 +62,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `harness_6502.py`, `harness_6809.py` | The same wrapper for py65 and MC6809 |
 | `run_z80.py`, `run_8080.py`, `run_6502.py`, `run_6809.py` | Run every build in a folder through `check()`. `run_6502.py` holds the two 6502 machine-code tests, one per interpreter |
 | `test_editor.py` | Types sessions at the Z80 editor builds, each step when the editor is waiting for it, and compares the output byte for byte with a model of the editor (which follows the source key for key, and uses `ref.py` for whatever a line runs). Generic builds get paste and print sessions, CP/M builds file ones (the disk is compared too), checked builds error ones; a few sessions with keys pressed while a program is busy are compared with patterns |
-| `build_win32.sh` | Builds the four Windows programs into `out/win32` (each with a listing and a map file of its symbols), then runs `chkpe.py` |
+| `build_win32.sh` | Builds the twelve Windows programs (regular, `QUICK` and speed) into `out/win32` (each with a listing and a map file of its symbols), then runs `chkpe.py` |
 | `harness_win32.py` | Runs a Windows .EXE in the Unicorn emulator: maps the file as Windows would, models the `kernel32` calls it makes, gives it a command line, a console (or redirected input) and a few files. Same interface as the others |
 | `run_win32.py` | Runs every Windows build through `check()`, the editor builds through `test_editor.py`, and all of them through a few Windows-only tests |
 | `chkpe.py` | Checks a Windows .EXE's header against the rules: alignments, sizes, the section, the entry point, the import table |
@@ -76,7 +77,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `../../games/` | The games, at the root of the repository (its README says how to play each one). The programs are each in two files: `NAME.TXT`, with comments that explain how it works, and `NAME.B8S`, the same code stripped of comments and white space. `games/b8sms/`, `games/tweet140/`, `games/tweet280/` and `games/longer/` hold the tiny games, which are already stripped and have no `.TXT` |
 | `../../programs/` | Programs that aren't games, in the same two files: Tiny BASIC (`TINYBAS.B8S` is part of the suite), MON, SIEVE, PI and MANDEL |
 | `b8strip.py` | Strips a program of comments and white space (but keeps a comment that starts with `!`), keeping a space only where B8Script needs one (`b8strip.py ../../games/NAME.TXT ../../games/NAME.B8S` after editing a game). `--same A B` checks that two files hold the same code |
-| `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files next to each source, and the Z80's `QUICK` and speed builds to `../quick/` and `../fast/` |
+| `mkrel.py` | Copies the builds in `out/` to the `.bin`, `.COM`, `.EXE` and `.lst` files next to each source, and every CPU's `QUICK` and speed builds to `../quick/` and `../fast/` |
 | `patchinfo.py` | Where n?'s timing count sits in each CP/M .COM, to patch it for a machine whose BDOS is faster or slower (see `../TIMING.B8S`) |
 | `cpmsim.py` | Runs the CP/M builds under real CP/M 2.2 (Digital Research's BDOS and CCP) in z80pack's `cpmsim`: `cpmsim.py suite out B8SZ80 B8SZ80C` runs the suite's programs and compares each output with `ref.py`'s; `cpmsim.py type out STEP...` types at CP/M, for the editors. `-8` runs on an 8080 instead of the Z80 (which traps undocumented opcodes). Needs z80pack (set `Z80PACK`) and cpmtools; see its header. Not part of the regular run: it takes about ten minutes a build |
 

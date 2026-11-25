@@ -46,7 +46,11 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | 8080, `QUICK = 1` | 1,134 | 1,188 | 1,528 | 1,582 |
 | 8080 speed build (`FAST = 1`) | 4,352 | 4,352 | 4,864 | 4,864 |
 | 6502, stack in pages 2-3 | 1,208 | 1,265 | 1,707 | 1,750 |
+| 6502, pages 2-3, `QUICK = 1` | 1,534 | 1,591 | 1,976 | 2,019 |
+| 6502, pages 2-3, speed build (`FAST = 1`) | 7,448 | 7,505 | 5,506 | 5,549 |
 | 6502, stack in zero page | 1,155 | 1,217 | 1,673 | 1,721 |
+| 6502, zero page, `QUICK = 1` | 1,483 | 1,545 | 1,946 | 1,994 |
+| 6502, zero page, speed build (`FAST = 1`) | 6,949 | 7,011 | 5,069 | 5,117 |
 | 6809 | 873 | 934 | 1,264 | 1,313 |
 | 6809, `QUICK = 1` | 1,026 | 1,087 | 1,380 | 1,429 |
 | 6809 speed build (`FAST = 1`) | 4,654 | 4,715 | 4,257 | 4,306 |
@@ -76,7 +80,7 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | Code and tables, speed build | 6,963 | 6,575 | 7,663 | 7,291 |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
-- A checked speed build can be smaller than its unchecked one (6809, Windows): the unchecked one's 26 variable entries each also do `@` and `!`.
+- A checked speed build can be smaller than its unchecked one (6502, 6809, Windows): the unchecked one's 26 variable entries each also do `@` and `!`.
 - The 8080 speed builds include up to 255 bytes of padding, which puts their 512-byte table on a page boundary.
 - A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four regular ones have 357, 359, 143 and 133 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.
@@ -93,8 +97,8 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | `*-rom-XXXX.bin` | Generic ROM image, to load at XXXXh (`-zp-` = the zero-page 6502 interpreter, `-editor-` = Z80 with the line editor) |
 | `B8SZ80.COM`, `B8SZ80C.COM`, `B8S8080.COM`, `B8S8080C.COM` | CP/M builds; the C means checked. Run as `B8SZ80 PROG.B8S` |
 | `B8SZ80E.COM`, `B8SZ80EC.COM` | CP/M builds with the line editor; the C means checked. Run as `B8SZ80E PROG.B8S`, or with no file |
-| `quick/` | The Z80 builds with `QUICK = 1`: every regular Z80 build with its speed-ups, 1.1 to 1.5 times as fast (`B8SZ80Q.COM` and so on; see [Speed](#speed)) |
-| `fast/` | The Z80 speed builds: `B8SZ80F.COM`, `B8SZ80FC.COM` and two generic ROMs, about twice as fast (see [Speed](#speed)) |
+| `quick/` | Every regular build of every CPU again with `QUICK = 1`, 1.1 to 1.5 times as fast, named with `-quick-` or a Q (`B8SZ80Q.COM`, `b8s-6502-quick-rom-E000.bin`, `B8SWINQ.EXE` and so on; see [Speed](#speed)) |
+| `fast/` | The speed builds (`FAST = 1`) of every CPU, 1.7 to 4.3 times as fast, named with `-fast-` or an F (`B8SZ80F.COM`, `b8s-6809-fast-rom-E000.bin`, `B8SWINF.EXE` and so on; see [Speed](#speed)) |
 | `win32/B8SWIN.EXE`, `B8SWINC.EXE`, `B8SWINE.EXE`, `B8SWINEC.EXE` | Windows command-shell builds: C means checked, E with the line editor. Run as `B8SWIN PROG.B8S` |
 | `*.lst` | The assembler's listings |
 | `TIMING.B8S` | Times `n?` on your machine, to tune the CP/M builds' count (see The language) |
@@ -224,9 +228,9 @@ To save the 32 bytes of a full address table, the Z80, the 8080, the unchecked 6
 | CONOUT | print A | same | same |
 | EXIT | jumped to when the program ends | same | same |
 | KEY and CONOUT must keep | BC, DE, HL (and IY on the Z80) | X, Y | B, X, Y, U, DP |
-| Where to start | reset at 0000h | label `start`, E000h (point the reset vector at it) | label `start`, F000h (point the reset vector at it) |
-| RAM | RS 8000h, DS 8100h, letters 8200h, PROG 8300h; the skip cache (Z80 `QUICK` and speed builds) the page at the heap limit, F000h | RS = page 1, DS 0200h/0300h (or zero page 10h-EFh), letters 0400h, PROG 0500h | RS 8000h (S), DS 8100h (U), letters 8200h (DP), PROG 8300h |
-| Heap limit | `HEAPLIM` (page), default F0h | default E0h | default F0h |
+| Where to start | reset at 0000h | label `start`, E000h (point the reset vector at it); E200h in the speed builds, whose table fills E000h-E1FFh | label `start`, F000h (point the reset vector at it); E000h in the speed builds |
+| RAM | RS 8000h, DS 8100h, letters 8200h, PROG 8300h; the skip cache (`QUICK` and speed builds) the page at the heap limit, F000h | RS = page 1, DS 0200h/0300h (or zero page 10h-EFh), letters 0400h, PROG 0500h; the skip cache (`QUICK` and speed builds) the page at the heap limit, DF00h, or 0200h in the zero-page interpreter | RS 8000h (S), DS 8100h (U), letters 8200h (DP), PROG 8300h; the skip cache (`QUICK` and speed builds) the page at the heap limit |
+| Heap limit | `HEAPLIM` (page), default F0h | default E0h; DFh in the `QUICK` and speed builds of the pages 2-3 interpreter | default F0h; EFh with `QUICK`, DFh in the speed builds |
 | Timing | `MSLOOP` = loop passes per millisecond for `n?` (1-255); tune it to your clock and KEY | same | same |
 | With `ANSI = 0`: CONCLS (FF0Ch), CONEOL (FF0Fh) | clear the screen and home the cursor; clear to the end of the line | same | same |
 | CONCUR (FF12h) | show the cursor if A is not 0, hide it if A = 0 | show if the carry is set, hide if clear | as the Z80 |
@@ -405,27 +409,47 @@ The zero-page one is smaller because a cell that holds an address is used as the
 
 ## Speed
 
-The Z80 builds are tuned for size. Two switches, both off by default, add speed; the spec's [Speed](../docs/b8script.md#speed) section says what each does and why.
+The regular builds are tuned for size. Two switches, both off by default, add speed to every interpreter; the spec's [Speed](../docs/b8script.md#speed) section says what each does and why.
 
-- **`QUICK = 1`** adds the speed-ups that cost 180 to 230 bytes: a skip cache, a faster skip, `*` in 8 rounds for a small operand, `/` by a power of two as a shift, a true `)` that reads its block start in place, and, unchecked, a variable and its `@` or `!` in one step. It goes with any of the eight builds; the built files are in [`quick/`](quick/), named as the regular ones with a Q after the Z80 (`B8SZ80Q.COM`, `B8SZ80QC.COM`, `B8SZ80QE.COM`, `B8SZ80QEC.COM`, `b8s-z80-quick-rom-0000.bin` and so on). Two of them are past a size limit the regular ones keep to: the checked generic ROM with `ANSI = 1` (1,449 bytes, past 1,280) and `B8SZ80QEC.COM` (2,227, past 2,048).
-- **`FAST = 1`** is the speed build: `QUICK` and everything else, size no object: a dispatch table of whole addresses, the dispatcher inline, one entry for each letter and digit, the common punctuation written for the table, and `*` and `/` unrolled. It has no editor. The built files are in [`fast/`](fast/), with their own README.
+- **`QUICK = 1`** adds the speed-ups that cost least: a skip cache, a faster skip, `/` by a power of two as a shift, a true `)` that reads its block start in place, and, unchecked, a variable and its `@` or `!` in one step; and, on the 8-bit CPUs, a faster `*` for a small operand. It goes with every build and costs about 120 to 330 bytes. The built files are in [`quick/`](quick/).
+- **`FAST = 1`** is the speed build: `QUICK` and everything else, size no object: dispatch through a full table, the dispatcher inline, one entry for each letter and digit, the common punctuation written for the table, and `*` and `/` unrolled where the CPU has no instruction for them. It goes with every build except the Z80's line editor. The built files are in [`fast/`](fast/).
 
-Measured in Z80 clock cycles on the generic builds, against the regular build, with the same output every time:
+Each CPU's adaptations, and why some ideas don't apply to some CPUs, are in the READMEs of those two folders.
 
-| Program | Regular | `QUICK` | Speed build |
-|---|---|---|---|
-| SIEVE, 1 pass | 56.8 M | 1.09× | 2.24× |
-| PI, 100 digits | 316.2 M | 1.21× | 2.05× |
-| MANDEL | 163.2 M | 1.36× | 2.53× |
-| Tiny BASIC, a short program | 115.4 M | 1.38× | 2.40× |
-| Robots, scripted play | 8.3 M | 1.18× | 2.11× |
-| Reversi, scripted play | 43.9 M | 1.47× | 2.56× |
-| Qubic, scripted play | 61.4 M | 1.26× | 2.35× |
-| Tetris, scripted play | 10.9 M | 1.13× | 1.69× |
+**How much faster**, against the regular build of the same CPU, on the generic builds (Windows: the runner), with the same output every time. Measured in clock cycles, except on Windows, where the count is instructions:
 
-**The skip cache** takes a page of RAM: in the generic builds the page at the heap limit (F000h with the default `HEAPLIM`), which the heap never reaches; in the CP/M builds the page after the image, before the return stack, so that the letter page is still the one just below the program text. It remembers skips that start in the program text only, and is emptied whenever a run starts (in the editor builds, at every line too). A program that changes its own text while it runs is unsafe in these builds (the spec says so).
+| Program | Z80 | 8080 | 6502 | 6502, zero page | 6809 | Windows |
+|---|---|---|---|---|---|---|
+| **With `QUICK`** | | | | | | |
+| SIEVE, 1 pass | 1.09× | 1.09× | 1.10× | 1.11× | 1.10× | 1.11× |
+| PI, 100 digits | 1.21× | 1.16× | 1.20× | 1.21× | 1.14× | 1.12× |
+| MANDEL | 1.36× | 1.40× | 1.37× | 1.38× | 1.40× | 1.22× |
+| Tiny BASIC, a short program | 1.38× | 1.39× | 1.47× | 1.49× | 1.39× | 1.50× |
+| Robots, scripted play | 1.18× | 1.19× | 1.18× | 1.19× | 1.17× | 1.20× |
+| Reversi, scripted play | 1.47× | 1.49× | 1.49× | 1.51× | 1.52× | 1.49× |
+| Qubic, scripted play | 1.26× | 1.28× | 1.28× | 1.29× | 1.28× | 1.28× |
+| Tetris, scripted play | 1.13× | 1.12× | 1.16× | 1.16× | 1.16× | 1.10× |
+| **Speed build** | | | | | | |
+| SIEVE, 1 pass | 2.24× | 2.30× | 2.18× | 2.23× | 2.26× | 3.32× |
+| PI, 100 digits | 2.05× | 1.98× | 1.90× | 1.87× | 1.94× | 3.12× |
+| MANDEL | 2.53× | 2.69× | 2.45× | 2.52× | 2.50× | 3.47× |
+| Tiny BASIC, a short program | 2.40× | 2.43× | 2.62× | 2.64× | 2.65× | 4.31× |
+| Robots, scripted play | 2.11× | 2.26× | 1.98× | 1.98× | 2.19× | 2.83× |
+| Reversi, scripted play | 2.56× | 2.65× | 2.66× | 2.72× | 2.95× | 3.92× |
+| Qubic, scripted play | 2.35× | 2.48× | 2.48× | 2.55× | 2.64× | 3.70× |
+| Tetris, scripted play | 1.69× | 1.76× | 1.78× | 1.76× | 2.05× | 2.68× |
 
-**Building them:**
+The regular builds' own counts, for SIEVE's pass: 56.8 M cycles on the Z80, 58.1 M on the 8080, 38.5 M and 37.7 M on the two 6502s, 24.0 M on the 6809 and 4.8 M x86 instructions. Tetris gains least everywhere because much of its time is spent in `n?` waits, which are timed and rightly don't get shorter.
+
+**The skip cache** takes a page of RAM, which holds 64 entries:
+- **Z80, 8080:** in the generic builds the page at the heap limit (F000h with the default `HEAPLIM`), which the heap never reaches; in the CP/M builds the page after the image, before the return stack, so that the letter page is still the one just below the program text.
+- **6502:** DF00h, with the heap limit moved down a page to it; in the zero-page interpreter page 2, 0200h, which it doesn't otherwise use.
+- **6809:** the page below the ROM, EF00h (DF00h in the speed builds), with the heap limit moved down to it.
+- **Windows:** outside the 64 KB of B8Script memory.
+
+It remembers skips that start in the program text only, and is emptied whenever a run starts (in the editor builds, at every line too). A program that changes its own text while it runs is unsafe in these builds (the spec says so).
+
+**Building them:** `build.sh` takes `QUICK=1` or `FAST=1` for any CPU, and adds `-quick` or `-fast` to the names; `build_win32.sh` builds all twelve Windows files.
 
 ```
 cd testing
@@ -434,7 +458,12 @@ QUICK=1 VARIANTS=$'0 0 1\n0 1 1\n1 0 1\n1 1 1' ./build.sh Z80 ../z80/b8s-z80.asm
 FAST=1 ./build.sh Z80 ../z80/b8s-z80.asm out/z80                       # b8s-z80-fast-gen, -gen-chk, -cpm, -cpm-chk
 QUICK=1 ANSI=1 VARIANTS=$'0 0\n0 1\n0 0 1\n0 1 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80a
 FAST=1 ANSI=1 VARIANTS=$'0 0\n0 1' ./build.sh Z80 ../z80/b8s-z80.asm out/z80a
-python3 run_z80.py z80 out/z80                                         # tests them with the rest
+QUICK=1 ./build.sh I8080 ../8080/b8s-8080.asm out/8080                 # and FAST=1 the same way
+QUICK=1 VARIANTS=$'0 0\n0 1' ./build.sh C6502 ../6502/b8s-6502.asm out/6502
+QUICK=1 VARIANTS=$'0 0\n0 1' ./build.sh C6502 ../6502/b8s-6502-zp.asm out/6502
+QUICK=1 VARIANTS=$'0 0\n0 1' ./build.sh M6809 ../6809/b8s-6809.asm out/6809
+./build_win32.sh                                                       # B8SWINQ*.EXE and B8SWINF*.EXE too
+python3 run_z80.py z80 out/z80                                         # each CPU's tests take them with the rest
 python3 mkrel.py                                                       # copies them to quick/ and fast/
 ```
 

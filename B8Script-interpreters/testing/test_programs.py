@@ -9,7 +9,7 @@ with the same 16-bit arithmetic, MON's lines. Then every build must print what
 ref.py prints. MON's start-up line names the heap top, which differs between
 builds, so its first line is left out; its R command runs one RET of the build's
 CPU, which ref.py can't, so that part is checked by the build alone."""
-import sys, os, glob
+import re, sys, os, glob
 here = os.path.dirname(os.path.abspath(__file__))
 PROGS = os.path.normpath(os.path.join(here, '..', '..', 'programs'))
 sys.path.insert(0, here)
@@ -156,7 +156,7 @@ def check_builds(out):
     for cpu in ('z80', '8080', '6502', '6809', 'win32'):
         for f in sorted(glob.glob(f'{out}/{cpu}/*.hex') + glob.glob(f'{out}/{cpu}/*.EXE')):
             base, name = f[:-4], os.path.basename(f[:-4])
-            if '-ed' in name or name.startswith(('B8SWINE', 'B8SWINQE', 'B8SWINFE')):      # the editors run no file
+            if '-ed' in name or re.fullmatch(r'B8S[SF]?EU?', name):      # the editors run no file
                 continue
             cpm = '-cpm' in name
             run, ret = runner(cpu, base, cpm)

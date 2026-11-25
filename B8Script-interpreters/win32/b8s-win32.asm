@@ -5,29 +5,31 @@
 ;  Assembler: NASM 2.16, flat binary output: the PE header is laid out by
 ;  hand at the top of this file, so the output IS the .EXE:
 ;
-;      nasm -f bin -o B8SWIN.EXE b8s-win32.asm
-;      nasm -f bin -DCHECKED=1 -o B8SWINC.EXE b8s-win32.asm
-;      nasm -f bin -DEDITOR=1 -o B8SWINE.EXE b8s-win32.asm
-;      nasm -f bin -DEDITOR=1 -DCHECKED=1 -o B8SWINEC.EXE b8s-win32.asm
+;      nasm -f bin -DCHECKED=1 -o B8S.EXE b8s-win32.asm
+;      nasm -f bin -o B8SU.EXE b8s-win32.asm
+;      nasm -f bin -DEDITOR=1 -DCHECKED=1 -o B8SE.EXE b8s-win32.asm
+;      nasm -f bin -DEDITOR=1 -o B8SEU.EXE b8s-win32.asm
 ;
-;  (and the same with -DQUICK=1 for B8SWINQ*.EXE, or -DFAST=1 for B8SWINF*.EXE)
+;  Those are the base builds. Add -DSPEED=0 for the small ones (B8SS.EXE,
+;  B8SSU.EXE, B8SSE.EXE, B8SSEU.EXE) or -DSPEED=2 for the fast ones (B8SF*).
 ;
-;  Four switches (the defaults below, or -D on the command line):
+;  Three switches (the defaults below, or -D on the command line):
 ;    CHECKED  0 = no checks (spec: the programmer is responsible)
 ;             1 = starts with every variable at 0 and every word undefined,
 ;                 and stops on every error in the spec's table (and Ctrl-C)
 ;                 with the four-line report, on the standard error handle.
-;    EDITOR   0 = a runner: B8SWIN PROG.B8S loads the file, runs it, exits
+;    EDITOR   0 = a runner: B8S PROG.B8S loads the file, runs it, exits
 ;             1 = the line editor of the spec's suggested standard (the same
 ;                 editor as the Z80's, key for key); the file named on the
 ;                 command line is the program to start with.
-;    QUICK    1 = the speed-ups that cost few bytes: a skip cache, a faster
-;                 skip, '/' by a power of two as shifts, and (unchecked) a
-;                 variable then '@' or '!' in one step (see "Speed-ups").
-;                 0, the default, is the smallest build.
-;    FAST     1 = the speed build: QUICK, and a 256-entry jump table besides,
-;                 with no size limit (see "The speed build"). It goes with
-;                 either setting of the other two.
+;    SPEED    0 = small: the smallest build
+;             1 = base, the default: the speed-ups that cost few bytes: a
+;                 skip cache, a faster skip, '/' by a power of two as shifts,
+;                 and (unchecked) a variable then '@' or '!' in one step (see
+;                 "Speed-ups")
+;             2 = fast: base, and a 256-entry jump table besides, with no
+;                 size limit (see "The fast build")
+;             Each goes with either setting of the other two.
 ;
 ;  In every build Ctrl-C stops a running program (an unchecked runner stops
 ;  without a word): see the console layer for the rules, the held key and
@@ -44,21 +46,20 @@
 %ifndef EDITOR
 %define EDITOR  0
 %endif
-%ifndef QUICK
-%define QUICK   0
+%ifndef SPEED
+%define SPEED   1               ; 0 = small, 1 = base, 2 = fast
 %endif
-%ifndef FAST
-%define FAST    0
-%endif
-%if QUICK || FAST
- %define QK     1               ; (the speed-ups: QUICK, or the speed build)
+%assign FAST    SPEED/2         ; (1: the fast build)
+%assign SBASE   SPEED-FAST*2    ; (1: the base build)
+%if SBASE || FAST
+ %define QK     1               ; (the speed-ups: base, or the fast build)
 %else
  %define QK     0
 %endif
 %if QK && !CHECKED && !FAST
- %define QUICKU 1               ; (and those that only the unchecked QUICK
-%else                           ;   builds take; the speed build has its own)
- %define QUICKU 0
+ %define SBASEU 1               ; (and those that only the unchecked base
+%else                           ;   builds take; the fast build has its own)
+ %define SBASEU 0
 %endif
 
 ; -----------------------------------------------------------------------------
@@ -105,7 +106,7 @@
 ;  The stacks are outside the arena: the return stack is 112 entries below
 ;  RSTOP (in the image's uninitialised space below the arena) and the data
 ;  stack is the thread's stack (127 cells in the checked builds, as deep as
-;  the 1 MB stack reserve allows in the others). The QUICK and speed builds
+;  the 1 MB stack reserve allows in the others). The base and fast builds
 ;  keep their skip cache (64 entries, 512 bytes) after the interpreter's
 ;  variables, in the image's uninitialised space below NAMEBUF.
 ;
@@ -135,7 +136,7 @@ RSMAX   equ     112             ; return stack entries (checked builds)
 DSMAX   equ     127             ; data stack cells (checked builds)
 NAMEBUF equ     IB+0F000h       ; the file's name, as typed (up to 3.5 KB)
 %if QK
-NSKC    equ     64              ; the skip cache's entries (QUICK)
+NSKC    equ     64              ; the skip cache's entries (base)
 %endif
 
 ; -----------------------------------------------------------------------------
@@ -232,11 +233,11 @@ tstart:
         jmp     %1
  %endif
 %endmacro
-%define NEXTJ   jmp ebp                 ; (how DIVCODE ends: the speed build's
+%define NEXTJ   jmp ebp                 ; (how DIVCODE ends: the fast build's
                                         ;   own '/' has the dispatcher there)
 
-; NEXTF (the speed build): the dispatcher. It is `next`, and it is inline at
-; the end of the speed build's own handlers, so they never jump back to it.
+; NEXTF (the fast build): the dispatcher. It is `next`, and it is inline at
+; the end of the fast build's own handlers, so they never jump back to it.
 ; Every handler is entered with EAX = its character, zero-extended. NEXTD is
 ; the one after a digit: through dtabd, where a digit goes on with the number.
 %macro  NEXTF 0
@@ -467,8 +468,8 @@ alloc1: movzx   edx,word [ARENA+HEAP]
 ; quotient, 32768, does not fit in 16) wraps as the spec says instead of
 ; faulting. Dividing by 0 skips the IDIV in an unchecked build (two cells of
 ; no meaning: a and its sign); the checked build stops with Z. (The handler
-; itself in an unchecked build; in a checked or QUICK one its body, div1;
-; the speed build's fs_div is another copy.)
+; itself in an unchecked build; in a checked or base one its body, div1;
+; the fast build's fs_div is another copy.)
 %macro  DIVCODE 0
 %if CHECKED
         test    bx,bx
@@ -477,7 +478,7 @@ alloc1: movzx   edx,word [ARENA+HEAP]
         pop     eax
         movsx   ecx,bx
 %if QK
-        lea     edx,[ecx-1]             ; (QUICK: b a power of two? See DIVQ)
+        lea     edx,[ecx-1]             ; (base: b a power of two? See DIVQ)
         test    edx,ecx
         jz      %%p
 %%o:
@@ -497,7 +498,7 @@ alloc1: movzx   edx,word [ARENA+HEAP]
 %endif
 %endmacro
 
-; DIVQ (QUICK): '/' by a power of two, 2^k with k from 0 to 14, is shifts,
+; DIVQ (base): '/' by a power of two, 2^k with k from 0 to 14, is shifts,
 ; with IDIV's results: |a| >> k and |a| & (b - 1), both negated if a < 0
 ; (-32768 is its own |a|, as an unsigned 16 bits). EAX = a (its low word),
 ; ECX = b, EDX = b - 1. (A power of two or 0: an unchecked build divides by
@@ -635,7 +636,7 @@ pch:    CALLP   putc
 ;  distance from hbase, so every handler starts in the 256 bytes from hbase
 ;  (PT checks it). Only the starts must be there: the last handler, '$',
 ;  runs on past the window, and '[', '`' (and '_' in a checked build, and
-;  '/' in a checked or QUICK one) are stubs that jump to their bodies after
+;  '/' in a checked or base one) are stubs that jump to their bodies after
 ;  it. Each handler starts
 ;  with EBX = TOS and EAX, ECX, EDX free, and ends with JMP EBP.
 ;  (Two other layouts were tried: handlers 2-aligned with the table holding
@@ -902,14 +903,14 @@ grave1: CALLP   hexc
 div1:   DIVCODE
 %endif
 
-; ---- Speed-ups (QUICK builds) ---------------------------------------------
-; QUICK takes what pays on x86 of the Z80's QUICK: the skip cache and the
+; ---- Speed-ups (base builds) ---------------------------------------------
+; base takes what pays on x86 of the Z80's base: the skip cache and the
 ; faster skip (at skip), '/' by a power of two as shifts (DIVQ), and in the
 ; unchecked build a variable then '@' or '!' in one step (here). The Z80's
 ; '*' in 8 rounds has nothing to do here: x86 has IMUL. Nor has its true
 ; ')': this ')' reads the block start where it is in every build.
-%if QUICKU
-; a-z, in the unchecked QUICK build: a variable followed by '@' or '!' is
+%if SBASEU
+; a-z, in the unchecked base build: a variable followed by '@' or '!' is
 ; fetched or stored in the same step (x@ is the commonest pair in most
 ; programs). (A checked build checks the stacks between the two, so it keeps
 ; them apart.)
@@ -1420,7 +1421,7 @@ skip:
         ret
 %endif
 %else
-; The skip cache (QUICK). Nearly every skip is one that has happened before
+; The skip cache (base). Nearly every skip is one that has happened before
 ; (a loop skips the same false block on every pass), so the first scan from
 ; each place is remembered: 64 entries of {start, end} at skc, found by the
 ; start's low 6 bits. Only skips that start inside the program text are kept
@@ -1438,7 +1439,7 @@ skip:   mov     ecx,esi
 ; The scan. EDX = where it starts (the cache's key, and in the checked build
 ; the place for N; the opener is the character before it).
 %if FAST
-; (The speed build: a table of the six characters that count, NUL " ( ) [ ],
+; (The fast build: a table of the six characters that count, NUL " ( ) [ ],
 ; so the rest cost a load and a test each.)
 .sk0:   mov     edx,esi
         xor     eax,eax                 ; (EAX indexes the table)
@@ -2047,11 +2048,11 @@ ptab:   PT h_store      ; !
         PT h_not        ; ~
 %else
 ; =============================================================================
-;  The speed build (FAST = 1)
+;  The fast build (SPEED = 2)
 ;
 ;  The inner loop is a table of 256 handlers, one per character, and the
 ;  dispatcher (NEXTF: MOVZX EAX,BYTE [ESI] / INC ESI / JMP [dtab+EAX*4]) is
-;  `next` and is inline at the end of the speed build's own handlers. Those
+;  `next` and is inline at the end of the fast build's own handlers. Those
 ;  are: one per letter and digit, which knows its cell or its value, and the
 ;  commonest punctuation (fs_). The rest of the table is the regular
 ;  handlers, which end with JMP EBP, into `next`.
@@ -2120,7 +2121,7 @@ fv%[i]: cmp     byte [esi],'@'
 %assign i i+1
 %endrep
 
-; The commonest punctuation, written for the speed build (as the regular
+; The commonest punctuation, written for the fast build (as the regular
 ; handlers, but with the dispatcher inline; and '%' without XCHG with
 ; memory, which is locked, and slow).
 fs_add: pop     edx                     ; +
@@ -2411,8 +2412,8 @@ ptrs:   PTR     putc
 ;    61h-7Ah      a-z: push the address of that letter's cell
 ;    the rest     punctuation: jump through PTAB, 32 entries
 ;
-;  (The speed build has none of this: `next` is its table's dispatcher. See
-;  "The speed build".)
+;  (The fast build has none of this: `next` is its table's dispatcher. See
+;  "The fast build".)
 ; =============================================================================
 %if FAST == 0
 ; Digits: step back onto the first digit and read the whole number.
@@ -2421,9 +2422,9 @@ digit:  push    ebx
         CALLP   rdnum
         jmp     ebp
 
- %if QUICKU == 0
+ %if SBASEU == 0
 ; a-z: push the cell's address (the cell is the variable). (The unchecked
-; QUICK build does x@ and x! in one step: its `lower` is after the window.)
+; base build does x@ and x! in one step: its `lower` is after the window.)
 lower:  push    ebx
         lea     ebx,[ARENA+LET+eax*2]
         jmp     ebp
@@ -2439,7 +2440,7 @@ e_hi:   mov     al,'X'                  ; a reserved byte outside a string
         jmp     error
 %endif
 %if FAST
-next:   NEXTF                           ; (the speed build: through the table)
+next:   NEXTF                           ; (the fast build: through the table)
 %else
 next:
 %if CHECKED

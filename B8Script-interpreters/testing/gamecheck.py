@@ -12,7 +12,7 @@ A NAME.TXT listed in DOCS_ONLY is documentation only: it need not run (it may no
 fit in memory), so only its NAME.B8S is run. test_games.py checks that the .B8S
 is the .TXT stripped.
 """
-import sys, os, glob
+import re, sys, os, glob
 here = os.path.dirname(os.path.abspath(__file__))
 GAMES = os.path.normpath(os.path.join(here, '..', '..', 'games'))   # games/ at the root of the repository
 PROGS = os.path.normpath(os.path.join(here, '..', '..', 'programs'))   # and programs/
@@ -29,7 +29,7 @@ for cpu in ('z80', '8080', '6502', '6809', 'win32'):
     for hexf in sorted(glob.glob(f'{out}/{cpu}/*.hex') + glob.glob(f'{out}/{cpu}/*.EXE')):
         base = hexf[:-4]
         name = os.path.basename(base)
-        if '-ed' in name or name.startswith(('B8SWINE', 'B8SWINQE', 'B8SWINFE')):               # the editor builds have their own test
+        if '-ed' in name or re.fullmatch(r'B8S[SF]?EU?', name):               # the editor builds have their own test
             continue
         cpm = '-cpm' in name
         short = []

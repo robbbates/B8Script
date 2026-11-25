@@ -16,11 +16,12 @@
 ;             1 = send ANSI (VT100) sequences through CONOUT
 ;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
 ;                 CONAT (see the equates). The CP/M builds always send ANSI.
-;    QUICK    1 = the speed-ups that cost bytes: a skip cache, a faster skip,
-;                 '*' and '/' quicker for small and power-of-two operands, and
-;                 more (see "Speed-ups"). 0, the default, is the smallest build.
-;    FAST     1 = the speed build: QUICK and a dispatch table besides, with
-;                 no size limit (see "The speed build").
+;    SPEED    0 = small: the smallest build
+;             1 = base, the default: the speed-ups that cost bytes: a skip
+;                 cache, a faster skip, '*' and '/' quicker for small and
+;                 power-of-two operands, and more (see "Speed-ups")
+;             2 = fast: base and a dispatch table besides, with no size
+;                 limit (see "The fast build").
 ;
 ;  In every build Ctrl-C stops a running program (an unchecked build stops
 ;  without a word): see the console layer for the rules, the held key and
@@ -32,13 +33,14 @@
 CPM     EQU     0               ; 1 = CP/M .COM build
 CHECKED EQU     0               ; 1 = checked build
 ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
-QUICK   EQU     0               ; 1 = the speed-ups that cost bytes (see "Speed-ups")
-FAST    EQU     0               ; 1 = the speed build: see "The speed build"
+SPEED   EQU     1               ; 0 = small, 1 = base, 2 = fast (see "Speed-ups")
+FAST    EQU     SPEED/2         ; (1: the fast build)
+SBASE   EQU     SPEED-FAST*2    ; (1: the base build)
 ANS     EQU     ANSI+CPM-ANSI*CPM ; (CP/M: always ANSI)
-QK      EQU     QUICK+FAST-QUICK*FAST ; (the speed-ups: QUICK, or the speed build)
-QUICKU  EQU     QK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
-                                ;  builds take; the speed build has its own)
-PTLATE  EQU     QUICKU*(1-CPM)  ; (1: the table goes after psgn and pdec, not
+QK      EQU     SBASE+FAST-SBASE*FAST ; (the speed-ups: base, or the fast build)
+SBASEU  EQU     QK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
+                                ;  builds take; the fast build has its own)
+PTLATE  EQU     SBASEU*(1-CPM)  ; (1: the table goes after psgn and pdec, not
                                 ;   before the routines: wherever it doesn't
                                 ;   cross a page. chktab.py says if it does)
 
@@ -77,8 +79,8 @@ PTLATE  EQU     QUICKU*(1-CPM)  ; (1: the table goes after psgn and pdec, not
 ;  image's second page, the rest in its first. The layout below keeps to
 ;  that, and testing/chktab.py checks it in every build.
 ;
-;  The speed build (FAST) dispatches through a full table instead, and there
-;  NEXT and DROP are jumps outside page zero: see "The speed build".
+;  The fast build (FAST) dispatches through a full table instead, and there
+;  NEXT and DROP are jumps outside page zero: see "The fast build".
 ;
 ;  What the 8080 lacks, and what replaces it: no JR (JMP/Jcc), no DJNZ, no
 ;  SBC HL (byte-wise SUB/SBB, or negate and DAD), no shifts on register pairs
@@ -97,7 +99,7 @@ PTLATE  EQU     QUICKU*(1-CPM)  ; (1: the table goes after psgn and pdec, not
 ;             at +80h..+FFh
 ;    PROG     the program text, NUL-terminated; the heap starts after the NUL
 ;
-;  The QUICK and speed builds have a fifth, CPAGE, for the skip cache: the
+;  The base and fast builds have a fifth, CPAGE, for the skip cache: the
 ;  page at the heap limit (F000h) in a generic build, and under CP/M the
 ;  first page after the image, before the return stack, so that the letter
 ;  page is still the one just below the program text.
@@ -184,13 +186,13 @@ ANEG    EQU     neg16
 APUT    EQU     putc
 ANXT    EQU     next0
         IF      CHECKED
-ACHK    EQU     chkstk          ; (for the speed build's dispatcher)
+ACHK    EQU     chkstk          ; (for the fast build's dispatcher)
         ENDIF
         IF      1-CHECKED
 ACHK    EQU     0
         ENDIF
         IF      FAST
-DTPG    EQU     DTAB/256        ; (the speed build's table's first page)
+DTPG    EQU     DTAB/256        ; (the fast build's table's first page)
         ENDIF
         IF      1-FAST
 DTPG    EQU     0
@@ -206,7 +208,7 @@ DTPG    EQU     0
         DS      CPM*(1-FAST),0C3h ;   JMP drp
         DS      CPM*(1-FAST),ADRP&0FFh
         DS      CPM*(1-FAST),ADRP/256
-        DS      FAST,0E1h       ;   (speed build: POP H / JMP next0)
+        DS      FAST,0E1h       ;   (fast build: POP H / JMP next0)
         DS      FAST,0C3h
         DS      FAST,ANXT&0FFh
         DS      FAST,ANXT/256
@@ -231,7 +233,7 @@ DTPG    EQU     0
         .endm
         .macro  NEXT            ; next character
         DS      (1-CPM)*(1-FAST),0F7h ; RST 6
-        DS      CPM+FAST-CPM*FAST,0C3h ; JMP next0 (CP/M, and the speed build)
+        DS      CPM+FAST-CPM*FAST,0C3h ; JMP next0 (CP/M, and the fast build)
         DS      CPM+FAST-CPM*FAST,ANXT&0FFh
         DS      CPM+FAST-CPM*FAST,ANXT/256
         .endm
@@ -241,7 +243,7 @@ DTPG    EQU     0
         DS      CPM,ANXT&0FFh
         DS      CPM,ANXT/256
         .endm
-        .macro  NEXTF           ; (speed build only: the dispatcher itself, inline)
+        .macro  NEXTF           ; (fast build only: the dispatcher itself, inline)
         DS      FAST*CHECKED,0CDh ; (checked: CALL chkstk)
         DS      FAST*CHECKED,ACHK&0FFh
         DS      FAST*CHECKED,ACHK/256
@@ -257,7 +259,7 @@ DTPG    EQU     0
         DS      FAST,6Fh        ;   MOV L,A
         DS      FAST,0E9h       ;   PCHL
         .endm
-        .macro  NEXTD           ; (speed build only: the dispatcher, with TOS in DE.
+        .macro  NEXTD           ; (fast build only: the dispatcher, with TOS in DE.
         DS      FAST*CHECKED,0EBh ; A checked build's chkstk wants it in HL)
         DS      FAST*CHECKED,0CDh
         DS      FAST*CHECKED,ACHK&0FFh
@@ -274,7 +276,7 @@ DTPG    EQU     0
         DS      FAST,6Fh
         DS      FAST,0E9h
         .endm
-        .macro  NEXTX           ; (speed build only: the dispatcher, with TOS in HL
+        .macro  NEXTX           ; (fast build only: the dispatcher, with TOS in HL
         DS      FAST*CHECKED,0CDh ; in a checked build and in DE unchecked)
         DS      FAST*CHECKED,ACHK&0FFh
         DS      FAST*CHECKED,ACHK/256
@@ -422,7 +424,7 @@ rst30:  POP     D               ; 30  discard the RST's return address
 ;    61h-7Ah      a-z: push the address of that letter's cell
 ;    the rest     punctuation: jump through PTAB, 32 entries, in code order
 ; =============================================================================
-next0:  NEXTF                   ; (the speed build: the table dispatcher)
+next0:  NEXTF                   ; (the fast build: the table dispatcher)
         IF      CHECKED*(1-FAST)
         CALL    chkstk          ; both stacks are checked once per character
         ENDIF
@@ -530,9 +532,9 @@ h_alloc:XCHG
 ; ---- the letters and digits --------------------------------------------------
 
 ; a-z: push the cell's address (the cell is the variable)
-;  (the unchecked QUICK build does x@ and x! in one step: lowq)
+;  (the unchecked base build does x@ and x! in one step: lowq)
         ENDIF
-        IF      (1-CPM)*(1-QUICKU)
+        IF      (1-CPM)*(1-SBASEU)
 lower:  PUSH    H
         ADD     A
         MOV     L,A
@@ -1073,7 +1075,7 @@ uq2:    MOV     A,E             ; one shift for each halving of E down to 1
         JMP     uq2
         ENDIF
         IF      FAST
-; (the speed build: the shifts unrolled. By 16 to 128 it is fewer shifts to
+; (the fast build: the shifts unrolled. By 16 to 128 it is fewer shifts to
 ; go the other way: A:HL up by 8 - k, and A:H is the quotient)
 uq2:    MOV     A,E
         CPI     16
@@ -1174,7 +1176,7 @@ udv2:   POP     PSW
         RET
         ENDIF
         IF      FAST
-; (the speed build: the same 16 rounds, unrolled; and a dividend below 256
+; (the fast build: the same 16 rounds, unrolled; and a dividend below 256
 ; starts 8 bits up and takes only the last 8, since its first 8 would only
 ; shift zeros)
 udv0:   MOV     A,H
@@ -1651,7 +1653,7 @@ csi:    MVI     A,27
 ; quote counts as running into it. '\' takes either closer. The place where
 ; the skip started is kept on the stack, for the report.
         IF      1-QK
-; (Without QUICK: no skip cache.)
+; (Without base: no skip cache.)
 skip:
         ENDIF
         IF      CHECKED*(1-QK)
@@ -1888,7 +1890,7 @@ hexc:   LDAX    B
 hc1:    INX     B
         RET
 
-;  ---- Speed-ups (QUICK builds) -------------------------------------------
+;  ---- Speed-ups (base builds) -------------------------------------------
 ;  The skip cache and '/' by a power of two are above. These are the
 ;  handlers' tails that the builds with room take, kept here, out of the
 ;  handlers' first two pages.
@@ -1950,7 +1952,7 @@ closeq: LHLD    RSP
         CZ      pollk
         NEXTQ    
         ENDIF
-        IF      QUICKU
+        IF      SBASEU
 ; a-z, in the unchecked builds: a variable followed by '@' or '!' is fetched
 ; or stored in the same step (x@ is the commonest pair in most programs).
 ; (A checked build checks the stacks between the two, so it keeps them apart.)
@@ -2059,7 +2061,7 @@ brk     EQU     e_break         ;   the checked build reports B
 
 ; a-z: push the cell's address (the cell is the variable)
         ENDIF
-        IF      CPM*(1-QUICKU)
+        IF      CPM*(1-SBASEU)
 lower:  PUSH    H
         ADD     A
         MOV     L,A
@@ -2489,11 +2491,11 @@ fnul:   MOV     A,M
 
         IF      FAST
 ; =============================================================================
-;  The speed build (FAST = 1)
+;  The fast build (SPEED = 2)
 ;
 ;  The inner loop is a table: 256 entries, the low bytes of the handlers'
 ;  addresses in one page and the high bytes in the next. The dispatcher (at
-;  next0, and inline, as NEXTF, at the end of the speed build's own entries,
+;  next0, and inline, as NEXTF, at the end of the fast build's own entries,
 ;  so there is no jump back to it; the ordinary handlers end in JMP next0):
 ;
 ;      LDAX B / INX B / XCHG / MOV L,A / MVI H,DTAB/256 /
@@ -2528,7 +2530,7 @@ ftalloc:XCHG                    ; _
         JMP     h_alloc
 ftgrave:XCHG                    ; `
         JMP     h_grave
-; The commonest punctuation, written for the speed build: TOS in DE on the
+; The commonest punctuation, written for the fast build: TOS in DE on the
 ; way in, and the dispatcher inline on the way out.
 fs_add: POP     H               ; +
         DAD     D

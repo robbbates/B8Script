@@ -2,11 +2,12 @@
 
 usage: run_win32.py [DIR] [-v] [--nogames]     (DIR defaults to out/win32)
 
-The runners (B8SWIN, B8SWINC) go through run_tests.check(): the whole
-suite, the machine-code tests below, LOOSE or CHK, Tiny BASIC, ERRS and the
-break-key tests with the count of looks. The editor builds (B8SWINE,
-B8SWINEC) are typed at by test_editor.py's sessions, plus a session of
-their own for the arrow keys as Windows sends them. Then a few things only
+The runners (B8S, B8SU and their small and fast versions) go through
+run_tests.check(): the whole suite, the machine-code tests below, LOOSE or
+CHK, Tiny BASIC, ERRS and the break-key tests with the count of looks. The
+editor builds (B8SE, B8SEU and theirs) are typed at by test_editor.py's
+sessions, plus a session of their own for the arrow keys as Windows sends
+them. Then a few things only
 Windows has: the report goes to the standard error handle and the program's
 output to standard output, the console's input mode is put back at the
 end, input that is not a console is read with ReadFile, and a program on
@@ -94,11 +95,11 @@ def windows_only(exe, checked, editor, verbose):
         o = r.run()
         ok(o == b'65661267' and r.ended == 'exit', 'input from a pipe', r)
         # the file named in quotes, and no file at all
-        r = Run(exe, b'"q"$', b'', cmdline=b'"C:\\B8 dir\\B8SWIN.EXE"  "PROG.B8S"')
+        r = Run(exe, b'"q"$', b'', cmdline=b'"C:\\B8 dir\\B8S.EXE"  "PROG.B8S"')
         ok(r.run() == b'q' and r.ended == 'exit', 'a quoted command line', r)
-        r = Run(exe, b'"q"$', b'', cmdline=b'B8SWIN.EXE')
+        r = Run(exe, b'"q"$', b'', cmdline=b'B8S.EXE')
         ok(r.run() == b'' and r.ended == 'exit', 'no file named', r)
-        r = Run(exe, b'"q"$', b'', cmdline=b'B8SWIN.EXE NOSUCH.B8S')
+        r = Run(exe, b'"q"$', b'', cmdline=b'B8S.EXE NOSUCH.B8S')
         ok(r.run() == b'' and r.ended == 'exit', 'no such file', r)
     else:
         # the arrow keys as Windows sends them (key events with no
@@ -131,8 +132,8 @@ def main():
     for exe in sorted(glob.glob(d + '/*.EXE')):
         name = os.path.basename(exe)[:-4]
         mapf = exe[:-4] + '.map'
-        checked = name.endswith('C')
-        editor = name.startswith(('B8SWINE', 'B8SWINQE', 'B8SWINFE'))
+        checked = not name.endswith('U')               # B8S, B8SS, B8SF and their E: checked
+        editor = bool(re.fullmatch(r'B8S[SF]?EU?', name))
         if editor:
             total += test_editor.check_editor(exe[:-4], verbose=verbose, target=test_editor.win32_target(exe))
         else:

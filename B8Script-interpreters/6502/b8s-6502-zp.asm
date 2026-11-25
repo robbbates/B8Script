@@ -29,12 +29,13 @@
 ;             1 = send ANSI (VT100) sequences through CONOUT
 ;             0 = call the machine's own routines CONCLS, CONEOL, CONCUR and
 ;                 CONAT (see the equates)
-;    QUICK    1 = the speed-ups that cost bytes: a skip cache, a faster skip,
-;                 '*' and '/' quicker for small and power-of-two operands, and
-;                 more (see "Speed-ups"). 0, the default, is the smallest build.
-;    FAST     1 = the speed build: QUICK and a dispatch table besides, with
-;                 no size limit (see "The speed build").
-;  QUICK and FAST builds keep the skip cache in the page at $0200, which no
+;    SPEED    0 = small: the smallest build
+;             1 = base, the default: the speed-ups that cost bytes: a skip
+;                 cache, a faster skip, '*' and '/' quicker for small and
+;                 power-of-two operands, and more (see "Speed-ups")
+;             2 = fast: base and a dispatch table besides, with no size
+;                 limit (see "The fast build").
+;  The base and fast builds keep the skip cache in the page at $0200, which no
 ;  other build uses (this interpreter's data stack is in zero page).
 ;
 ;  Assembler: asm80, C6502 mode.
@@ -42,11 +43,12 @@
 
 CHECKED EQU     0               ; 1 = checked build
 ANSI    EQU     0               ; 1 = the console escapes send ANSI sequences
-QUICK   EQU     0               ; 1 = the speed-ups that cost bytes (see "Speed-ups")
-FAST    EQU     0               ; 1 = the speed build: see "The speed build"
-QK      EQU     QUICK+FAST-QUICK*FAST ; (the speed-ups: QUICK, or the speed build)
-QUICKU  EQU     QK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
-                                ;  builds take; the speed build has its own)
+SPEED   EQU     1               ; 0 = small, 1 = base, 2 = fast (see "Speed-ups")
+FAST    EQU     SPEED/2         ; (1: the fast build)
+SBASE   EQU     SPEED-FAST*2    ; (1: the base build)
+QK      EQU     SBASE+FAST-SBASE*FAST ; (the speed-ups: base, or the fast build)
+SBASEU  EQU     QK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
+                                ;  builds take; the fast build has its own)
 
 ; -----------------------------------------------------------------------------
 ;  Registers and zero page
@@ -75,8 +77,8 @@ QUICKU  EQU     QK*(1-CHECKED)*(1-FAST) ; (and those that only the unchecked
 ;  N1 characters start in the image's first page, those of the characters from
 ;  N1 up to N2 in its second, and the rest in its third. The layout below
 ;  keeps to that, and testing/chktab6502.py checks it in every build but the
-;  speed build (FAST = 1), which dispatches through a full table instead:
-;  see "The speed build" at the end.
+;  fast build (SPEED = 2), which dispatches through a full table instead:
+;  see "The fast build" at the end.
 ;
 ;  Every punctuation handler starts with the carry clear (the dispatcher
 ;  leaves it so). Several of them count on that, where the comments say.
@@ -126,7 +128,7 @@ LN      EQU     0Ah             ; 0A-0B the line being reported
 ;               and every build's: the countdown CDOWN at +79, KEYBUF (the
 ;               held key) at +7A, BRKOFF (the break-off cell) at +7B.
 ;    0500       PROG the program text, NUL-terminated; the heap follows
-;    E000       the interpreter (ROM). In the speed build its first two
+;    E000       the interpreter (ROM). In the fast build its first two
 ;               pages are the dispatch table, and start is at E200
 ;
 ;  The stacks sit below the letter page, so "the program's own space" (what
@@ -177,7 +179,7 @@ N1      EQU     8               ; ! " # $ % & ' (  start in the first page,
 N2      EQU     21              ; ) * + , - . / : ; < = > ?  in the second,
                                 ; @ [ \ ] ^ _ ` { | } ~  in the third
 
-; The speed build's dispatcher (FAST = 1; see "The speed build"), inline at
+; The fast build's dispatcher (SPEED = 2; see "The fast build"), inline at
 ; the end of its own entries. NEXTF reads the next character and jumps
 ; through the table:
 ;     LDY #0 / LDA (IP),Y / INC IP / BNE $+4 / INC IP+1 / TAY /
@@ -371,7 +373,7 @@ mq4:    ROR
         INX
         RTS
 .endm
-; (MULF: the same for the speed build, the rounds unrolled, with Y for the
+; (MULF: the same for the fast build, the rounds unrolled, with Y for the
 ; upper half's high byte while the low one is added)
 .macro  MULF
 mulq:   LDA     3,X
@@ -696,7 +698,7 @@ cq1:    PLA
         JMP     pkey
 .endm
 
-FTAB    EQU     BASE            ; (FAST: the speed build's table, two pages,
+FTAB    EQU     BASE            ; (FAST: the fast build's table, two pages,
         ORG     BASE+FAST*512   ;   comes first, and the code after it)
 
 ; =============================================================================
@@ -775,7 +777,7 @@ next:
         JMP     next
         ENDIF
         IF      (1-CHECKED)*FAST
-        JMP     fnext           ; (the speed build: see "The speed build")
+        JMP     fnext           ; (the fast build: see "The fast build")
         ENDIF
         IF      CHECKED
         JMP     next
@@ -1451,7 +1453,7 @@ chkst:  PHA
         IF      QK
 ;  ---- Speed-ups (QK builds) ---------------------------------------------
 ;  '*' is at mulq (in page 1 unchecked, to keep the handlers' pages; here
-;  checked and in the speed build), x@ and x! (unchecked) at lowq.
+;  checked and in the fast build), x@ and x! (unchecked) at lowq.
         ENDIF
         IF      CHECKED*QK*(1-FAST)
         MULQ
@@ -1462,7 +1464,7 @@ chkst:  PHA
         IF      QK
         CLOSEQ
         ENDIF
-        IF      QUICKU
+        IF      SBASEU
 ; a-z, in the unchecked QK builds: a variable followed by '@' or '!' is
 ; fetched or stored in the same step (x@ is the commonest pair in most
 ; programs). A checked build checks the stacks between the two, so it keeps
@@ -1692,7 +1694,7 @@ ud2:    DEY
         RTS
         ENDIF
         IF      FAST
-ud0:                            ; (the speed build: the 16 rounds unrolled)
+ud0:                            ; (the fast build: the 16 rounds unrolled)
         ASL     0,X
         ROL     1,X
         ROL     0FEh,X
@@ -2051,7 +2053,7 @@ pkey:   JSR     KEY
 next:
         ENDIF
         IF      CHECKED*FAST
-        JMP     fnext           ; (the speed build: see "The speed build")
+        JMP     fnext           ; (the fast build: see "The fast build")
         ENDIF
         IF      CHECKED*(1-FAST)
         ; Both stacks are checked once per character, after it has run. The
@@ -2284,11 +2286,11 @@ puship: LDA     IP              ; push the reading position
 
 ; a-z: push the cell's address (the cell is the variable)
 ;  (the unchecked QK builds do x@ and x! in one step: lowq)
-        IF      QUICKU
+        IF      SBASEU
 lower:  JMP     lowq
 lowp:
         ENDIF
-        IF      1-QUICKU
+        IF      1-SBASEU
 lower:
 lowp:
         ENDIF
@@ -2572,11 +2574,11 @@ lc8:    RTS
         ENDIF
 
 ; =============================================================================
-;  The speed build (FAST = 1)
+;  The fast build (SPEED = 2)
 ;
 ;  The inner loop is a table: 256 entries, the low bytes of the handlers'
 ;  addresses in one page (DTL) and the high bytes in the next (DTH). The
-;  dispatcher, NEXTF, is inline at the end of the speed build's own entries,
+;  dispatcher, NEXTF, is inline at the end of the fast build's own entries,
 ;  so there is no JSR and no RTS per character:
 ;      LDY #0 / LDA (IP),Y / INC IP / BNE $+4 / INC IP+1 / TAY /
 ;      LDA DTL,Y / STA V / LDA DTH,Y / STA V+1 / JMP (V)
@@ -4088,4 +4090,4 @@ DTH:
         DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; F0h
         DB      fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256,fhi/256                     ; F8h
         ENDIF
-; ==== end of the speed build
+; ==== end of the fast build

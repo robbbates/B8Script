@@ -301,10 +301,12 @@ async function runSrc(page, src) {
       await p.waitForTimeout(100);
       const h1 = await p.$eval('#wrap', e => e.getBoundingClientRect().height);
       const hidden = await p.evaluate(() => ['top', 'bottom'].every(id => getComputedStyle(document.getElementById(id)).display === 'none'));
-      ok(`${tag}: upright, ☰ hides all but the screen (its box ${Math.round(h0)} -> ${Math.round(h1)} px)`, hidden && h1 > h0 + 100);
-      await p.tap('#menub');
+      const gone = await p.$eval('#menub', e => getComputedStyle(e).display === 'none');
+      ok(`${tag}: upright, ☰ hides all but the screen, itself too (its box ${Math.round(h0)} -> ${Math.round(h1)} px)`, hidden && gone && h1 > h0 + 100);
+      await p.tap('#screen');
       await p.waitForTimeout(100);
-      ok(`${tag}: and ☰ again shows it all`, await p.$eval('#top', e => getComputedStyle(e).display !== 'none'));
+      ok(`${tag}: a tap on the screen shows it all again, ☰ too`, await p.$eval('#top', e => getComputedStyle(e).display !== 'none')
+         && await p.$eval('#menub', e => getComputedStyle(e).display !== 'none'));
     }
 
     // the program's own keys: MINES has w a s d as a cross, Space, f and q

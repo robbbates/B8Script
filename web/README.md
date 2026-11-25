@@ -11,7 +11,7 @@ Every game in [`games/`](../games/) and every program in [`programs/`](../progra
 - Pasting types the text, so a BASIC program can be pasted into Tiny BASIC.
 - On a phone, tap the screen for the keyboard. The bar below the screen has Esc, Ctrl, Tab, the arrows, Backspace, Return and Break.
   - Each program has its own big keys: the ones it uses, laid out as it uses them (w a s d as a cross, GREED's eight directions as a 3 × 3 grid, Tic-tac-toe's 1 to 9 as its board, Ski's j and l one each side). **Pad** shows or hides them. Movement keys repeat while held.
-  - Upright, **☰** in the screen's corner hides everything but the screen, so that it keeps its room with the phone's keyboard up, for typing in Tiny BASIC or MON; **☰** again shows it all.
+  - Upright, **☰** in the screen's corner hides everything but the screen, so that it keeps its room with the phone's keyboard up, for typing in Tiny BASIC or MON; a tap on the screen shows it all again.
   - Closing the phone's keyboard lets go of the focus, so a pad key pressed after it doesn't bring the keyboard back.
   - Sideways, the screen takes the whole height, with the program's keys either side and ⌨, Ctrl, ⌫, ⏎ and Break above them; **☰** shows the bars above and below the screen.
 

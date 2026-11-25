@@ -1180,7 +1180,7 @@ it is built they run under the B8SIC's tests.
 | Build | File | Bytes | Notes |
 |---|---|---|---|
 | Pure | `b8s-e.b8a` | 800 | Unchecked. The program text follows at 0320h |
-| Checked | `b8s-ec.b8a` | 1,713 | The spec's checked build, and the default under B8SDOS. The program text follows at 06B1h. `/U` in the command tail runs a program unchecked: `B8SCRIPT /U PROG.B8S` |
+| Checked | `b8s-ec.b8a` | 1,714 | The spec's checked build, and the default under B8SDOS. The program text follows at 06B2h. `/U` in the command tail runs a program unchecked: `B8SCRIPT /U PROG.B8S` |
 
 Both share one file for the packed table, the handlers and the skipping, byte for byte. The console is B8SDOS's (output
 by `CONOUT`, keys by `CONIN` and `CONST`), so its code is not counted.
@@ -1197,12 +1197,12 @@ the machine's data stack ((SP) is NOS), the return stack is the machine's return
 | Variable cells a-z, two bytes each | 00BEh | 190 | 190 |
 | The interpreter's code and variables | 0100h up to the program | 256 | 256 |
 | Program text, pure build | 0320h | 800 | 800 |
-| Program text, checked build | 06B1h | 1713 | 1713 |
+| Program text, checked build | 06B2h | 1714 | 1714 |
 | `-n?` line buffer (127 characters and CR), MEMTOP − 128 | EF70h | 61296 | −4240 |
 | MEMTOP, the first byte past a program's space; the heap limit is the line buffer | EFF0h | 61424 | −4112 |
 
 The heap starts just past the program's NUL and ends at the line buffer; a checked build stops with `H` past it or
-below its start. The data stack holds 252 cells and the return stack 250 entries (more than the 64 and 64 the spec asks):
+below its start. The data stack holds 252 cells (251 in the checked build, which keeps one spare cell under the program's, so that a pop past empty and a push after it, which the stack-limit interrupt does not see yet, touch nothing the OS keeps) and the return stack 250 entries (more than the 64 and 64 the spec asks):
 each stack is 256 cells with the four deepest the hardware's guard zone, and the OS keeps room for itself in them.
 Before the program runs, the cell of a variable holds a byte of the startup code in the pure build (the spec's undefined
 start) and 0 in the checked one; a word's cell likewise holds startup bytes in the pure build and points at an internal

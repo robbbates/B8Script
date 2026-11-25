@@ -47,8 +47,10 @@ Bytes 91h and 93h in the input stand for the left and right arrow keys:
 key events with no character and the virtual keys 25h and 27h.
 
 Time: the clock counts emulated work (IPMS instructions are a millisecond,
-measured CHUNK instructions at a time), plus the time that the waits
-spend: a wait with no key to give takes all of its time at once. A timed
+measured CHUNK instructions at a time) from the moment the B8Script
+program starts (run0, after the command line is read and the file
+loaded, so that the .EXE's own name doesn't shift it), plus the time that
+the waits spend: a wait with no key to give takes all of its time at once. A timed
 wait that finds a key (or a key-up event) returns at once, so n?, the
 250 ms window for a second Ctrl-C and the editor's 5 ms Esc wait behave as
 on the Z80 harness. With `console=False` the input is not a
@@ -108,6 +110,9 @@ class Run:
     def __init__(self, exe, prog=b'', inp=b'', timed=(), mode='runner', files=None, cmdline=None,
                  maxinstr=3_000_000_000, console=True, brk_at=None, outcon=True, hires=True):
         self.pe = chkpe.parse(exe)
+        mapf = exe[:-4] + '.map'           # the clock starts where the program does (run0): see run()
+        m = os.path.exists(mapf) and re.search(r'^\s*[0-9A-F]+\s+([0-9A-F]+)\s+run0\s*$', open(mapf).read(), re.M)
+        self.run0 = int(m.group(1), 16) if m else None
         self.mode = mode
         self.stages = []
         if mode == 'editor':
@@ -385,6 +390,14 @@ class Run:
     # ---- running ----
     def run(self):
         u = self.u
+        if self.run0 is not None and not self.icount:
+            # the startup, to run0, is not counted: run it to there an instruction
+            # at a time is too slow, so stop at run0 and start the clock at 0
+            try:
+                u.emu_start(self.eip, self.run0, count=10_000_000)
+            except UcError as e:
+                self.ended = f'fault {e} at {u.reg_read(UC_X86_REG_EIP):#x}'
+            self.eip = u.reg_read(UC_X86_REG_EIP)
         while self.ended is None:
             try:
                 u.emu_start(self.eip, 0xFFFFFFFF, count=CHUNK)

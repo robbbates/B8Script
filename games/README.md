@@ -11,6 +11,7 @@ Every `.B8S` file is a complete program. Run it with any B8Script runner:
 | Windows (command shell) | `B8SWIN BREAKOUT.B8S` |
 | CP/M, Z80 | `B8SZ80 BREAKOUT.B8S` |
 | CP/M, 8080 | `B8S8080 BREAKOUT.B8S` |
+| A web browser, on a computer or a phone | Open [`web/b8script.html`](../web/b8script.html) and pick the game from its menu |
 
 The interpreters are in [`B8Script-interpreters/`](../B8Script-interpreters/), and its README covers every build, including the 6502 and 6809 ROMs.
 

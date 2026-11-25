@@ -647,7 +647,7 @@ These are the tricks the Z80, 8080, 6502 and 6809 interpreters use. They are col
   - **`/` by any power of two** as a shift, with the same sign rules: `256/` for a high byte, and the 32 or 64 of fixed point.
   - **A true `)`** reads the block start where it is, instead of popping it and pushing it back.
   - **A variable then `@` or `!`** in one step, in the unchecked builds. A checked build checks the stacks between the two, so it keeps them apart.
-- **Fast** (in `B8Script-interpreters/z80/fast/`) takes everything, with no size limit:
+- **Fast** (in `B8Script-interpreters/z80/fast/`) takes everything, with no size limit. It is built for running benchmarks:
   - **Dispatch through a full table.** 256 entries, the handlers' low bytes in one page and their high bytes in the next: read the character, two loads, and `JP (HL)`.
   - **The dispatcher inline** at the end of every entry of the fast build's own, so there is no jump back to the loop.
   - **One entry per letter and digit,** each knowing its cell or its value already: a variable is `LD HL,cell`, a word call reads its own cell, and a one-digit number needs no loop.
@@ -974,7 +974,7 @@ Each build comes in the three tiers, in `B8Script-interpreters/z80/small/`, `bas
 | CP/M with the line editor, checked | `B8SE.COM` | 2,048, 2,227, none | `B8SE PROG.B8S`, or with no file |
 | The same, unchecked | `B8SUE.COM` | 1,646, 1,860, none |  |
 
-A small file has `small` in place of `base` (`b8s-z80-small-rom-0000.bin`) or an S after `B8S` (`B8SS.COM`, `B8SUSE.COM`); a fast one has `fast` or an F (`b8s-z80-fast-rom-0000.bin`, `B8SF.COM`, `B8SUF.COM`). Base is 180 to 230 bytes bigger than small and 1.1 to 1.6 times as fast; fast is about twice as fast as small, and has no editor. See [Speed](#speed) and the interpreters README.
+A small file has `small` in place of `base` (`b8s-z80-small-rom-0000.bin`) or an S after `B8S` and any U (`B8SS.COM`, `B8SUSE.COM`); a fast one has `fast` or an F (`b8s-z80-fast-rom-0000.bin`, `B8SF.COM`, `B8SUF.COM`). Base is 180 to 230 bytes bigger than small and 1.1 to 1.6 times as fast; fast is about twice as fast as small, and has no editor (one can be added if there's enough interest). See [Speed](#speed) and the interpreters README.
 
 **Registers.** BC is the reading position, HL is TOS, SP is the data stack ((SP) is NOS), IY is the return-stack pointer. A and DE are scratch. In the CP/M builds and the fast builds IX holds the inner loop's address, so a handler ends with `JP (IX)`. The alternate registers are not used, so an interrupt routine may use them.
 

@@ -16,7 +16,7 @@ The Windows source takes its switches (`CHECKED`, `EDITOR`, `SPEED`) as NASM def
 
 - **small** (`SPEED = 0`) is tuned for size: the smallest build of each CPU.
 - **base** (`SPEED = 1`, the default) adds the speed-ups that cost least: about 120 to 330 bytes more than small, for 1.1 to 1.6 times its speed.
-- **fast** (`SPEED = 2`) is base and everything else, size no object: 4 to 9 KB, and 1.7 to 4.6 times the speed of small. It goes with every build except the Z80's line editor.
+- **fast** (`SPEED = 2`) is base and everything else, size no object: 4 to 9 KB, and 1.7 to 4.6 times the speed of small. It is built for running benchmarks. It goes with every build except the Z80's line editor.
 
 `ANSI` decides what the console escapes of `$` (`/{` `/}` `/|` `` /` `` `/~`) do. With `ANSI = 1` they send ANSI (VT100) sequences through `CONOUT`. With `ANSI = 0` they call four routines of the machine's own (see the machine interface below). The generic builds default to `ANSI = 0`; the CP/M builds always send ANSI, whatever the switch says; the Windows builds always send ANSI, in the console mode they set.
 
@@ -296,6 +296,8 @@ Every build stops a running program on Ctrl-C. An unchecked build prints nothing
 
 ## The Z80 line editor (EDITOR = 1)
 
+The line editor is built into the Z80 builds (small and base) and the Windows builds (every tier). The 8080, 6502 and 6809 builds are runners only, and the Z80's fast build has no editor. An editor can be added to any of them if there's enough interest.
+
 The interpreter starts in the editor, and a program that ends comes back to it. There is no prompt. It follows the suggested standard in the spec's Environments chapter. Type a line and press Return:
 
 | You type | What happens |
@@ -449,7 +451,7 @@ Every source builds in three tiers, set by `SPEED`. They come from the same sour
 
 - **small** (`SPEED = 0`) is tuned for size. Its files are in each CPU's `small/`.
 - **base** (`SPEED = 1`, the default) adds the speed-ups that cost least, about 120 to 330 bytes, and is 1.1 to 1.6 times as fast as small. It goes with every build. Its files are in each CPU's `base/`.
-- **fast** (`SPEED = 2`) is base and everything else, size no object: 4 to 9 KB, 1.7 to 3 times as fast as small on the 8-bit CPUs and 2.7 to 4.6 times on Windows. It goes with every build except the Z80's line editor; Windows has fast editor builds. Its files are in each CPU's `fast/`.
+- **fast** (`SPEED = 2`) is base and everything else, size no object: 4 to 9 KB, 1.7 to 3 times as fast as small on the 8-bit CPUs and 2.7 to 4.6 times on Windows. It is built for running benchmarks. It goes with every build except the Z80's line editor; Windows has fast editor builds. Its files are in each CPU's `fast/`.
 
 **What base adds:**
 

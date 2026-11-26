@@ -4,12 +4,15 @@ generic: the image is ROM at 0000h, the program text is loaded at PROG (taken
 from the listing) and NUL-terminated, and KEY/CONOUT/EXIT are traps. KEY
 returns a waiting key in A, or 0, with the zero flag matching A. In a build
 with ANSI = 0 the console routines are traps too (see `console`).
-cpm: the image is a .COM at 0100h; BDOS 6, 15, 16, 19, 20, 21, 22 and 26
-are emulated, and any other call stops the run. `files` is the disk: a dict
-of 11-character names (as in an FCB) to contents, and it holds what the
-build wrote when the run is over.
+cpm: the image is a .COM at 0100h; BDOS 6, 15, 16, 19, 20, 21, 22, 23
+(rename), 26, 33 (read a random record) and 35 (the file's size in records)
+are emulated, and any other call stops the run. `files` is the disk: a dict of 11-character
+names (as in an FCB) to contents, and it holds what the build wrote when the
+run is over. A file's last record is padded with ^Z when it is read.
 If it is not given, the program is the one file on it, PROG.B8S, which is
-the name on the command line.
+the name on the command line. `tail` is the command tail at 0080h, as the CCP
+leaves it: a length byte, the text after the command's name, and a NUL. It
+defaults to b' PROG.B8S'.
 editor: a generic image built with EDITOR = 1. No program is loaded (the RAM
 at PROG starts as junk, as after power-on) and everything goes in through
 KEY. The run ends as 'exit' when the editor is left (LEAVE).
@@ -76,7 +79,7 @@ def plat(lst, cpm=False):
 
 class Run:
     def __init__(self, hexf, lst, prog, inp=b'', cpu='z80', mode='generic',
-                 maxticks=4_000_000_000, brk_at=None, timed=(), files=None):
+                 maxticks=4_000_000_000, brk_at=None, timed=(), files=None, tail=b' PROG.B8S'):
         self.m = z80.I8080Machine() if cpu == '8080' else z80.Z80Machine()
         self.sy = symbols(lst)
         org, img = load_hex(hexf)
@@ -122,6 +125,7 @@ class Run:
             fcb = bytearray(36)
             fcb[1:12] = b'PROG    B8S'
             self.m.set_memory_block(0x5C, bytes(fcb))
+            self.m.set_memory_block(0x80, bytes([len(tail)]) + tail + b'\0')
             self.files = {b'PROG    B8S': prog} if files is None else files
             self.cur = None        # the file that is open
             self.fpos = 0
@@ -249,6 +253,14 @@ class Run:
                 self.files.pop(name, None)
             self.cur, self.fpos = (name if found and f != 19 else None), 0
             m.a = 0 if found else 0xFF
+        elif f == 23:                           # rename: the new name at FCB+16
+            old = bytes(self.mem(m.de + 1 + i) for i in range(11))
+            new = bytes(self.mem(m.de + 17 + i) for i in range(11))
+            if old in self.files and new not in self.files:
+                self.files[new] = self.files.pop(old)
+                m.a = 0
+            else:
+                m.a = 0xFF
         elif f == 16:                           # close
             m.a = 0
         elif f == 26:
@@ -263,6 +275,26 @@ class Run:
                 m.set_memory_block(self.dma, rec)
                 self.fpos += 128
                 m.a = 0
+        elif f in (33, 35):                     # read a random record, size
+            name = bytes(self.mem(m.de + 1 + i) for i in range(11))
+            if name not in self.files:
+                self.ended = 'bdos %d: %r is not on the disk' % (f, name)
+                return False
+            file = self.files[name]
+            if f == 35:                         # r0, r1, r2: the records
+                n = (len(file) + 127) // 128
+                m.set_memory_block(m.de + 33, bytes([n & 255, n >> 8 & 255, n >> 16]))
+                m.a = 0
+            elif self.mem(m.de + 35):           # r2 must be 0
+                m.a = 6
+            else:
+                r = self.mem(m.de + 33) | self.mem(m.de + 34) << 8
+                rec = file[r * 128:r * 128 + 128]
+                if rec:
+                    m.set_memory_block(self.dma, rec + b'\x1a' * (128 - len(rec)))
+                    m.a = 0
+                else:
+                    m.a = 1                     # reading unwritten data
         elif f == 21:                           # write a record
             self.files[self.cur] += bytes(self.mem(self.dma + i) for i in range(128))
             m.a = 0

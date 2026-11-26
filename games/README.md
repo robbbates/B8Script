@@ -1,6 +1,6 @@
 # B8Script games
 
-Forty-two games for B8Script: twenty-one full-size ones, and twenty-one tiny ones that each fit in a tweet. Programs that aren't games, such as Tiny BASIC, a memory monitor and benchmarks, are in [`programs/`](../programs/).
+Forty-three games for B8Script: twenty-two full-size ones, and twenty-one tiny ones that each fit in a tweet. Programs that aren't games, such as Tiny BASIC, a memory monitor and benchmarks, are in [`programs/`](../programs/).
 
 ## Running a game
 
@@ -26,6 +26,7 @@ The interpreters are in [`B8Script-interpreters/`](../B8Script-interpreters/), a
 |---|---|---|
 | `BATTLE.B8S` | **Battleship** against the computer: five ships each on a 10 × 10 sea. | Place ships with w a s d, t to turn, space to set, r for random. Fire with w a s d and space, or type a cell such as `c5`. q gives up. |
 | `BREAKOUT.B8S` | **Breakout**: knock out the wall with the ball. Three balls; where the ball hits the paddle sets its angle. | a and d move the paddle, space serves, q quits. |
+| `CHESS.B8S` | **Chess** against the machine, with the full rules: castling, en passant, promotion (always to a queen), check, mate and stalemate. Level 1 to 3 is how many moves it looks ahead, then captures; a move takes seconds at level 1 and minutes at level 3 on a 4 MHz Z80. | Choose White or Black and the level, then type a move as its two squares (`e2e4`) and Return; castle by moving the king two squares. q gives up. |
 | `CONNECT4.B8S` | **Connect Four**: you are X and move first. The machine takes a win when it sees one and blocks yours. | 1–7 drops a piece into that column. y plays again. |
 | `DUNGEON.B8S` | **Dungeon**, a small roguelike: find the stairs `>` and go deeper. Gold `$`, potions `!`, a sword and armour `]`. | w a s d move; walk into a monster to fight it. p drinks a potion, q quits. |
 | `FIFTEEN.B8S` | **The 15-puzzle** (and the 8-puzzle on 3 × 3): slide the tiles back into order. Every puzzle can be solved. | w a s d slide a tile into the gap; the key is the way the tile moves. q gives up. |

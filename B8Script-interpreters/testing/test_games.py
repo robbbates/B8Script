@@ -237,6 +237,38 @@ TESTS += [
 ]
 
 
+# Chess: whole games, your moves chosen by python-chess (a greedy player taking the
+# biggest capture, or a three-ply search). The machine has no random numbers, so it
+# plays the same moves every time. Level 2 mates the greedy player; level 1 cannot
+# see a mate coming, so the search player beats it, and it can stalemate you
+CHESS_MATED_W = (
+    'e2e3 f2f3 c2c3 f1c4 e1f1 d2d3 e3e4 e4d5 c3c4 c4d5 g2g4 f3g4 d1c2 c2c5 f1f2 c1e3 '
+    'f2f1')
+CHESS_MATED_B = (
+    'e7e6 d8e7 b8c6 e6d5 e7e4 g8e7 a8b8 b8a8 h8g8 g7g6 a7a6 g6f5 g8g1 e7f5 c6a5 c7c5 '
+    'a8b8 e8e7 b7b5 b5c4 f8h6 d7d6 e7f6 f6g6 g6f5 f7f6 f5g6 g6h7 h7g6 f6f5')
+CHESS_WIN_B = (
+    'g8f6 b8c6 a8b8 g7g6 f8h6 c6a5 h6f8 a5c6 f6g8 c6a5 e7e6 f8b4 b8a8 b7b6 c8b7 b4d2 '
+    'f7f5 g8h6 a8c8 h6f7 h7h5 c8b8 a5c4 d7d5 c7d6 d6d5 d5e4 f7e5 b7e4 h8g8 d8c7 c7c3 '
+    'c3a1 b8c8 a1b2 c8c3')
+CHESS_STALE = (
+    'h2h3 a2a4 b1c3 c3d5 a1a2 b2b4 d2d4 d1d4 d4b4 c1d2 d2b4 g1f3 h1h2 f3g5 h3h4 h2h3 '
+    'e2e4 f1b5 b5d7 g5e4 g2h3 e1d1 d1e2 e2d1 d1e2 e2e1 e1e2 f2f4 e2f3 f3f2 f2e1 e1f2 '
+    'f2f1 f1f2 f2g1 g1f1')
+TESTS += [
+    ('CHESS', 'it mates you, you play White', b'y2' + typed(CHESS_MATED_W) + b'n',
+     [b'You play White, level 2.', b'I play ', b'Check!', b'Checkmate: I win.', b'Play again?', b'Bye.']),
+    ('CHESS', 'it mates you, you play Black', b'n2' + typed(CHESS_MATED_B) + b'n',
+     [b'You play Black, level 2.', b'Check!', b'Checkmate: I win.', b'Bye.']),
+    ('CHESS', 'you mate it, as Black at level 1', b'n1' + typed(CHESS_WIN_B) + b'n',
+     [b'You play Black, level 1.', b'Checkmate: you win.', b'Bye.']),
+    ('CHESS', 'it stalemates you, at level 1', b'y1' + typed(CHESS_STALE) + b'n',
+     [b'Stalemate: a draw.', b'Bye.']),
+    ('CHESS', 'bad moves, a legal one, give up', b'y1e2e5\rzz\re2\rE2E4\re1e2\rq\rn',
+     [b'That is not a legal move.', b'I play ', b'Play again?', b'Bye.']),
+]
+
+
 # Battleship, seed 1: firing only at my ships (read from the game), and only
 # at water, which lets it find and sink the whole fleet. And placing, firing
 # twice at a cell, and giving up
@@ -433,6 +465,9 @@ def idol_saves(path):
     return bad
 
 
+STEPS = {'CHESS': 400_000_000}    # the step budget of a run, where a game needs more
+
+
 def play(path, keys, steps=20_000_000):
     r = Play(open(path, 'rb').read(), keys, checked=True)
     out = r.run(steps)
@@ -460,7 +495,7 @@ if __name__ == '__main__':
         # hold the same code, so they must print exactly the same
         paths = [os.path.join(GAMES, game + ext) for ext in ('.B8S', '.TXT')
                  if game + ext not in DOCS_ONLY]
-        runs = [play(p, keys) for p in paths if os.path.exists(p)]
+        runs = [play(p, keys, STEPS.get(game, 20_000_000)) for p in paths if os.path.exists(p)]
         (r, out), (r2, out2) = runs[0], runs[-1]
         miss = [t for t in texts if t not in out]
         ok = not miss and r.error is None and r2.error is None and out == out2

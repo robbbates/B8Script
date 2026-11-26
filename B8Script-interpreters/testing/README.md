@@ -37,6 +37,7 @@ python3 chktab6502.py out/6502/*.lst
 python3 chkbr6502.py out/6502/*.lst                # asm80 misses some bad 6502 branches
 python3 gamecheck.py out                           # every game on every build, briefly
 python3 test_games.py                              # scripted games played to an end on ref.py
+python3 test_chess.py                              # the chess engine: perft and searches, on ref.py
 python3 test_programs.py out                       # SIEVE, PI, MANDEL and MON on ref.py and every build
 python3 test_web.py                                # the web player's interpreter against ref.py
 node test_page.js                                  # the web player's page, in Chromium
@@ -71,6 +72,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `test_page.js` | Drives the web player in Chromium (Playwright), as a computer and as phones: the screen, typing, a phone's keyboard, the pad, `n?`'s clock, the break key and checked reports. `node test_page.js DIR` also saves screenshots in DIR |
 | `test_programs.py` | Checks SIEVE, PI, MANDEL and MON on `ref.py` against models written in Python (PI's digits are themselves checked against Machin's formula), then, given `out`, runs each on every build and compares the output with `ref.py`'s. MON's R runs one return instruction of the build's CPU |
 | `test_games.py` | Types a fixed key sequence at a game on a checked `ref.py` and checks for the messages it should reach: a win, a loss or another known message. It runs both versions, which must print the same, and checks that every `.B8S` in `games/` and `programs/` holds the code of its `.TXT`. `test_games.py NAME` runs one game's tests |
+| `test_chess.py` | Checks the engine of `games/CHESS.TXT` on a checked `ref.py`: perft (the count of the move tree) of five standard positions to depth 2 or 3, against the known counts with promotion to a queen only, then mates in one and two, free and guarded pieces, stalemate and mate. The perft word lives in a comment in `CHESS.TXT`, so this adds it to `CHESS.B8S` cut before its main program |
 | `chktab.py`, `chktab09.py`, `chktab6502.py` | Check the dispatch-table layout rules on Z80/8080, 6809 and zero-page 6502 listings |
 | `chkbr6502.py` | Checks every 6502 branch against its target |
 | `test_tweets.py` | Plays the tiny games in `games/tweet140/` and `games/tweet280/` the same way, and checks each against its folder's limit: 140 or 280 characters (see `docs/tweets.md`). `test_tweets.py NAME` runs one game's tests; `--all` adds the slow check that Tic-tac-toe never loses |

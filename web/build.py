@@ -36,6 +36,7 @@ KEYS = {
     'programs/TINYBAS.B8S': ([], ['^B', 'Ret']),
     'games/BATTLE.B8S': (['. w .', 'a s d'], ['t r', 'Spc q']),
     'games/BREAKOUT.B8S': (['a d'], ['Spc', 'q']),
+    'games/CHESS.B8S': (['a b c d', 'e f g h', 'y n q'], ['1 2 3 4', '5 6 7 8', 'Bs Ret']),
     'games/CONNECT4.B8S': (['1 2', '3 4'], ['5 6', '7 y']),
     'games/DUNGEON.B8S': (['. w .', 'a s d'], ['p', 'q']),
     'games/FIFTEEN.B8S': (['. w .', 'a s d'], ['q']),

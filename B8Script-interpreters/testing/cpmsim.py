@@ -14,11 +14,13 @@ cpmtools (apt-get install cpmtools). Set Z80PACK to the z80pack folder.
       CPU's machine code) under the named .COM files, each output compared
       byte for byte with ref.py. Keys are typed as a person types them.
   python3 cpmsim.py files [-8] OUTDIR BUILD...   e.g. files out B8S B8SU
-      the CP/M file programs (test_cpm.py's cases: HEXDUMP, .B8S and .TXT)
-      under the named .COM files, with their files on drive C and the name
-      on the command line or typed at the prompt; each output is compared
-      byte for byte with test_cpm.py's model. A key is typed only once the
-      output has stopped, as a person would wait for the page.
+      the CP/M file programs (test_cpm.py's cases for HEXDUMP and LEDIT,
+      .B8S and .TXT, but those at the limits of memory) under the named .COM
+      files, with each case's file on drive C and the name on the command
+      line or typed at the prompt; the output is compared byte for byte with
+      test_cpm.py's model, and so is the file left on the disk. Keys are
+      typed as a person would: a line at a time, waiting for the output to
+      stop before the next.
   python3 cpmsim.py type [-8] OUTDIR STEP...
       type at CP/M: a STEP is text (\\r for Return, \\x03 for Ctrl-C),
       'wait:SECONDS' or 'expect:TEXT'. Prints all the output.
@@ -184,46 +186,89 @@ def suite(outdir, builds, cpu8):
     return fails
 
 
+def get(disk, name):
+    """A file's contents on a disk, or None if it is not there."""
+    tmp = os.path.join(ZP, 'disks', '_get.tmp')
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    r = subprocess.run(['cpmcp', '-f', FMT, disk, '0:' + name, tmp], capture_output=True)
+    if r.returncode or not os.path.exists(tmp):
+        return None
+    data = open(tmp, 'rb').read()
+    os.remove(tmp)
+    return data
+
+
 def files(outdir, builds, cpu8):
+    """test_cpm.py's cases, but those at the limits of memory, which differ under
+    real CP/M. Each case's file is put on drive C as F.DAT, in whole records
+    padded with ^Z (as the harness reads a file), and a ^C at the prompt makes
+    CP/M read the disk's directory again. Afterwards F.DAT is read back and must
+    be what the model left, with no F.$$$ beside it."""
     import test_cpm
     c = setup(outdir, cpu8)
-    for p in test_cpm.PROGS:
-        put(c, p, open(os.path.join(test_cpm.CPM, p), 'rb').read())
-    for k, (what, data, typed, keys) in enumerate(test_cpm.CASES):
-        if data is not None:
-            put(c, 'T%d.COM' % k, data)
+    for name, _, _ in test_cpm.PROGRAMS:
+        for ext in ('.B8S', '.TXT'):
+            put(c, name + ext, open(os.path.join(test_cpm.CPM, name + ext), 'rb').read())
+    pad = lambda d: None if d is None else d + b'\x1a' * (-len(d) % 128)
     fails = 0
     for b in builds:
         sim, bad, ran = Sim(cpu8), [], 0
-        for p in test_cpm.PROGS:
-            for k, (what, data, typed, keys) in enumerate(test_cpm.CASES):
-                # a typed name gets a drive and lower case, which HEXDUMP's N folds
-                typed = b'c:t%d.com' % k if typed is not None else None
-                cmd = b'B:%s %s' % (b.encode(), p.encode()) + (b'' if typed else b' T%d.COM' % k)
-                ran += 1
-                sim.out = bytearray()
-                sim.type(cmd + b'\r')
-                sim.until(b'\r\n', 5)
-                start = sim.out.index(b'\r\n') + 2
-                sim.settle()
-                if typed:
-                    sim.type(typed + b'\r')
+        for name, cases, model in test_cpm.PROGRAMS:
+            for ext in ('.B8S', '.TXT'):
+                for what, data, typed, keys in cases:
+                    if callable(data):
+                        continue
+                    for f in ('F.DAT', 'F.$$$'):
+                        subprocess.run(['cpmrm', '-f', FMT, c, '0:' + f], capture_output=True)
+                    if data is not None:
+                        put(c, 'F.DAT', pad(data))
+                    sim.out = bytearray()
+                    sim.type(b'\x03')                  # CP/M logs the disk in again
+                    sim.until(b'C>', 10)
                     sim.settle()
-                for ch in keys:
-                    sim.type(bytes([ch]))
+                    # a typed name gets a drive and lower case, which N folds
+                    if typed is not None and typed.startswith(b'a:test'):
+                        typed = b'c:f.dat'
+                    cmd = b'B:%s %s%s' % (b.encode(), name.encode(), ext.encode()) + (b'' if typed else b' F.DAT')
+                    ran += 1
+                    sim.out = bytearray()
+                    sim.type(cmd + b'\r')
+                    sim.until(b'\r\n', 5)
+                    start = sim.out.index(b'\r\n') + 2
                     sim.settle()
-                ok = sim.until(b'\r\nC>', 30, start)
-                got = bytes(sim.out[start:])
-                got = got[:got.rfind(b'C>')] if ok else got
-                exp = test_cpm.hexdump(data, keys, typed)
-                g = got[:-2] if got.endswith(b'\r\n') else got    # the CCP's new line
-                if not ok:
-                    bad.append((p, what, 'HUNG', got[-80:]))
-                    sim.close()
-                    sim = Sim(cpu8)
-                elif g != exp and got != exp:
-                    d = next((i for i in range(min(len(g), len(exp))) if g[i] != exp[i]), min(len(g), len(exp)))
-                    bad.append((p, what, d, g[d:d + 40], exp[d:d + 40]))
+                    if typed:
+                        sim.type(typed + b'\r')
+                        sim.settle()
+                    # HEXDUMP's keys are read one at a time; LEDIT's are typed a line
+                    # at a time, and the key that answers its Q on its own
+                    line, last = b'', b''
+                    for ch in keys:
+                        answer = name == 'LEDIT' and last in (b'q', b'Q') and not line
+                        sim.type(bytes([ch]))
+                        if name == 'HEXDUMP' or ch == 13 or answer:
+                            sim.settle()
+                        if answer:
+                            last = b''
+                        elif ch == 13:
+                            last, line = line, b''
+                        else:
+                            line += bytes([ch])
+                    ok = sim.until(b'\r\nC>', 30, start)
+                    got = bytes(sim.out[start:])
+                    got = got[:got.rfind(b'C>')] if ok else got
+                    exp, disk = model(pad(data), keys, typed)
+                    g = got[:-2] if got.endswith(b'\r\n') else got    # the CCP's new line
+                    left = get(c, 'F.DAT'), get(c, 'F.$$$')
+                    if not ok:
+                        bad.append((name + ext, what, 'HUNG', got[-80:]))
+                        sim.close()
+                        sim = Sim(cpu8)
+                    elif g != exp and got != exp:
+                        d = next((i for i in range(min(len(g), len(exp))) if g[i] != exp[i]), min(len(g), len(exp)))
+                        bad.append((name + ext, what, d, g[d:d + 40], exp[d:d + 40]))
+                    elif left != (pad(disk), None):
+                        bad.append((name + ext, what, 'the disk differs', [x and x[:40] for x in left]))
         sim.close()
         print(f'{b}{" (8080)" if cpu8 else ""}: {ran} runs, {len(bad)} differ')
         for x in bad:

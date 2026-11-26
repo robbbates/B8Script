@@ -1012,7 +1012,7 @@ All four must keep BC and IY, and all but `CONAT` also HL. The flags may change.
 
 **Screen size.** Whatever the terminal or the machine's routines give: the interpreter doesn't know it.
 
-**Machine-code contract.** Entered by CALL, with the return address on top of the stack and the data cells above it. The code must keep BC. A, DE, HL, IX, IY and the alternate registers may change; the interpreter restores IX and IY itself. It returns with RET (C9h), which the loader writes. On return, the cell on top of the stack becomes the new TOS. A generic build owns page zero: the code must leave it intact, and `RST 28h` prints the character in A, keeping BC, DE, HL and IY. A CP/M build doesn't use page zero, which is the system's: there, print through the BDOS. A routine that calls the BDOS from B8Script, with a kit for reading files, is under [Files under CP/M](idioms.md#files-under-cpm) in idioms.md.
+**Machine-code contract.** Entered by CALL, with the return address on top of the stack and the data cells above it. The code must keep BC. A, DE, HL, IX, IY and the alternate registers may change; the interpreter restores IX and IY itself. It returns with RET (C9h), which the loader writes. On return, the cell on top of the stack becomes the new TOS. A generic build owns page zero: the code must leave it intact, and `RST 28h` prints the character in A, keeping BC, DE, HL and IY. A CP/M build doesn't use page zero, which is the system's: there, print through the BDOS. A routine that calls the BDOS from B8Script, with a kit for reading and writing files, is under [Files under CP/M](idioms.md#files-under-cpm) in idioms.md.
 
 [↑ Back to top](#b8script-spec)
 

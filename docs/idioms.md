@@ -536,7 +536,7 @@ The grave does two jobs: followed by a hex digit it loads bytes, followed by any
 
 ## Files under CP/M
 
-B8Script has no file commands. On a CP/M build the grave is the way in: one machine-code routine calls the BDOS, and everything else (the FCB, the record buffer, the file's name) is B8Script. The routine is 8080 code, so one copy serves the Z80 and the 8080 builds. HEXDUMP carries the kit.
+B8Script has no file commands. On a CP/M build the grave is the way in: one machine-code routine calls the BDOS, and everything else (the FCB, the record buffer, the file's name) is B8Script. The routine is 8080 code, so one copy serves the Z80 and the 8080 builds. HEXDUMP, a file viewer, and LEDIT, a line editor, carry the kit.
 
 **The guard** comes first, before any machine code is loaded. It is true only on a CP/M runner: the loader's RET byte is C9h, and CP/M keeps a jump (C3h) at 0000h and at 0005h. Anywhere else the program says so and ends:
 
@@ -586,21 +586,45 @@ A function that returns a byte gives it in L, and H need not be zero: mask the r
 | C | `( dst n -- )` | For N: copies one part of the name from t, in capitals, up to n characters, and stops at a dot or the name's end |
 | A | `( -- text )` | The first name after the program's own in the command tail, or 0 if there is none |
 
-With no name on the command line, HEXDUMP asks for one: `A :0=( ; "File: "$ -14? 13'10' 0) f@N`. Its variables: b the gateway's code, f the FCB (36 bytes), d the record buffer, and t, i and c as scratch.
+With no name on the command line, both programs ask for one: `A :0=( ; "File: "$ -14? 13'10' 0) f@N`. Its variables: b the gateway's code, f the FCB (36 bytes), d the record buffer, and t, i and c as scratch.
 
-**The calls HEXDUMP makes**, each one line:
+**The calls the programs make**, each one line (f is the file's FCB, g LEDIT's temporary one):
 
-| Call | Code | Does |
-| --- | --- | --- |
-| Set the DMA (26) | `26B;` | With the buffer's address under it |
-| Open (15) | `f@15B255&255=` | True if there is no such file |
-| The size (35) | `f@35B; f@33+@s!` | The size in records, at FCB+33 |
-| Read a random record (33) | `[R f@33+! 26B; f@33B;]` | `( buf rec -- )`: the record number is a cell at FCB+33, and FCB+35 stays zero |
+| Call | Code | Does | Source |
+| --- | --- | --- | --- |
+| Set the DMA (26) | `26B;` | With the buffer's address under it | both |
+| Open (15) | `f@15B255&255=` | True if there is no such file | both |
+| The size (35) | `f@35B; f@33+@s!` | The size in records, at FCB+33 | HEXDUMP |
+| Read a random record (33) | `[R f@33+! 26B; f@33B;]` | `( buf rec -- )`: the record number is a cell at FCB+33, and FCB+35 stays zero | HEXDUMP |
+| Read the next record (20) | `e@26B; f@20B255&\` | Into the text at e, the DMA set first; anything but 0 is the end of the file, and leaves the loop | LEDIT |
+| Delete (19) | `g@19B;` | The result (255 if there was no such file) is dropped | LEDIT |
+| Make (22) | `g@22B255&255=` | True if the file can't be made | LEDIT |
+| Write the next record (21) | `:26B; g@21B255&z!` | From the address under it; anything but 0 (a full disk) is kept in z | LEDIT |
+| Close (16) | `g@16B255&255=` | True if it failed: until a written file is closed, the directory doesn't hold it | LEDIT |
+| Rename (23) | `f@ g@16+ 12 M` then `g@23B255&255=` | The new name goes at FCB+16 | LEDIT |
+
+**Code that jumps.** A routine with a loop can't be position-independent on the 8080, which has no relative jumps. So after the load the program stores the jumps' targets into the code, and stores the arguments into it at each call, in place of the zeros it was loaded with. Such a routine takes nothing from the data stack. LEDIT's move, `( src dst n -- )`, is 24 bytes; when the blocks overlap upward it is given the ends, and its two INCs are stored over with DECs (2Bh, 1Bh):
+
+```text
+25_:m! `C5210000110000010000 `78B1CA00007E1223130BC30000C1 ;
+m@23+ m@13+! m@10+ m@21+!
+[M m@8+! {:}%{:}%32768^%32768^>:{( m@8+@1-:{+%}+% 0)} 8&:35+m@17+. 19+m@18+. m@5+! m@2+! m@` ]
+```
+
+Its scanner, `( start limit c k -- p left )`, finds the k-th byte c before limit: a line by its number, the ^Z that ends a text, the CR that ends a typed line. Machine code moves or scans a byte in about 60 clock cycles, where a loop in B8Script takes about 2,600.
+
+```text
+43_:s! `C5210000110000010000 `78B1CA00007DBBC200007CBACA0000 `7E23FE00C200000BC30000 `D1E3C5E5424B ;
+s@36+ :s@13+! s@23+! s@25+ s@18+! s@10+ :s@30+! s@34+!
+[S s@8+! s@28+. s@5+! s@2+! s@` ]
+```
 
 - **The FCB and the buffer go on the heap.** A checked build stops with `O` on any `!` or `.` below the letter page, so 005Ch and 0080h may be read but not written.
 - **Set the DMA before the first read.** The runner's loader leaves it just past the program text, where the heap starts.
 - **Take the name from the command tail.** The loader's open of the program file overwrites the second FCB at 006Ch, so a name given on the command line is parsed from 0080h: a length byte, then the text, ending in NUL. `B8S HEXDUMP.B8S FILE.COM` leaves ` HEXDUMP.B8S FILE.COM` there.
 - **The code must keep BC,** which the gateway does; the grave restores IX and IY after the call.
+- **Memory ends at the BDOS.** The jump at 0005h names it, so `6@-256&` is the page where the heap ends. A checked build lets a program store anywhere from the heap top up to that page without allocating it, so LEDIT keeps its text there, and reads and writes the records straight into and out of it.
+- **Write a new file, then rename it.** LEDIT writes NAME.$$$, closes it, deletes NAME and renames NAME.$$$ to NAME, so a write that fails (a full disk) leaves the old file as it was. The last record is padded with ^Z, CP/M's end of a text file.
 
 [↑ Back to top](#b8script-idioms-tips-and-tricks)
 
@@ -678,7 +702,7 @@ Develop on a checked build, which stops with an error code, the line and column,
 
 - [b8script.md](b8script.md): the spec's Idioms, Tips and Don't rely on
 - [tutorial.md](tutorial.md) and [tweets.md](tweets.md)
-- [programs/cpm/](../programs/cpm/): HEXDUMP, the source of Files under CP/M
+- [programs/cpm/](../programs/cpm/): HEXDUMP and LEDIT, the sources of Files under CP/M
 - [games/](../games/): the commented .TXT sources of the 21 full-size games, their README, and the tweet-size games in tweet140 and tweet280
 
 Code quoted from a program was checked against its source; rows that describe a pattern in words have no code to check.

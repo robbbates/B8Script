@@ -4,9 +4,9 @@ generic: the image is ROM at 0000h, the program text is loaded at PROG (taken
 from the listing) and NUL-terminated, and KEY/CONOUT/EXIT are traps. KEY
 returns a waiting key in A, or 0, with the zero flag matching A. In a build
 with ANSI = 0 the console routines are traps too (see `console`).
-cpm: the image is a .COM at 0100h; BDOS 6, 15, 16, 19, 20, 21, 22, 26, 33
-(read a random record) and 35 (the file's size in records) are emulated, and
-any other call stops the run. `files` is the disk: a dict of 11-character
+cpm: the image is a .COM at 0100h; BDOS 6, 15, 16, 19, 20, 21, 22, 23
+(rename), 26, 33 (read a random record) and 35 (the file's size in records)
+are emulated, and any other call stops the run. `files` is the disk: a dict of 11-character
 names (as in an FCB) to contents, and it holds what the build wrote when the
 run is over. A file's last record is padded with ^Z when it is read.
 If it is not given, the program is the one file on it, PROG.B8S, which is
@@ -253,6 +253,14 @@ class Run:
                 self.files.pop(name, None)
             self.cur, self.fpos = (name if found and f != 19 else None), 0
             m.a = 0 if found else 0xFF
+        elif f == 23:                           # rename: the new name at FCB+16
+            old = bytes(self.mem(m.de + 1 + i) for i in range(11))
+            new = bytes(self.mem(m.de + 17 + i) for i in range(11))
+            if old in self.files and new not in self.files:
+                self.files[new] = self.files.pop(old)
+                m.a = 0
+            else:
+                m.a = 0xFF
         elif f == 16:                           # close
             m.a = 0
         elif f == 26:

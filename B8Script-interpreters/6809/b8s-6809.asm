@@ -1599,13 +1599,13 @@ sqc:    CLRA                    ; )
 ; base: a power of two, 2^k, is a shift: q = a >> k and r = a AND (2^k - 1).
 ; That is 2, and 256 for a high byte, and the 32 or 64 of fixed point.
 udiv:   LDD     ,U
-        LBEQ    ud0             ; by 0: the long way (it means nothing anyway)
+        BEQ     uqx             ; by 0: the long way (it means nothing anyway)
         SUBD    #1
         TFR     D,X             ; X = d - 1
         ANDA    ,U
-        LBNE    ud0
+        BNE     uqx
         ANDB    1,U
-        LBNE    ud0             ; not a power of two
+        BNE     uqx             ; not a power of two
         TFR     X,D
         ANDA    2,U
         ANDB    3,U
@@ -1627,6 +1627,8 @@ uq2:    STD     2,U             ; q
         PULS    D
         STD     ,U
         RTS
+uqx:    JMP     ud0             ; (three short branches to one jump are
+                                ;  3 bytes less than three long ones)
         ENDIF
 
         IF      FAST

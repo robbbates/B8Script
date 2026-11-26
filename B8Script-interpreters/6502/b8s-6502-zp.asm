@@ -1509,15 +1509,19 @@ lws:    JSR     incip           ; x!: the cell = TOS, and it is dropped
 ; found by the start's low byte times 4. Only skips that start in the
 ; program text are kept (the line buffer changes); the cache is emptied when
 ; the program starts. A program that changes its own text while it runs is
-; not looked after. Where the skip started is kept in the scratch under the
-; top cell, $FE,X and $FF,X. (The checked build: A holds the wrong closer on
-; the way in, as at the checked skip above.)
+; not looked after. A miss writes the start into its entry at once, and
+; keeps the entry's place in the scratch under the top cell, $FE,X (1, which
+; no entry has, for a skip that is not kept), so that the end can go in when
+; the scan finds it. A scan that fails ends the program, and the next run
+; empties the cache, so a half-written entry is never found. (The checked
+; build: A holds the wrong closer on the way in, as at the checked skip above.)
 skip:
         ENDIF
         IF      CHECKED*QK
         STA     T0
         ENDIF
         IF      QK
+        LDY     #1              ; (no entry)
         LDA     IP+1
         CMP     #>PROG
         BCC     sks             ; below the program text: no cache
@@ -1527,10 +1531,10 @@ skip:
         TAY                     ; Y -> the entry
         LDA     IP
         CMP     CPAGE*256,Y
-        BNE     sks
+        BNE     skm
         LDA     IP+1
         CMP     CPAGE*256+1,Y
-        BNE     sks
+        BNE     skm
         LDA     CPAGE*256+2,Y   ; a hit: the IP goes to the closer, which is
         STA     IP              ;   read
         LDA     CPAGE*256+3,Y
@@ -1538,10 +1542,11 @@ skip:
         LDY     #0
         LDA     (IP),Y
         JMP     incip
-sks:    LDA     IP
-        STA     0FEh,X
+skm:    LDA     IP              ; a miss: the entry's start now, its end when
+        STA     CPAGE*256,Y     ;   the scan has found it
         LDA     IP+1
-        STA     0FFh,X
+        STA     CPAGE*256+1,Y
+sks:    STY     0FEh,X          ; the entry, or 1 for none
         LDY     #0
         STY     T2              ; depth
 ; The scan reads at IP+Y. Most characters are nothing to it, and two range
@@ -1600,17 +1605,9 @@ sqc1:
         ENDIF
         IF      QK
         PHA
-        LDA     0FFh,X          ; remember the skip, if it started in the
-        CMP     #>PROG          ;   program text
-        BCC     sq9
-        LDA     0FEh,X
-        ASL
-        ASL
-        TAY
-        LDA     0FEh,X
-        STA     CPAGE*256,Y
-        LDA     0FFh,X
-        STA     CPAGE*256+1,Y
+        LDY     0FEh,X          ; the entry, if the skip is kept
+        CPY     #1
+        BEQ     sq9
         LDA     IP
         SEC
         SBC     #1

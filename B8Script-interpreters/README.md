@@ -58,11 +58,11 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | 6502, stack in pages 2-3 | base | 1,534 | 1,591 | 1,976 | 2,019 |
 | 6502, stack in pages 2-3 | fast | 7,448 | 7,505 | 5,506 † | 5,549 † |
 | 6502, stack in zero page | small | 1,155 | 1,217 | 1,673 | 1,721 |
-| 6502, stack in zero page | base | 1,483 | 1,545 | 1,946 | 1,994 |
-| 6502, stack in zero page | fast | 6,949 | 7,011 | 5,069 † | 5,117 † |
+| 6502, stack in zero page | base | 1,474 | 1,536 | 1,937 | 1,985 |
+| 6502, stack in zero page | fast | 6,940 | 7,002 | 5,060 † | 5,108 † |
 | 6809 | small | 873 | 934 | 1,264 | 1,313 |
-| 6809 | base | 1,026 | 1,087 | 1,380 | 1,429 |
-| 6809 | fast | 4,654 | 4,715 | 4,257 † | 4,306 † |
+| 6809 | base | 1,023 | 1,084 | 1,377 | 1,426 |
+| 6809 | fast | 4,651 | 4,712 | 4,254 † | 4,303 † |
 
 **CP/M .COM files** (always ANSI):
 

@@ -56,13 +56,13 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | 8080 | fast | 4,352 | 4,352 | 4,864 | 4,864 |
 | 6502, stack in pages 2-3 | small | 1,208 | 1,265 | 1,707 | 1,750 |
 | 6502, stack in pages 2-3 | base | 1,534 | 1,591 | 1,976 | 2,019 |
-| 6502, stack in pages 2-3 | fast | 7,448 | 7,505 | 5,506 | 5,549 |
+| 6502, stack in pages 2-3 | fast | 7,448 | 7,505 | 5,506 † | 5,549 † |
 | 6502, stack in zero page | small | 1,155 | 1,217 | 1,673 | 1,721 |
 | 6502, stack in zero page | base | 1,483 | 1,545 | 1,946 | 1,994 |
-| 6502, stack in zero page | fast | 6,949 | 7,011 | 5,069 | 5,117 |
+| 6502, stack in zero page | fast | 6,949 | 7,011 | 5,069 † | 5,117 † |
 | 6809 | small | 873 | 934 | 1,264 | 1,313 |
 | 6809 | base | 1,026 | 1,087 | 1,380 | 1,429 |
-| 6809 | fast | 4,654 | 4,715 | 4,257 | 4,306 |
+| 6809 | fast | 4,654 | 4,715 | 4,257 † | 4,306 † |
 
 **CP/M .COM files** (always ANSI):
 
@@ -85,11 +85,11 @@ The 6502 has two sources: `b8s-6502.asm` keeps the data stack in pages 2 and 3, 
 | small | Code and table | 1,319 | 1,829 | 2,021 | 2,543 |
 | base | The file | 2,560 | 3,072 | 3,584 | 4,096 |
 | base | Code and table | 1,509 | 1,973 | 2,207 | 2,687 |
-| fast | The file | 8,192 | 7,680 | 8,704 | 8,704 |
-| fast | Code and tables | 6,963 | 6,575 | 7,663 | 7,291 |
+| fast | The file | 8,192 | 7,680 † | 8,704 | 8,704 |
+| fast | Code and tables | 6,963 | 6,575 † | 7,663 | 7,291 † |
 
 - A generic size is the whole ROM image: the code plus the punctuation table.
-- A checked fast build can be smaller than its unchecked one (6502, 6809, Windows): the unchecked one's 26 variable entries each also do `@` and `!`.
+- † A checked fast build can be smaller than its unchecked one (6502, 6809, Windows): the unchecked one's 26 variable entries each also do `@` and `!`, in one step with the variable, which a checked build can't do, as it tests the stacks between the two.
 - The 8080 fast builds include up to 255 bytes of padding, which puts their 512-byte table on a page boundary.
 - A Windows file is a 512-byte header and then the code, the table and about 375 to 400 bytes of import data, rounded up to the next 512 bytes: so a file shrinks only in steps of 512. The four small ones have 357, 359, 143 and 133 bytes to spare before their next step up.
 - The letter cells, stacks and line buffer are all in RAM, so they aren't counted.

@@ -714,7 +714,7 @@ Develop on a checked build, which stops with an error code, the line and column,
 - [b8script.md](b8script.md): the spec's Idioms, Tips and Don't rely on
 - [tutorial.md](tutorial.md) and [tweets.md](tweets.md)
 - [programs/cpm/](../programs/cpm/): HEXDUMP and LEDIT, the sources of Files under CP/M
-- [games/](../games/): the commented .TXT sources of the 21 full-size games, their README, and the tweet-size games in tweet140 and tweet280
+- [games/](../games/): the commented .TXT sources of the 22 full-size games, their README, and the tweet-size games in tweet140 and tweet280
 
 Code quoted from a program was checked against its source; rows that describe a pattern in words have no code to check.
 

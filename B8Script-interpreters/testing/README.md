@@ -37,6 +37,7 @@ python3 chktab6502.py out/6502/*.lst
 python3 chkbr6502.py out/6502/*.lst                # asm80 misses some bad 6502 branches
 python3 gamecheck.py out                           # every game on every build, briefly
 python3 test_games.py                              # scripted games played to an end on ref.py
+python3 test_chess.py                              # the chess engine: perft and searches, on ref.py
 python3 test_programs.py out                       # SIEVE, PI, MANDEL and MON on ref.py and every build
 python3 test_cpm.py out                            # HEXDUMP and LEDIT on every Z80 and 8080 CP/M runner, their guards on ref.py and the generic builds
 python3 test_web.py                                # the web player's interpreter against ref.py
@@ -73,6 +74,7 @@ python3 mkrel.py                                   # copy out/ to the .bin, .COM
 | `test_programs.py` | Checks SIEVE, PI, MANDEL and MON on `ref.py` against models written in Python (PI's digits are themselves checked against Machin's formula), then, given `out`, runs each on every build and compares the output with `ref.py`'s. MON's R runs one return instruction of the build's CPU |
 | `test_cpm.py` | Checks the CP/M file programs in `programs/cpm/` (HEXDUMP and LEDIT). On `ref.py`, which can't run machine code, a checked run must print the guard's line and end; given `out`, both `.B8S` and `.TXT` run on every Z80 and 8080 CP/M runner (small, base and fast, checked and unchecked) with files on the harness's disk and the name in the command tail or typed at the prompt, and the output and the disk afterwards are compared byte for byte with models written in Python. LEDIT's cases at the limits of memory work out its room from the build's `PROG`. On the generic builds the guards must hold |
 | `test_games.py` | Types a fixed key sequence at a game on a checked `ref.py` and checks for the messages it should reach: a win, a loss or another known message. It runs both versions, which must print the same, and checks that every `.B8S` in `games/`, `programs/` and `programs/cpm/` holds the code of its `.TXT`. `test_games.py NAME` runs one game's tests |
+| `test_chess.py` | Checks the engine of `games/CHESS.TXT` on a checked `ref.py`: perft (the count of the move tree) of five standard positions to depth 2 or 3, against the known counts with promotion to a queen only, then mates in one and two, free and guarded pieces, stalemate and mate. The perft word lives in a comment in `CHESS.TXT`, so this adds it to `CHESS.B8S` cut before its main program |
 | `chktab.py`, `chktab09.py`, `chktab6502.py` | Check the dispatch-table layout rules on Z80/8080, 6809 and zero-page 6502 listings |
 | `chkbr6502.py` | Checks every 6502 branch against its target |
 | `test_tweets.py` | Plays the tiny games in `games/tweet140/` and `games/tweet280/` the same way, and checks each against its folder's limit: 140 or 280 characters (see `docs/tweets.md`). Each `.TXT` must hold the code of its `.B8S`, and both are played and must print the same. `test_tweets.py NAME` runs one game's tests; `--all` adds the slow check that Tic-tac-toe never loses |

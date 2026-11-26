@@ -109,14 +109,15 @@ def kingdom(extra):
     return keys
 
 
-def maze(seed):
-    """Keys for Maze: the seed key, then the shortest way out, found by a
-    breadth-first search of the maze as the game printed it."""
+def maze(seed, bumps=b''):
+    """Keys for Maze: the seed key, any bumps (keys that hit a wall), then the
+    shortest way out from place 78, found by a breadth-first search of the maze as
+    the game printed it. Returns the keys and the message the game should end with."""
     from collections import deque
     r, out = play('tweet280', 'MAZE', seed)
     top = out.index(b'\x1b[H\x1b[J') + 6
     m = out[top:top + 19 * 41]
-    prev, todo = {79: None}, deque([79])
+    prev, todo = {78: None}, deque([78])
     while todo:
         a = todo.popleft()
         for step, key in ((1, b'l'), (-1, b'j'), (41, b'k'), (-41, b'i')):
@@ -128,7 +129,7 @@ def maze(seed):
     while prev[a]:
         a, key = prev[a]
         keys = key + keys
-    return seed + keys
+    return seed + bumps + keys, b'\x1b[21;1HOut in %d keys' % (len(bumps) + len(keys))
 
 
 def mash(seed, keys, n):
@@ -202,10 +203,13 @@ TESTS = {'tweet140': [
     ('BRKOUT28', 'one brick, then the ball is lost', N * 200, [b'\x1b[4;31H#', b'\x1b[21;', b'\x1b[22;1Hscore 1'], 'end'),
     ('HANGMN28', 'guess it', b'kbinary', [b'B_____ 0/6 ?', b'BINARY won'], 'end'),
     ('HANGMN28', 'six misses', b'kzqxjvw', [b'______ 5/6 ?', b'BINARY lost'], 'end'),
-    # Maze: walls hold, and the shortest way out (54 steps in every binary-tree maze) gets out
-    ('MAZE', 'walls hold', b'kiiii', [b'#######################################\r\n#', b'\x1b[2;39H@'], None),
-    ('MAZE', 'walk out', maze(b'k'), [b'\x1b[21;1HOut in 54 keys'], 'end'),
-    ('MAZE', 'another maze', maze(b'\0\0\0\0\0k'), [b'\x1b[21;1HOut in 54 keys'], 'end'),
+    # Maze: walls hold; the shortest way out gets out, each maze with its own length
+    # (the first maze's is 113, where the binary tree's was always 53); a bump counts
+    ('MAZE', 'walls hold', b'kiiiillll', [b'#######################################\r\n#', b'\x1b[2;38H@'], None),
+    ('MAZE', 'walk out', maze(b'k')[0], [b'\x1b[21;1HOut in 113 keys'], 'end'),
+    *(('MAZE', what, keys, [end], 'end') for what, (keys, end) in (
+        ('another maze', maze(N * 5 + b'k')),
+        ('bumps count', maze(N * 9 + b'k', b'iil')))),
 ]}
 
 

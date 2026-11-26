@@ -82,7 +82,7 @@ Twenty-three games, each one complete in a tweet. [`docs/tweets.md`](../docs/twe
 | `COPTER.B8S` | **Copter**: fly down a narrowing cave. Gravity pulls you right; you have inertia. | Any key pushes left. |
 | `BRKOUT28.B8S` | **Breakout**: 96 bricks; keep the ball in play. The score is the bricks broken. | j left, l right. |
 | `HANGMN28.B8S` | **Hangman**: eight six-letter computer words, six misses allowed. | Press a key, then guess letters. |
-| `MAZE.B8S` | **Maze**: a new maze every game. Start in the gap at the top right and get out through the gap at the bottom left; the way out is always 54 steps. | Press a key, then i up, j left, k down, l right. |
+| `MAZE.B8S` | **Maze**: a new maze every game, made by a random walk. Start in the top right cell and get out through the gap at the bottom left. Making the maze takes a while on an 8-bit machine. | Press a key and wait, then i up, j left, k down, l right. |
 
 ### Speed of the real-time tiny games
 

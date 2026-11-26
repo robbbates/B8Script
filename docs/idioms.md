@@ -311,6 +311,7 @@ The 26 variables hold one cell each; anything bigger lives on the heap, reached 
 | Index to row and column | `[P 72/Y]` with `[Y"/~"$]` | One `/` gives row and column in the order `/~` takes them, so a board as wide as the screen needs no arithmetic at all (GREED; ROBOTS and BATTLE add offsets first) |
 | Neighbour offsets as text | `"345EGWXY"+,70-` | The offsets stored as characters plus a bias (MINES) |
 | Allocate and clear in one loop | `0_g!1024 1(0 1_.1-:);` | Takes the heap a byte at a time, storing 0 (TRON, SNAKE, DUEL) |
+| Two bytes in one store | `2573 2_!` | Allocates and stores CR and LF as one cell, 13 + 256 × 10, low byte first: the end of each row of a text buffer (MAZE in tweet280) |
 | Fixed-width records in a string | `"Sol     Vega    Rigel   "u!` and `%8*+` | The data stays in the program text (TRADER, IDOL, HANGMAN) |
 | Several tables in one block | `996_v!`, then `v@356+`, `v@990+@` | One allocation for everything, addressed as v plus a constant (TINYBAS, IDOL) |
 | Use the heap top without allocating | `0_:p!e!` | Memory above the top still belongs to the program (TINYBAS; LEDIT keeps a whole text file there, with `0_:d!e!`) |
@@ -401,7 +402,7 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Digits at a place in the text | `[V 0 1( t@,48-:32767&10<0=:{(;0)}\ %10*+ t@1+t! 1)]` | `( -- n )`, leaving t just after the digits (LEDIT) |
 | Key to a number by position | `"wasd"i@+, c@=` in a loop | The index where the key matches is the command (G2048, ROBOTS, FIFTEEN) |
 | Keypad to a step | `v@1- 3/ 1-d! 1-o!` | Position 0–8 to dy and dx of −1…+1 (ROBOTS) |
-| i j k l as arrow keys | `0?3&"Q'Oy"+,80-` | The step for a 41-wide grid: +1, −41, −1 or +41 (MAZE in tweet280). See below |
+| i j k l as arrow keys | `0?3&"Q'Oy"+,80-` | The step for a 41-wide grid: +1, −41, −1 or +41. MAZE in tweet280 keeps it as a word, `[D3&"Q'Oy"+,80-]`, which its maze generator also calls with random bits. See below |
 | j k l as −1, 0, +1 | `0?107-` | k is the middle letter, so subtracting its code leaves −1, 0 or +1; check the range (`:1+32767&3<`) unless every key may move. No game uses it yet: SKI uses the two-test form above |
 | Ask until valid | `1( K 48- :c!0> c@8<&:( ; c@F 0) 0= )` | A bad key leaves the false flag, so the loop asks again (CONNECT4, KLONDIKE) |
 | Echo printable keys only | `:32>(:' 0)` | (KLONDIKE, WUMPUS, QUBIC) |
@@ -502,6 +503,7 @@ The games share a few shapes: a frame is one timed key wait, end conditions fold
 | Smooth motion | `x@4/;` | Positions in quarter cells, drawn in whole ones (COPTER) |
 | Capped gravity | `v@1+:3>(;3 0)` | Falling speeds up to a limit (COPTER) |
 | Flood fill without recursion | Sweep until nothing changes, or keep an explicit stack | Recursion can pass the 64 return-stack entries every build guarantees (MINES) |
+| A maze by random walk | Step two cells at a time at random; on a cell never visited, open the wall crossed; stop when every cell is visited | Aldous–Broder: a perfect maze with no bias, in one loop with no stack, about 80 characters. Slow, as the walk wanders to find the last cells (MAZE in tweet280) |
 | Catch up on arrival | Update a place from the day you last saw it | Nothing runs for places you aren't at (IDOL) |
 | Play again | `K 121=)` | The outer loop's flag is whether the key was y (all) |
 
@@ -521,6 +523,7 @@ The games share a few shapes: a frame is one timed key wait, end conditions fold
 | Replay a sequence | `s@r!`, then the same draws | Store only the seed (SIMON) |
 | A world from a seed | `[H 0G@+ 25173*13849+ r! 1R;]` | Names, prices and maps are drawn again from seed and place, not stored (IDOL) |
 | Cheap sizes | `7&`, `31&`, `3&` on R's byte | Masks for power-of-two ranges skip the modulo (SIMON, BLACKJCK) |
+| A generator that reaches every state | `r@5*1+:r!4096/;` | A multiplier one more than a multiple of 4 and an odd increment go through all 65,536 states; `75*74+` splits them into 31 cycles, the longest 16,384. That matters when a loop runs until chance finishes it: a random walk driven by a short cycle can go round the same cells for ever. `4096/;` leaves bits 12 and 13 at the bottom for a `3&` (MAZE in tweet280) |
 
 [↑ Back to top](#b8script-idioms-tips-and-tricks)
 

@@ -36,7 +36,7 @@ The files are in `games/` (at the root of the repository): [`tweet140/`](../game
 | [Copter](#copter) | 250 | Real-time, one key | Any key |
 | [Breakout](#breakout) | 275 | Real-time arcade | j, l |
 | [Hangman](#hangman) | 271 | Words | Letters |
-| [Maze](#maze) | 276 | A new maze every game | i j k l |
+| [Maze](#maze) | 278 | A new maze every game | i j k l |
 
 Ski, Tron, Snake, Duel, Copter and Breakout are real-time. Tron, Snake, Duel, Breakout and Maze clear the screen with `/{` and draw with the cursor escape `/~`, Lights Out clears it once and draws each cell in its place with `/~`, and Simon clears its line with `/}`, so those need a console that does the screen escapes (see [The console](b8script.md#the-console)). The rest are plain teletype games.
 
@@ -362,17 +362,19 @@ Guess the word a letter at a time; six misses and you lose. Each line shows the 
 ### Maze
 
 ```text
-"MAZE ijkl. Key"$0 1(1+1?0=)r!0_g!0 1(:41/%;:39=3&%39<25&+10+1_.1+:779<);34 1_.1y!1(1x!1(y@41*x@+g@+:32%.y@1=x@37<r@75*74+:r!0<&|42&41-+32%.x@2+:x!38<)y@2+:y!18<)32g@697+."/{"$g@$0 79i!1(i@41/"/~@"$0?3&"Q'Oy"+,80-:i@+g@+,32=&i@41/"/~ "$i@+:i!697-%1+%)20 0"/~Out in "$#" keys"$
+"ijkl. Key, wait"$0 1(1+1?0=)r!0_g!19:(39:(35 1_.1-:);2573 2_!1-:);34 1_.[D3&"Q'Oy"+,80-]32:g@697+.g@78+:i!.170:(r@5*1+:r!4096/;D:i@+:w!+:t!g@-:41>%735<&t@,&:31>(t@i!0)35=:(32:w@.t@.0)+:)"/{"$g@$78i!1(i@41/"/~@"$0?D:i@+g@+,32=&i@41/"/~ "$i@+:i!697-%1+%)20 0"/~Out in "$#" keys"$
 ```
 
-A new 19 × 9 maze every game. You are `@`, in the gap at the top right; get out through the gap at the bottom left. i, j, k and l move up, left, down and right. When you get out it says how many keys you pressed; the shortest way out takes 54.
+A new 19 × 9 maze every game. You are `@`, in the top right cell; get out through the gap at the bottom left. i, j, k and l move up, left, down and right. When you get out it says how many keys you pressed. The shortest way out is different in every maze, 81 steps on average, from 53 to 153 over all 65,536 seeds.
 
-- **Binary-tree generation.** Each cell opens one wall, north or east, at random. The top row can only open east and the right column only north, which joins everything into one tree. That is about 85 characters for a perfect maze: every cell reachable, by exactly one path.
+- **Random-walk generation (Aldous–Broder).** A walker starts in the top right cell and steps two places at a time in random directions. When it lands on a cell it has never been in, it opens the wall it crossed. It stops when all 171 cells have been visited. A wall is opened only into a new cell, so the maze is perfect, every cell reachable by exactly one path, and every perfect maze is as likely as any other: no bias, no open top row, no staircase. It is a loop, not a recursion, so it needs no stack. The cells left to visit are counted down on the stack, and the 0 left at the end is the key count.
+- **The catch: it is slow.** The walk finds the last few cells by wandering through finished maze, about 2,300 steps on average and 4,500 at most. Making a maze takes about 10 seconds on a 4 MHz Z80 and about 30 at 1 MHz on a 6502 or 6809, up to twice that for the slowest seeds, so the title says to wait.
+- **The generator has to reach every state.** `r@75*74+` splits its 65,536 states into 31 cycles, the longest 16,384 long, and some seeds walk round the same few cells for ever. `r@5*1+` (a multiplier one more than a multiple of 4, an odd increment) goes through all 65,536, and every seed finishes. `4096/;` takes bits 12 and 13 for the direction.
 - **The maze is a string.** It is built in a buffer of 41-byte rows: 39 maze characters, then CR and LF, with a `"` after the last row. So `g@$` prints the whole maze, and the same buffer is the wall map for moving: a step is allowed only onto a space.
-- **One formula fills the buffer.** For column c, the character is `(c = 39)·3 + (c < 39)·25 + 10`: that gives `#` for the maze, CR at column 39, and LF at column 40. It is written with the allocate-and-store trick.
-- **The keys are a table.** `key & 3` is 0–3 for l, i, j and k, so it indexes the string `"Q'Oy"`, whose characters minus 80 are the steps +1, −41, −1 and +41. A blocked move becomes a step of 0 (`32=&`), so moving and not moving are the same code, and a key that bumps a wall is counted like any other.
-- The key count lives on the stack, under the loop's flag: `%1+%` adds one to it.
-- **The catch.** A binary-tree maze has a bias: from any cell, north or east is always open. So the way out is always a staircase down and left of the same length (54 steps), and the maze's difficulty is all in its dead ends. Starting at the top right is what makes it a maze at all: from the bottom left, "always go up or right" would walk straight out. A less biased algorithm, such as sidewinder, doesn't fit in what's left.
+- **Two loops fill the buffer.** Each row is 39 `#` and then `2573 2_!`, which stores CR and LF as one cell (13 + 256 × 10, low byte first). Each loop's count is its own entry flag, `19:(`.
+- **Edges cost one test.** A step off the left or right edge lands on an LF or a CR, which the walk treats as a wall. A step off the top or bottom would leave the buffer, so the walk takes the cell's byte only when the place is in rows 1 to 17.
+- **One table for the walk and the keys.** `D` takes the low two bits of a number and indexes the string `"Q'Oy"`, whose characters minus 80 are +1, −41, −1 and +41. The walk feeds it random bits for a half step; the game feeds it the key, as l, i, j and k have the low bits 0 to 3. A blocked move becomes a step of 0 (`32=&`), so moving and not moving are the same code, and a key that bumps a wall is counted like any other.
+- The walk works on addresses and the game on places in the buffer: the walk's stores need no `g@+`, and the place divided by 41 is the cursor's row and column.
 
 [↑ Back to top](#tweet-games)
 

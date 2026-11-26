@@ -500,7 +500,7 @@ A checked fast build can be smaller than its unchecked one: the unchecked one's 
 | Program | Z80 | 8080 | 6502 | 6502, zero page | 6809 | Windows |
 |---|---|---|---|---|---|---|
 | **base** | | | | | | |
-| SIEVE, 1 pass | 1.09× | 1.09× | 1.10× | 1.11× | 1.10× | 1.11× |
+| SIEVE, 1 pass | 1.09× | 1.09× | 1.10× | 1.10× | 1.10× | 1.11× |
 | PI, 100 digits | 1.21× | 1.16× | 1.20× | 1.21× | 1.14× | 1.12× |
 | MANDEL | 1.36× | 1.40× | 1.37× | 1.38× | 1.40× | 1.22× |
 | Tiny BASIC, a short program | 1.42× | 1.44× | 1.49× | 1.51× | 1.42× | 1.57× |

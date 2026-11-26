@@ -694,7 +694,7 @@ Against the small build of the same CPU, on the same eight runs (in clock cycles
 | Z80 | 180–230 bytes | 1.09–1.47× | 1.69–2.56× | 4,352–4,864 bytes |
 | 8080 | 180–212 bytes | 1.09–1.49× | 1.76–2.69× | 4,352–4,864 bytes |
 | 6502, stack in pages 2–3 | 269–326 bytes | 1.10–1.49× | 1.78–2.71× | 5,506–7,448 bytes |
-| 6502, stack in zero page | 264–319 bytes | 1.11–1.51× | 1.76–2.74× | 5,060–6,940 bytes |
+| 6502, stack in zero page | 264–319 bytes | 1.10–1.51× | 1.76–2.74× | 5,060–6,940 bytes |
 | 6809 | 113–150 bytes | 1.10–1.52× | 1.94–2.95× | 4,254–4,651 bytes |
 | Windows (x86) | 144–190 bytes of code | 1.10–1.57× | 2.68–4.61× | 7,680–8,704-byte files |
 

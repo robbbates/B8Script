@@ -1,8 +1,8 @@
 # Tweet games
 
-Twenty-one B8Script games, in two sizes:
+Twenty-three B8Script games, in two sizes:
 
-- **Tweet 140**: the classic tweet. Ten games.
+- **Tweet 140**: the classic tweet. Twelve games.
 - **Tweet 280**: the tweet since 2017. Eleven games that need the room.
 
 Each one is a complete program, with no line breaks and nothing left out. Paste it into a runner and play.
@@ -21,6 +21,8 @@ The files are in `games/` (at the root of the repository): [`tweet140/`](../game
 | [Pig](#pig) | 140 | Push your luck | h, any key |
 | [Tron](#tron) | 132 | Real-time, 2D | `,` and `.` |
 | [Lights Out](#lights-out) | 138 | Puzzle | a–y |
+| [Lights Out, a random start](#lights-out-a-random-start) | 140 | Puzzle | Any key, then a–y |
+| [Lights Out, the key's start](#lights-out-the-keys-start) | 140 | Puzzle | Any key, then a–y |
 
 | Game | 280 | Kind | You press |
 |---|---|---|---|
@@ -197,6 +199,33 @@ This is the deepest game here. The puzzle is linear algebra over GF(2): the orde
 - The case of each letter is `32*-`: the cell's 0 or 1 times 32, taken off the lower-case letter.
 - A count of lit cells, made while drawing, is the win test. The press count lives on the stack and is printed after each drawing.
 - `1- 31&` keeps every key inside the grid's 50 bytes, so a stray key can never write over the program. Each key lands on one of 32 places. Most keys, digits and punctuation among them, land on a cell. z to `~`, Z to `^` and `:` to `>` land on the dead row below and toggle one bottom-row cell alone: a cheat, left in rather than spending characters to block it. Space, `@`, `` ` ``, `?`, `_` and DEL toggle nothing that shows, but count as presses.
+
+[↑ Back to top](#tweet-games)
+
+### Lights Out, a random start
+
+```text
+[F:,1^%.][T:F:1-F:1+F:6-F6+F][Q5/%6*+a+6+]"/{"$50 1(1-:1%a+.:)1(8+25/%;:QT1?0=);1(0:z!1(:5/"/~"$::Q,:z@+z!32*- 97+'1+:25<);z@0=\0?1- 31&QT1)
+```
+
+Lights Out as above, but from a board stirred until you press a key, so each game starts differently (`LIGHTR14.B8S`). To make room it drops the press count.
+
+- **A stir that can always be won.** A random pattern of lights would be unsolvable three times in four. So the board starts all on, and until a key comes, `1(8+25/%;:QT1?0=)` presses every 8th cell, mod 25. Presses from a board that can be solved leave one that can be solved, and 8 and 25 share no factor, so the presses go through every cell. Which of the 50 boards it lands on depends on how long the key took. The fill loop counts down to 0 and leaves the 0 on the stack, where the stir takes it as its first cell.
+- **The grid lives in the variables.** The 7 × 6 grid's 50 bytes are the cells of the variables `a` to `y`, from `a`'s address: `50 1(1-:1%a+.:)` fills them with 1s, and `Q` adds `a` where Lights Out fetches `g`. That saves allocating the grid and keeping its address. `z`, past the grid, counts the lit cells. It relies on the variables lying in one block, as they do in every interpreter here; the spec doesn't promise it (see [Don't rely on](b8script.md#dont-rely-on)).
+- The draw starts its index and the count at once: `0:z!1(`.
+
+[↑ Back to top](#tweet-games)
+
+### Lights Out, the key's start
+
+```text
+[F:,1^%.][T:F:1-F:1+F:6-F6+F][Q5/%6*+a+6+]"/{"$50 1(1-:1%a+.:);0?1(:25/%;QT1-:);1(0:z!1(:5/"/~"$::Q,:z@+z!32*- 97+'1+:25<);z@0=\0?1- 31&QT1)
+```
+
+Lights Out again, with the board picked by the key you press to start (`LIGHTK.B8S`), so the same key always gives the same puzzle: "try board q".
+
+- **The key is the seed.** `0?1(:25/%;QT1-:)` takes the key's code c and presses c cells, c, c−1 and on down to 1, each mod 25. The board depends on c mod 50, so the 95 printable keys give all 50 boards this can make, a to z 26 of them, and keys 50 codes apart give the same one (`1` and `c`). As with the random start, presses from a solvable board keep it solvable.
+- The grid in the variables and the draw are the random start's.
 
 [↑ Back to top](#tweet-games)
 

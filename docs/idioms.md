@@ -314,6 +314,7 @@ The 26 variables hold one cell each; anything bigger lives on the heap, reached 
 | Fixed-width records in a string | `"Sol     Vega    Rigel   "u!` and `%8*+` | The data stays in the program text (TRADER, IDOL, HANGMAN) |
 | Several tables in one block | `996_v!`, then `v@356+`, `v@990+@` | One allocation for everything, addressed as v plus a constant (TINYBAS, IDOL) |
 | Use the heap top without allocating | `0_:p!e!` | Memory above the top still belongs to the program (TINYBAS; LEDIT keeps a whole text file there, with `0_:d!e!`) |
+| A small table in the variables | `[Q5/%6*+a+6+]` | The cells of `a` to `y` are 50 bytes in a row in every interpreter here: a grid with no allocation and no address to keep. The spec doesn't promise the layout (LIGHTR14, LIGHTK) |
 | Stack in the heap | push `d@z@p@+! p@2+p!`, pop `p@2-:p! z@+@c!` | A flood fill with no recursion (MINES); TINYBAS keeps a byte stack the same way |
 | Swap two buffers | `g@h@g!h!` | Double-buffering for Life (LIFE) |
 | Shadow copy | Keep what the screen shows; draw only the cells that differ | Start it at an impossible value to force a full first draw (G2048, REVERSI, IDOL) |
@@ -494,7 +495,8 @@ The games share a few shapes: a frame is one timed key wait, end conditions fold
 | Computer player | Place, test, take back; try for self, then for the opponent, else random | (CONNECT4, QUBIC) |
 | Negamax | Swap players with T and call N; save shared variables on the return stack | About 110 characters for perfect tic-tac-toe (TICTAC) |
 | Predict the player | `i@3*p@+9/%;` | Indexes what the player did last time after the same two moves (RPS) |
-| A puzzle by playing it | Shuffle from solved with legal moves | Always solvable (FIFTEEN, LIGHTS) |
+| A puzzle by playing it | Shuffle from solved with legal moves | Always solvable (FIFTEEN, LIGHTS); LIGHTR14 presses every 8th cell, mod 25, until a key comes: `1(8+25/%;:QT1?0=)` |
+| The key as the seed | `0?1(:25/%;QT1-:)` | The key's code picks the start, so the same key always gives the same puzzle, and a player can name one: LIGHTK presses as many cells as the code, which gives 50 boards from the printable keys (LIGHTK) |
 | Walk to a sentinel | `1( t@b@+,o@=0=\ t@d@+t! k@1+k! 1)` | Border bytes match nothing, so the walk stops at the edge (REVERSI) |
 | Bounce | `d@-1*d!`, or `[Z:@0%-%!]` then `dZ` | Negate a velocity (BREAKOUT, BRKOUT28) |
 | Smooth motion | `x@4/;` | Positions in quarter cells, drawn in whole ones (COPTER) |

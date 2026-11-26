@@ -57,6 +57,43 @@ def simon(seed, rounds):
     return keys + b'\0' + b'9' * (rounds + 1)
 
 
+def lights(cells):
+    """Lights Out from a board that starts all on and has these cells pressed, as
+    LIGHTR14 and LIGHTK stir it. Returns a solution found by chasing the lights,
+    and the board as drawn first and as drawn at the end."""
+    def press(b, c):
+        r, q = divmod(c, 5)
+        for rr, qq in ((r, q), (r - 1, q), (r + 1, q), (r, q - 1), (r, q + 1)):
+            if 0 <= rr < 5 and 0 <= qq < 5:
+                b[rr * 5 + qq] ^= 1
+    board = [1] * 25
+    for c in cells:
+        press(board, c)
+    for top in range(32):                   # the first row's presses, then chase
+        b, presses = board[:], [i for i in range(5) if top >> i & 1]
+        for i in presses:
+            press(b, i)
+        for i in range(5, 25):
+            if b[i - 5]:
+                press(b, i)
+                presses.append(i)
+        if not any(b):
+            break
+    draw = lambda b: b''.join(b'\x1b[%d;%dH%c' % (i // 5 + 1, i % 5 + 1, 97 + i - 32 * b[i]) for i in range(25))
+    return bytes(97 + i for i in presses), draw(board), draw([0] * 25)
+
+
+def lightr(k):
+    """LIGHTR14: the key that starts it comes after k-1 empty looks, so the stir
+    makes k presses, every 8th cell mod 25, from cell 8."""
+    return (N * (k - 1) + b's',) + lights([8 * i % 25 for i in range(1, k + 1)])
+
+
+def lightk(key):
+    """LIGHTK: the key's code c presses c cells, c, c-1 ... 1, mod 25."""
+    return (bytes([key]),) + lights([c % 25 for c in range(key, 0, -1)])
+
+
 def kingdom(extra):
     """Keys for Kingdom: each year feed 20 a head, plus a share of what is left
     over, reading the state from what the game printed."""
@@ -127,6 +164,16 @@ TESTS = {'tweet140': [
     # Lights Out: the 15-press solution of the all-on board, in both cases
     ('LIGHTS14', 'solve it', b'abfgijmnoqrsvwy', [b'\x1b[1;1HA\x1b[1;2HB', b'\x1b[1;1Ha', b'\x1b[5;5Hy 15'], 'end'),
     ('LIGHTS14', 'upper case, stray keys', b' 0ABFGIJMNOQRSVWY0', [b'\x1b[5;5Hy 18'], 'end'),
+    # LIGHTR14 and LIGHTK: the board their stir leaves, solved; in upper case, with
+    # stray keys (Space toggles nothing that shows; 0 is cell p, pressed twice)
+    *(('LIGHTR14', f'a stir of {k}, solved', st + keys, [first, last], 'end')
+      for k, (st, keys, first, last) in ((k, lightr(k)) for k in (1, 2, 37, 50))),
+    ('LIGHTR14', 'upper case, stray keys', lightr(23)[0] + b' 0' + lightr(23)[1].upper() + b'0',
+     [lightr(23)[2], lightr(23)[3]], 'end'),
+    *(('LIGHTK', f'key {chr(c)!r}, solved', st + keys, [first, last], 'end')
+      for c, (st, keys, first, last) in ((c, lightk(c)) for c in b' 0Aaqz~')),
+    ('LIGHTK', 'upper case, stray keys', lightk(113)[0] + b' 0' + lightk(113)[1].upper() + b'0',
+     [lightk(113)[2], lightk(113)[3]], 'end'),
 ], 'tweet280': [
     # Snake: the first food is next to the start, so it grows at once
     ('SNAKE', 'eat, grow, new food', N * 8 + b'.' + N * 4 + b',' + N * 30,

@@ -694,8 +694,8 @@ Against the small build of the same CPU, on the same eight runs (in clock cycles
 | Z80 | 180–230 bytes | 1.09–1.47× | 1.69–2.56× | 4,352–4,864 bytes |
 | 8080 | 180–212 bytes | 1.09–1.49× | 1.76–2.69× | 4,352–4,864 bytes |
 | 6502, stack in pages 2–3 | 269–326 bytes | 1.10–1.49× | 1.78–2.71× | 5,506–7,448 bytes |
-| 6502, stack in zero page | 273–328 bytes | 1.11–1.51× | 1.76–2.74× | 5,069–6,949 bytes |
-| 6809 | 116–153 bytes | 1.10–1.52× | 1.94–2.95× | 4,257–4,654 bytes |
+| 6502, stack in zero page | 264–319 bytes | 1.10–1.51× | 1.76–2.74× | 5,060–6,940 bytes |
+| 6809 | 113–150 bytes | 1.10–1.52× | 1.94–2.95× | 4,254–4,651 bytes |
 | Windows (x86) | 144–190 bytes of code | 1.10–1.57× | 2.68–4.61× | 7,680–8,704-byte files |
 
 The interpreters README has every run on every CPU.
@@ -1032,8 +1032,8 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 |---|---|---|
 | Bytes, small (unchecked, checked), `ANSI = 0` | 1,208 and 1,707 | 1,155 and 1,673 |
 | The same, `ANSI = 1` | 1,265 and 1,750 | 1,217 and 1,721 |
-| Base, `ANSI = 0` | 1,534 and 1,976 | 1,483 and 1,946 |
-| Fast, `ANSI = 0` | 7,448 and 5,506 | 6,949 and 5,069 |
+| Base, `ANSI = 0` | 1,534 and 1,976 | 1,474 and 1,937 |
+| Fast, `ANSI = 0` | 7,448 and 5,506 | 6,940 and 5,060 |
 | Data stack | Pages 2 and 3, 252 cells, low and high bytes in separate pages; TOS at $02/$03 | Zero page $10–$EF, 112 cells, each cell two bytes side by side |
 | Return stack | Page 1 (the hardware stack), about 110 entries | Same |
 | Letter page | $0400 | $0400 |
@@ -1066,7 +1066,7 @@ Two interpreters. `b8s-6502.asm` keeps the data stack in pages 2 and 3; `b8s-650
 
 ## Appendix D: 6809
 
-Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`, and for speed `SPEED`, as on the Z80 (see [Speed](#speed)). Builds, in `B8Script-interpreters/6809/small/`, `base/` and `fast/` (bytes with `ANSI = 0`, then with `ANSI = 1`): base, `b8s-6809-base-rom-F000.bin` (checked, 1,380; 1,429) and `b8s-6809-base-rom-unchecked-F000.bin` (1,026; 1,087); small, `b8s-6809-small-rom-F000.bin` (checked, 1,264; 1,313) and `b8s-6809-small-rom-unchecked-F000.bin` (873; 934); fast, `b8s-6809-fast-rom-E000.bin` (checked, 4,257; 4,306) and `b8s-6809-fast-rom-unchecked-E000.bin` (4,654; 4,715). The image starts at F000h (E000h in fast), with label `start`: point the reset vector at it.
+Source: `B8Script-interpreters/6809/b8s-6809.asm`. Switches: `CHECKED`, `ANSI`, and for speed `SPEED`, as on the Z80 (see [Speed](#speed)). Builds, in `B8Script-interpreters/6809/small/`, `base/` and `fast/` (bytes with `ANSI = 0`, then with `ANSI = 1`): base, `b8s-6809-base-rom-F000.bin` (checked, 1,377; 1,426) and `b8s-6809-base-rom-unchecked-F000.bin` (1,023; 1,084); small, `b8s-6809-small-rom-F000.bin` (checked, 1,264; 1,313) and `b8s-6809-small-rom-unchecked-F000.bin` (873; 934); fast, `b8s-6809-fast-rom-E000.bin` (checked, 4,254; 4,303) and `b8s-6809-fast-rom-unchecked-E000.bin` (4,651; 4,712). The image starts at F000h (E000h in fast), with label `start`: point the reset vector at it.
 
 | Item | Hex | Unsigned | Signed |
 |---|---|---|---|

@@ -27,12 +27,13 @@ B8Script is a tiny stack language interpreted from its source text: every comman
 - The screen is 80 × 24 on an ANSI terminal. Use the console escapes (`/{` clears, `/~` positions the cursor, `/}` clears to the end of the line) to redraw in place rather than letting output scroll.
 
 ## Files and names
-- Write the commented source as NAME.TXT, and make the stripped program NAME.B8S with `python3 B8Script-interpreters/testing/b8strip.py NAME.TXT NAME.B8S`. `b8strip.py --same NAME.TXT NAME.B8S` checks that they match. For tweet-sized games there is only the .B8S, kept in stripped form.
-- Names are at most 8 characters (CP/M) and must not repeat any name in games/, games/tweet140/, games/tweet280/ or programs/.
+- Write the commented source as NAME.TXT, and make the stripped program NAME.B8S with `python3 B8Script-interpreters/testing/b8strip.py NAME.TXT NAME.B8S`. `b8strip.py --same NAME.TXT NAME.B8S` checks that they match. Tweet-sized games have one too: the .B8S, kept in stripped form, is what counts against the limit. The web player's Source button shows the .TXT.
+- Names are at most 8 characters (CP/M) and must not repeat any name in games/, games/tweet140/, games/tweet280/, programs/ or programs/cpm/.
 - Where it goes:
   - full-size games in games/;
   - tiny games in games/tweet140/ (at most 140 characters) or games/tweet280/ (at most 280);
-  - non-game programs in programs/.
+  - non-game programs in programs/;
+  - programs that need CP/M (they read or write files through the BDOS: see "Files under CP/M" in docs/idioms.md) in programs/cpm/. These start with the guard, are tested with test_cpm.py, and stay out of the web player, which has no CPU.
 
 ## Test it
 Work from B8Script-interpreters/testing/.
@@ -41,7 +42,7 @@ Work from B8Script-interpreters/testing/.
   - as a checked build, which stops with a report on any stack, bracket or other error: in Python, `from ref import Ref; Ref(open(F,'rb').read(), b'keys', checked=True).run()`.
 
   Debug in checked mode until it plays cleanly.
-- **Scripted play:** add tests to test_games.py, following its TESTS entries. Each is a fixed key sequence and the messages that must appear: a win, a loss and a few key situations. Tiny games go in test_tweets.py, which also checks the size limits. Programs go in test_programs.py. Run them.
+- **Scripted play:** add tests to test_games.py, following its TESTS entries. Each is a fixed key sequence and the messages that must appear: a win, a loss and a few key situations. Tiny games go in test_tweets.py, which also checks the size limits and plays the .TXT too. Programs go in test_programs.py, and the CP/M programs in test_cpm.py, with a model of the program in Python; `python3 cpmsim.py files` runs those under real CP/M 2.2 as well. Run them.
 - **On the real interpreters:** build them with the commands in B8Script-interpreters/testing/README.md (`SPEED=0|1|2 ./build.sh ...` for each CPU, and `./build_win32.sh`). Then `python3 gamecheck.py out` compares the game's output on every CPU build with ref.py. The 6502 and 6809 runs are slow, so you can start with the Z80 and Windows folders alone.
 - Run `python3 test_web.py` after adding the game to the web player.
 

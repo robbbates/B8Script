@@ -15,6 +15,7 @@
 - [Random numbers](#random-numbers)
 - [Game and real-time patterns](#game-and-real-time-patterns)
 - [Machine code and the hex loader](#machine-code-and-the-hex-loader)
+- [Files under CP/M](#files-under-cpm)
 - [Making programs small and fast](#making-programs-small-and-fast)
 - [Gotchas](#gotchas)
 - [Debugging](#debugging)
@@ -162,6 +163,7 @@ There are no shift commands and no hex literals; these idioms make them from `:+
 | All bits of a mask set? | `[V:w@&=\|]` | `( flag mask -- flag' )` ORs in "every bit of mask is in w" (TICTAC) |
 | Self-inverse scramble | XOR each byte with a seeded random stream | Running it again restores the data (IDOL save codes) |
 | Rolling checksum | `0 0i! 1( 3* h@1032+i@+,+63& i@1+:i! 47<)` | c = 3c + byte, mod 64; any changed byte shows (IDOL) |
+| A six-digit offset | `n@1-H i@16*X` | With 256-byte pages, the page in four hex digits and the row's offset in two make the offset in the file (HEXDUMP) |
 
 [↑ Back to top](#b8script-idioms-tips-and-tricks)
 
@@ -239,6 +241,7 @@ v 1(
 | Why the loop ended | `0q! 1( ... q@0=) q@1=( ... 0) q@2=( ... 0)` | One variable is both the loop test and the reason (IDOL, LIGHTS) |
 | Check everything, decide at the end | `1n@1(%0?:'D=&%1-:);` | Each test is ANDed into one flag under the counter (SIMON) |
 | Error code, not unwinding | `(2x!0) x@\` | Set a code, keep the stack balanced, and leave at the next `x@\` (TINYBAS) |
+| Sort a command, then leave | `1( test:( act 0)\ test:( act 0)\ ... 0)` | A block run once: each test that holds acts, and its `\` leaves the block, so later tests aren't made (LEDIT) |
 | Look for a key every 16 passes | `k@1+:k!15&0=(K(4x!0)0)`, with `[K1?2=]` | A masked counter makes a one-in-16 test; K is "is Ctrl-B down?". Use a key of your own for a program's own break: Ctrl-C belongs to the interpreter (TINYBAS) |
 | Neighbourhood scan | `y@1-j! 1( x@1-i! 1( ... i@1+:i! x@2+<) j@1+:j! y@2+<)` | The 3×3 around x, y with no offset table (SUPERTRK) |
 
@@ -310,7 +313,8 @@ The 26 variables hold one cell each; anything bigger lives on the heap, reached 
 | Allocate and clear in one loop | `0_g!1024 1(0 1_.1-:);` | Takes the heap a byte at a time, storing 0 (TRON, SNAKE, DUEL) |
 | Fixed-width records in a string | `"Sol     Vega    Rigel   "u!` and `%8*+` | The data stays in the program text (TRADER, IDOL, HANGMAN) |
 | Several tables in one block | `996_v!`, then `v@356+`, `v@990+@` | One allocation for everything, addressed as v plus a constant (TINYBAS, IDOL) |
-| Use the heap top without allocating | `0_:p!e!` | Memory above the top still belongs to the program (TINYBAS) |
+| Use the heap top without allocating | `0_:p!e!` | Memory above the top still belongs to the program (TINYBAS; LEDIT keeps a whole text file there, with `0_:d!e!`) |
+| A small table in the variables | `[Q5/%6*+a+6+]` | The cells of `a` to `y` are 50 bytes in a row in every interpreter here: a grid with no allocation and no address to keep. The spec doesn't promise the layout (LIGHTR14, LIGHTK) |
 | Stack in the heap | push `d@z@p@+! p@2+p!`, pop `p@2-:p! z@+@c!` | A flood fill with no recursion (MINES); TINYBAS keeps a byte stack the same way |
 | Swap two buffers | `g@h@g!h!` | Double-buffering for Life (LIFE) |
 | Shadow copy | Keep what the screen shows; draw only the cells that differ | Start it at an impossible value to force a full first draw (G2048, REVERSI, IDOL) |
@@ -356,6 +360,7 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | n spaces | `[S1(:1<\32'1- 1);]` | `( n -- )`, safe for 0 (SKI, COPTER, G2048) |
 | n of any character | `[ %1(%:'%1-:);;]` | `( n c -- )` for borders and rules (IDOL) |
 | Leading zeros | `y@:1000<("0"$0):100<("0"$0):10<("0"$0)#` | One zero for each power of ten the value is below (G2048, IDOL) |
+| Right-aligned in four columns | `[U :1000<(32'0):100<(32'0):10<(32'0)#32']` | A space for each power of ten the number is below, then a space after: line numbers in a listing (LEDIT) |
 | Exactly three digits | `[U :100/;48+' :10/;10M48+' 10M48+']` | No loop (SUPERTRK) |
 | Right-aligned | `[A 1-%:{:9>%:99>%:999>%9999>++++ 6%-"      "+$ }#]` | `( n w -- )` counts digits with flags and prints the tail of a string of six spaces (IDOL) |
 | Digits without a buffer | `[N -1% 1(10/ 48+% :0=0=); 1(E :0<0=);]` | Stacks the digits above a −1 marker, then prints them back (IDOL) |
@@ -392,6 +397,8 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Number reader with no variable | `[N0 1(0?:13=\:'48-%10*+1);]` | The total rides on the stack; Return ends it (HILO) |
 | Number reader that ignores other keys | `[N 0n! 1( K :c!47> c@58<&( c@' n@10*c@48-+n! 0) c@13= ~) n@]` | Only digits echo; K stirs the random seed while waiting (TRADER, SUPERTRK) |
 | Number from a typed line | `[N -3?a! 0n! 1( a@,48- :d!-1> d@10<& :( n@10*d@+n! a@1+a! 0) ) L n@]` | Walks the line until a non-digit (WUMPUS) |
+| A number, then a command letter | `t@,48- 32767&10<:h!( V n! 0)` then `t@,95&c! t@1+,13=x!` | h: a number came; c: the next character, in capitals; x: the line ends after it, so `5L` is a command and `5Lunch` isn't (LEDIT) |
+| Digits at a place in the text | `[V 0 1( t@,48-:32767&10<0=:{(;0)}\ %10*+ t@1+t! 1)]` | `( -- n )`, leaving t just after the digits (LEDIT) |
 | Key to a number by position | `"wasd"i@+, c@=` in a loop | The index where the key matches is the command (G2048, ROBOTS, FIFTEEN) |
 | Keypad to a step | `v@1- 3/ 1-d! 1-o!` | Position 0–8 to dy and dx of −1…+1 (ROBOTS) |
 | i j k l as arrow keys | `0?3&"Q'Oy"+,80-` | The step for a 41-wide grid: +1, −41, −1 or +41 (MAZE in tweet280). See below |
@@ -432,6 +439,7 @@ B8Script's screen commands are five escapes inside the strings that `$` prints. 
 | Name | Code | What it does |
 | --- | --- | --- |
 | Home, don't clear | `0 0"/~"$` at the top of the draw | Overwrites the old picture in place, with no flicker (LIFE, TETRIS) |
+| A page drawn in place | `0 0"/~"$`, the rows, `"/}"$` for a row with nothing in it, and a status line that ends in `/}` | Clear once at the start; every page after overwrites the last, and nothing scrolls (HEXDUMP) |
 | Index straight to the cursor | `[P64/"/~"$]` | `/` leaves the quotient (the row) under the remainder (the column): the order `/~` takes them in (SNAKE, TRON, DUEL, DUNGEON) |
 | Cell to screen place | `[Q2*5+%4*29+Y]` | Scale and offset each half for Y (LIGHTS, BATTLE, G2048) |
 | Clear, then draw | `"/{IDOL/M/J/M/J..."$` | The clear and the first text in one string (IDOL) |
@@ -487,7 +495,8 @@ The games share a few shapes: a frame is one timed key wait, end conditions fold
 | Computer player | Place, test, take back; try for self, then for the opponent, else random | (CONNECT4, QUBIC) |
 | Negamax | Swap players with T and call N; save shared variables on the return stack | About 110 characters for perfect tic-tac-toe (TICTAC) |
 | Predict the player | `i@3*p@+9/%;` | Indexes what the player did last time after the same two moves (RPS) |
-| A puzzle by playing it | Shuffle from solved with legal moves | Always solvable (FIFTEEN, LIGHTS) |
+| A puzzle by playing it | Shuffle from solved with legal moves | Always solvable (FIFTEEN, LIGHTS); LIGHTR14 presses every 8th cell, mod 25, until a key comes: `1(8+25/%;:QT1?0=)` |
+| The key as the seed | `0?1(:25/%;QT1-:)` | The key's code picks the start, so the same key always gives the same puzzle, and a player can name one: LIGHTK presses as many cells as the code, which gives 50 boards from the printable keys (LIGHTK) |
 | Walk to a sentinel | `1( t@b@+,o@=0=\ t@d@+t! k@1+k! 1)` | Border bytes match nothing, so the walk stops at the edge (REVERSI) |
 | Bounce | `d@-1*d!`, or `[Z:@0%-%!]` then `dZ` | Negate a velocity (BREAKOUT, BRKOUT28) |
 | Smooth motion | `x@4/;` | Positions in quarter cells, drawn in whole ones (COPTER) |
@@ -533,6 +542,100 @@ The grave does two jobs: followed by a hex digit it loads bytes, followed by any
 
 [↑ Back to top](#b8script-idioms-tips-and-tricks)
 
+## Files under CP/M
+
+B8Script has no file commands. On a CP/M build the grave is the way in: one machine-code routine calls the BDOS, and everything else (the FCB, the record buffer, the file's name) is B8Script. The routine is 8080 code, so one copy serves the Z80 and the 8080 builds. HEXDUMP, a file viewer, and LEDIT, a line editor, carry the kit.
+
+**The guard** comes first, before any machine code is loaded. It is true only on a CP/M runner: the loader's RET byte is C9h, and CP/M keeps a jump (C3h) at 0000h and at 0005h. Anywhere else the program says so and ends:
+
+```text
+2_`00,201= 0,195=& 5,195=& 0=:("Needs CP//M on a Z80 or 8080./M/J"$0)\
+```
+
+**The gateway** B, `( arg fn -- hl )`, is 13 bytes of position-independent code and the loader's RET:
+
+```text
+14_:b! `E1D1E3C54BEBCD0500C1D1E5D5 ;
+[B b@` ]
+```
+
+| Bytes | Instruction | Does |
+| --- | --- | --- |
+| `E1` | `POP HL` | The return address |
+| `D1` | `POP DE` | fn |
+| `E3` | `EX (SP),HL` | arg into HL, the return address back on the stack |
+| `C5` | `PUSH BC` | Keep the reading position, as the contract asks |
+| `4B` | `LD C,E` | The function number |
+| `EB` | `EX DE,HL` | arg into DE |
+| `CD0500` | `CALL 0005h` | The BDOS, which returns its result in HL (and A) |
+| `C1` | `POP BC` | |
+| `D1` | `POP DE` | The return address |
+| `E5` `D5` | `PUSH HL`, `PUSH DE` | The result becomes TOS |
+| `C9` | `RET` | Written by the loader |
+
+A function that returns a byte gives it in L, and H need not be zero: mask the result with `255&` where it is tested.
+
+**The kit.** N puts a name in an FCB, with the help of C; A finds the name on the command line:
+
+```text
+[C 1( t@,:33<{:}%46=|:{(;0)}\ :96>{:}%123<&32&- %:0>:{(1-{{:}%.1+}0)}0=(%;0) t@1+t! 1);;]
+[N c! t!
+  36 1(1-:c@+0%.:);
+  11 1(:c@+32%.1-:);
+  t@1+,58=( t@,95&64-c@. t@2+t! 0)
+  c@1+ 8C
+  t@,46=( t@1+t! c@9+ 3C 0)]
+[A 129 1(:,32=:(%1+%0)) 1(:,32>:(%1+%0)) 1(:,32=:(%1+%0)) :,33<(;0 0)]
+```
+
+| Word | Effect | Does |
+| --- | --- | --- |
+| N | `( text fcb -- )` | Name to FCB: all 36 bytes zeroed, an optional `d:` drive, up to 8 and 3 characters in capitals, blank-padded, extra characters dropped. The name ends at any character at or below space |
+| C | `( dst n -- )` | For N: copies one part of the name from t, in capitals, up to n characters, and stops at a dot or the name's end |
+| A | `( -- text )` | The first name after the program's own in the command tail, or 0 if there is none |
+
+With no name on the command line, both programs ask for one: `A :0=( ; "File: "$ -14? 13'10' 0) f@N`. Its variables: b the gateway's code, f the FCB (36 bytes), d the record buffer, and t, i and c as scratch.
+
+**The calls the programs make**, each one line (f is the file's FCB, g LEDIT's temporary one):
+
+| Call | Code | Does | Source |
+| --- | --- | --- | --- |
+| Set the DMA (26) | `26B;` | With the buffer's address under it | both |
+| Open (15) | `f@15B255&255=` | True if there is no such file | both |
+| The size (35) | `f@35B; f@33+@s!` | The size in records, at FCB+33 | HEXDUMP |
+| Read a random record (33) | `[R f@33+! 26B; f@33B;]` | `( buf rec -- )`: the record number is a cell at FCB+33, and FCB+35 stays zero | HEXDUMP |
+| Read the next record (20) | `e@26B; f@20B255&\` | Into the text at e, the DMA set first; anything but 0 is the end of the file, and leaves the loop | LEDIT |
+| Delete (19) | `g@19B;` | The result (255 if there was no such file) is dropped | LEDIT |
+| Make (22) | `g@22B255&255=` | True if the file can't be made | LEDIT |
+| Write the next record (21) | `:26B; g@21B255&z!` | From the address under it; anything but 0 (a full disk) is kept in z | LEDIT |
+| Close (16) | `g@16B255&255=` | True if it failed: until a written file is closed, the directory doesn't hold it | LEDIT |
+| Rename (23) | `f@ g@16+ 12 M` then `g@23B255&255=` | The new name goes at FCB+16 | LEDIT |
+
+**Code that jumps.** A routine with a loop can't be position-independent on the 8080, which has no relative jumps. So after the load the program stores the jumps' targets into the code, and stores the arguments into it at each call, in place of the zeros it was loaded with. Such a routine takes nothing from the data stack. LEDIT's move, `( src dst n -- )`, is 24 bytes; when the blocks overlap upward it is given the ends, and its two INCs are stored over with DECs (2Bh, 1Bh):
+
+```text
+25_:m! `C5210000110000010000 `78B1CA00007E1223130BC30000C1 ;
+m@23+ m@13+! m@10+ m@21+!
+[M m@8+! {:}%{:}%32768^%32768^>:{( m@8+@1-:{+%}+% 0)} 8&:35+m@17+. 19+m@18+. m@5+! m@2+! m@` ]
+```
+
+Its scanner, `( start limit c k -- p left )`, finds the k-th byte c before limit: a line by its number, the ^Z that ends a text, the CR that ends a typed line. Machine code moves or scans a byte in about 60 clock cycles, where a loop in B8Script takes about 2,600.
+
+```text
+43_:s! `C5210000110000010000 `78B1CA00007DBBC200007CBACA0000 `7E23FE00C200000BC30000 `D1E3C5E5424B ;
+s@36+ :s@13+! s@23+! s@25+ s@18+! s@10+ :s@30+! s@34+!
+[S s@8+! s@28+. s@5+! s@2+! s@` ]
+```
+
+- **The FCB and the buffer go on the heap.** A checked build stops with `O` on any `!` or `.` below the letter page, so 005Ch and 0080h may be read but not written.
+- **Set the DMA before the first read.** The runner's loader leaves it just past the program text, where the heap starts.
+- **Take the name from the command tail.** The loader's open of the program file overwrites the second FCB at 006Ch, so a name given on the command line is parsed from 0080h: a length byte, then the text, ending in NUL. `B8S HEXDUMP.B8S FILE.COM` leaves ` HEXDUMP.B8S FILE.COM` there.
+- **The code must keep BC,** which the gateway does; the grave restores IX and IY after the call.
+- **Memory ends at the BDOS.** The jump at 0005h names it, so `6@-256&` is the page where the heap ends. A checked build lets a program store anywhere from the heap top up to that page without allocating it, so LEDIT keeps its text there, and reads and writes the records straight into and out of it.
+- **Write a new file, then rename it.** LEDIT writes NAME.$$$, closes it, deletes NAME and renames NAME.$$$ to NAME, so a write that fails (a full disk) leaves the old file as it was. The last record is padded with ^Z, CP/M's end of a text file.
+
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
+
 ## Making programs small and fast
 
 Every character costs a byte of memory and a dispatch each time it runs, so the same choices make a program both smaller and faster.
@@ -556,6 +659,7 @@ Every character costs a byte of memory and a dispatch each time it runs, so the 
 | Fast path first | Print to the screen with one `$`; copy a byte at a time only into a buffer (IDOL) |
 | Spend letters on the hot words | Rarely used routines go in a numbered table (IDOL) |
 | Push the identity before a fold | Start at 0 for OR or −1 for AND under the loop, so no result variable is needed (G2048, LIGHTS) |
+| Hot byte loops in machine code | On a CP/M build, LEDIT's move and scanner take about 60 clock cycles a byte, against about 2,600 for the same loop in B8Script (LEDIT) |
 
 [↑ Back to top](#b8script-idioms-tips-and-tricks)
 
@@ -567,6 +671,7 @@ The minus before a digit is the one that bites most, especially in the small gam
 | --- | --- |
 | `5-3` pushes 5 and −3 | Write `5- 3`; it applies after any operator, so `0>-10*` pushes −10. Search outside strings for `-` before a digit |
 | `39-0)` is 39, −0, close | Write `39- 0)` |
+| `48-32767&` is 48, then −32767 | The same slip after any operator: write `48- 32767&`, and `e@=` rather than `e@-0=` (LEDIT) |
 | Variables start with garbage | Store before you read; a checked build hides this by zeroing them |
 | `x#` prints an address | You meant `x@#` (tutorial) |
 | `{` and `}` unpaired inside a block | `)` jumps to whatever is on top of the return stack |
@@ -596,6 +701,7 @@ Develop on a checked build, which stops with an error code, the line and column,
 | Stack-leak sentinel | `12345` first, then `12345=0=("Stack leak"$0)` last |
 | Trace a value | `:#" "$` |
 | Mark a place | `"@3"$` |
+| Test machine code by itself | A scrap program that loads it, calls it with known values and prints what it leaves, before the program relies on it (LEDIT's move and scanner) |
 
 - **Take the sentinel out** before the program goes into a pipe, since it prints.
 - **A checked run is not proof.** Checked builds zero the variables, so a program that reads before it stores can work there and fail unchecked.
@@ -607,6 +713,7 @@ Develop on a checked build, which stops with an error code, the line and column,
 
 - [b8script.md](b8script.md): the spec's Idioms, Tips and Don't rely on
 - [tutorial.md](tutorial.md) and [tweets.md](tweets.md)
+- [programs/cpm/](../programs/cpm/): HEXDUMP and LEDIT, the sources of Files under CP/M
 - [games/](../games/): the commented .TXT sources of the 22 full-size games, their README, and the tweet-size games in tweet140 and tweet280
 
 Code quoted from a program was checked against its source; rows that describe a pattern in words have no code to check.

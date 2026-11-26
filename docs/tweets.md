@@ -1,8 +1,8 @@
 # Tweet games
 
-Twenty-one B8Script games, in two sizes:
+Twenty-three B8Script games, in two sizes:
 
-- **Tweet 140**: the classic tweet. Ten games.
+- **Tweet 140**: the classic tweet. Twelve games.
 - **Tweet 280**: the tweet since 2017. Eleven games that need the room.
 
 Each one is a complete program, with no line breaks and nothing left out. Paste it into a runner and play.
@@ -21,6 +21,8 @@ The files are in `games/` (at the root of the repository): [`tweet140/`](../game
 | [Pig](#pig) | 140 | Push your luck | h, any key |
 | [Tron](#tron) | 132 | Real-time, 2D | `,` and `.` |
 | [Lights Out](#lights-out) | 138 | Puzzle | a–y |
+| [Lights Out, a random start](#lights-out-a-random-start) | 140 | Puzzle | Any key, then a–y |
+| [Lights Out, the key's start](#lights-out-the-keys-start) | 140 | Puzzle | Any key, then a–y |
 
 | Game | 280 | Kind | You press |
 |---|---|---|---|
@@ -55,7 +57,7 @@ These come up again and again.
 - **Allocate and clear in one go.** `0_g!` notes the heap top, then `1024 1(0 1_.1-:)` allocates one byte at a time and stores a 0 in each. That is cheaper than allocating the block and clearing it with an index. Tron, Snake, Duel and Breakout use it, and Lights Out fills its grid with 1s the same way, `1 1_.`, so every light starts on.
 - **An unsigned bounds test.** `32767&30<` is true only for 0–29: masking turns a negative number into a large positive one. Breakout clamps its paddle with it, one test instead of two.
 - **Hide the cursor while drawing.** Tron, Snake and Duel hide it with ``/` `` in their first string, so it doesn't sit beside the bike, and show it again with `/|` at the end.
-- **Watch the minus sign.** `1-3&` is 1 and then −3. It is the easiest slip to make in code this dense, and easy to miss on review: `0>-10*` looks like "negate, times ten" and is really "push −10". The fix is a space, `1- 3&`. A search of the code outside strings for a minus before a digit finds every case, and each one is either meant or a bug. The stripper (`b8strip.py`) keeps exactly the spaces B8Script needs, and every game here is already in its stripped form.
+- **Watch the minus sign.** `1-3&` is 1 and then −3. It is the easiest slip to make in code this dense, and easy to miss on review: `0>-10*` looks like "negate, times ten" and is really "push −10". The fix is a space, `1- 3&`. A search of the code outside strings for a minus before a digit finds every case, and each one is either meant or a bug. The stripper (`b8strip.py`) keeps exactly the spaces B8Script needs, and every game here is already in its stripped form. Beside each one is a `NAME.TXT`: the same code laid out with comments, which strips back to it.
 
 [↑ Back to top](#tweet-games)
 
@@ -200,6 +202,33 @@ This is the deepest game here. The puzzle is linear algebra over GF(2): the orde
 
 [↑ Back to top](#tweet-games)
 
+### Lights Out, a random start
+
+```text
+[F:,1^%.][T:F:1-F:1+F:6-F6+F][Q5/%6*+a+6+]"/{"$50 1(1-:1%a+.:)1(8+25/%;:QT1?0=);1(0:z!1(:5/"/~"$::Q,:z@+z!32*- 97+'1+:25<);z@0=\0?1- 31&QT1)
+```
+
+Lights Out as above, but from a board stirred until you press a key, so each game starts differently (`LIGHTR14.B8S`). To make room it drops the press count.
+
+- **A stir that can always be won.** A random pattern of lights would be unsolvable three times in four. So the board starts all on, and until a key comes, `1(8+25/%;:QT1?0=)` presses every 8th cell, mod 25. Presses from a board that can be solved leave one that can be solved, and 8 and 25 share no factor, so the presses go through every cell. Which of the 50 boards it lands on depends on how long the key took. The fill loop counts down to 0 and leaves the 0 on the stack, where the stir takes it as its first cell.
+- **The grid lives in the variables.** The 7 × 6 grid's 50 bytes are the cells of the variables `a` to `y`, from `a`'s address: `50 1(1-:1%a+.:)` fills them with 1s, and `Q` adds `a` where Lights Out fetches `g`. That saves allocating the grid and keeping its address. `z`, past the grid, counts the lit cells. It relies on the variables lying in one block, as they do in every interpreter here; the spec doesn't promise it (see [Don't rely on](b8script.md#dont-rely-on)).
+- The draw starts its index and the count at once: `0:z!1(`.
+
+[↑ Back to top](#tweet-games)
+
+### Lights Out, the key's start
+
+```text
+[F:,1^%.][T:F:1-F:1+F:6-F6+F][Q5/%6*+a+6+]"/{"$50 1(1-:1%a+.:);0?1(:25/%;QT1-:);1(0:z!1(:5/"/~"$::Q,:z@+z!32*- 97+'1+:25<);z@0=\0?1- 31&QT1)
+```
+
+Lights Out again, with the board picked by the key you press to start (`LIGHTK.B8S`), so the same key always gives the same puzzle: "try board q".
+
+- **The key is the seed.** `0?1(:25/%;QT1-:)` takes the key's code c and presses c cells, c, c−1 and on down to 1, each mod 25. The board depends on c mod 50, so the 95 printable keys give all 50 boards this can make, a to z 26 of them, and keys 50 codes apart give the same one (`1` and `c`). As with the random start, presses from a solvable board keep it solvable.
+- The grid in the variables and the draw are the random start's.
+
+[↑ Back to top](#tweet-games)
+
 ## Tweet 280
 
 Eleven games that need more than 140 characters.
@@ -273,7 +302,7 @@ The tension: people are labour, but the land caps the harvest at 999 acres, so m
 
 The computer can't be beaten. It is `O` and opens in the centre. You are `X`: press 1–9 for the cells, row by row from the top left. The best you can do is draw. Playing all 201 legal games against it gives 194 losses and 7 draws, and `test_tweets.py --all` checks that again.
 
-- **A full game-tree search** (negamax) in about 110 characters. `N` tries every empty cell, and a move scores 1 if it wins on the spot. Otherwise it scores the negation of the opponent's best reply, found by swapping the two players (`T`) and calling `N` again. It stops searching a position as soon as it finds a winning move, which makes it about four times faster. The first reply takes up to about 30 seconds on a 4 MHz Z80.
+- **A full game-tree search** (negamax) in about 110 characters. `N` tries every empty cell, and a move that wins on the spot scores −1, the win test's flag; lower is better. Otherwise it scores the negation of the opponent's best reply, found by swapping the two players (`T`) and calling `N` again. It stops searching a position as soon as it finds a winning move (a score of −1), which makes it about four times faster. The first reply takes up to about 30 seconds on a 4 MHz Z80.
 - **The board is two 9-bit numbers**, one per player. A win is any of 8 line masks fully set, and `V` tests one mask, so the table is just `0 7V56V448V…`.
 - The search's best move comes back on the stack, and its score in `v`. `v` is saved and restored around each recursive call, since a variable is shared by every level.
 - **There is no code for a human win.** Against a perfect opponent it can't happen, so the game only checks its own lines. Opening in the centre also means a draw is simply "four rounds passed".

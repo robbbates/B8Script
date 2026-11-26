@@ -1,6 +1,6 @@
 # B8Script games
 
-Forty-three games for B8Script: twenty-two full-size ones, and twenty-one tiny ones that each fit in a tweet. Programs that aren't games, such as Tiny BASIC, a memory monitor and benchmarks, are in [`programs/`](../programs/).
+Forty-five games for B8Script: twenty-two full-size ones, and twenty-three tiny ones that each fit in a tweet. Programs that aren't games, such as Tiny BASIC, a memory monitor and benchmarks, are in [`programs/`](../programs/).
 
 ## Running a game
 
@@ -18,7 +18,7 @@ The interpreters are in [`B8Script-interpreters/`](../B8Script-interpreters/), a
 - **The screen.** Most games draw on a screen of 80 × 24, with the console escapes of `$` (`/{` clears it, `/~` places the cursor). The CP/M and Windows builds send them as ANSI (VT100) sequences: on CP/M use an ANSI terminal or emulator, and the Windows builds switch the console into ANSI mode themselves. A generic ROM built with `ANSI = 0` draws through the machine's own screen routines instead.
 - **Ctrl-C** stops any game.
 - **Random numbers** come from how long you take to press a key. That's why many games say "Key" or "Press a key to start": your timing picks the game.
-- **`.TXT` files.** Each full-size game also has a `NAME.TXT` with comments that explain how it works. It runs the same as the `.B8S`; the `.B8S` is just that file with the comments and spaces stripped out.
+- **`.TXT` files.** Each game, the tiny ones too, also has a `NAME.TXT` with comments that explain how it works. It runs the same as the `.B8S`; the `.B8S` is just that file with the comments and spaces stripped out. In the web player, **Source** shows it.
 
 ## Full-size games
 
@@ -49,7 +49,7 @@ The interpreters are in [`B8Script-interpreters/`](../B8Script-interpreters/), a
 
 ## Tiny games
 
-Twenty-one games, each one complete in a tweet. [`docs/tweets.md`](../docs/tweets.md) shows the code of each and explains how it fits. Four of them share a name with a full-size game, so their file names carry their size instead: `LIGHTS14.B8S`, `BRKOUT28.B8S`, `MASTER28.B8S` and `HANGMN28.B8S`.
+Twenty-three games, each one complete in a tweet. [`docs/tweets.md`](../docs/tweets.md) shows the code of each and explains how it fits. Four of them share a name with a full-size game, so their file names carry their size instead: `LIGHTS14.B8S`, `BRKOUT28.B8S`, `MASTER28.B8S` and `HANGMN28.B8S`. `LIGHTR14.B8S` and `LIGHTK.B8S` are Lights Out with other starts.
 
 ### `tweet140/`: 140 characters, the classic tweet
 
@@ -65,6 +65,8 @@ Twenty-one games, each one complete in a tweet. [`docs/tweets.md`](../docs/tweet
 | `PIG.B8S` | **Pig**, the dice game: reach 100 in as few turns as you can. A 1 loses the turn's points. | Any key rolls, h banks the points. |
 | `TRON.B8S` | **Tron**: a light cycle that never stops. Don't hit your own trail. | `,` turns left, `.` turns right. |
 | `LIGHTS14.B8S` | **Lights Out**, the classic 5 × 5 puzzle from all lights on. Upper case is on, lower case is off; 15 presses is the best. | a–y press that cell. |
+| `LIGHTR14.B8S` | **Lights Out, a random start**: the board is stirred until you press a key, so each game starts differently, and every start can be won. | Any key starts; then a–y press that cell. |
+| `LIGHTK.B8S` | **Lights Out, the key's start**: the key you press picks the board, so the same key gives the same puzzle (50 in all; try q). | Any key picks the board; then a–y press that cell. |
 
 ### `tweet280/`: 280 characters, a tweet since 2017
 

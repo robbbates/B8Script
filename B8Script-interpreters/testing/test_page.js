@@ -63,7 +63,7 @@ async function runSrc(page, src) {
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
   await page.goto(URL);
   const n = await page.$$eval('#prog option', o => o.length);
-  ok(`the menu holds every program (${n})`, n === 5 + 21 + 10 + 11);         // programs, games, the tiny games
+  ok(`the menu holds every program (${n})`, n === 5 + 21 + 12 + 11);         // programs, games, the tiny games
 
   await page.selectOption('#prog', 'programs/MANDEL.B8S');
   await page.click('#run');

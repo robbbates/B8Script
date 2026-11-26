@@ -63,6 +63,8 @@ KEYS.update({
     d + '/HILO.B8S': ([], DIGITS),
     d + '/LANDER.B8S': ([], ['7 8 9', '4 5 6', '1 2 3', '. 0 .']),
     d + '/LIGHTS14.B8S': (['a b c d e', 'f g h i j', 'k l m n o', 'p q r s t', 'u v w x y'], []),
+    d + '/LIGHTR14.B8S': (['a b c d e', 'f g h i j', 'k l m n o', 'p q r s t', 'u v w x y'], []),
+    d + '/LIGHTK.B8S': (['a b c d e', 'f g h i j', 'k l m n o', 'p q r s t', 'u v w x y'], []),
     d + '/NIM.B8S': ([], ['1 2 3']),
     d + '/PIG.B8S': (['Spc'], ['h']),
     d + '/REFLEX.B8S': ([], ['Spc']),

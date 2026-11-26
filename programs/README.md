@@ -1,6 +1,6 @@
 # B8Script programs
 
-Programs for B8Script that aren't games: a BASIC interpreter, a memory monitor, a benchmark and two classic demonstrations of arithmetic. The games are in [`games/`](../games/).
+Programs for B8Script that aren't games: a BASIC interpreter, a memory monitor, a benchmark, two classic demonstrations of arithmetic, and in [`cpm/`](cpm/) a program that reads CP/M files. The games are in [`games/`](../games/).
 
 Every `.B8S` file is a complete program. Run it with any B8Script runner, the same way as a game (`B8S PI.B8S`, on Windows or CP/M; see [`games/README.md`](../games/README.md#running-a-game)). Each one also has a `NAME.TXT` with comments that explain how it works. It runs the same as the `.B8S`, which is that file with the comments and spaces stripped out.
 
@@ -11,6 +11,14 @@ Every `.B8S` file is a complete program. Run it with any B8Script runner, the sa
 | `SIEVE.B8S` | **The BYTE sieve**, the benchmark from *BYTE* magazine (1981): find the primes with the Sieve of Eratosthenes, over 8,191 flags. | Type how many passes to make. It prints a dot for each pass, then the count, `1899 primes`. Time it with a watch to compare machines. |
 | `PI.B8S` | **The digits of pi**, by the spigot of Rabinowitz and Wagon, which needs nothing bigger than a 16-bit cell. | Type how many digits, 1 to 250. They come out in groups of ten, fifty to a line. 250 digits take a while on an 8-bit machine. |
 | `MANDEL.B8S` | **The Mandelbrot set**, drawn in characters, 78 × 22, with 16-bit fixed-point arithmetic. | Just run it. Denser characters mean the point took longer to escape; `@` is inside the set. |
+
+## CP/M file programs
+
+The programs in [`cpm/`](cpm/) read files through the CP/M BDOS, with a little machine code (see [Files under CP/M](../docs/idioms.md#files-under-cpm) in idioms.md). They need a CP/M build on a Z80 or an 8080; on any other build they say so and end. They are not in the web player.
+
+| File | Program | How to use it |
+|---|---|---|
+| `cpm/HEXDUMP.B8S` | **HEXDUMP**: shows any file in hex and as text, a page of 256 bytes at a time, in MON's row format. | `B8S HEXDUMP.B8S FILE.COM`, or with no name it asks for one. Space or Return shows the next page, b the one before, q quits. |
 
 ## The benchmarks
 

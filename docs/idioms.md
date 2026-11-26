@@ -15,6 +15,7 @@
 - [Random numbers](#random-numbers)
 - [Game and real-time patterns](#game-and-real-time-patterns)
 - [Machine code and the hex loader](#machine-code-and-the-hex-loader)
+- [Files under CP/M](#files-under-cpm)
 - [Making programs small and fast](#making-programs-small-and-fast)
 - [Gotchas](#gotchas)
 - [Debugging](#debugging)
@@ -533,6 +534,76 @@ The grave does two jobs: followed by a hex digit it loads bytes, followed by any
 
 [↑ Back to top](#b8script-idioms-tips-and-tricks)
 
+## Files under CP/M
+
+B8Script has no file commands. On a CP/M build the grave is the way in: one machine-code routine calls the BDOS, and everything else (the FCB, the record buffer, the file's name) is B8Script. The routine is 8080 code, so one copy serves the Z80 and the 8080 builds. HEXDUMP carries the kit.
+
+**The guard** comes first, before any machine code is loaded. It is true only on a CP/M runner: the loader's RET byte is C9h, and CP/M keeps a jump (C3h) at 0000h and at 0005h. Anywhere else the program says so and ends:
+
+```text
+2_`00,201= 0,195=& 5,195=& 0=:("Needs CP//M on a Z80 or 8080./M/J"$0)\
+```
+
+**The gateway** B, `( arg fn -- hl )`, is 13 bytes of position-independent code and the loader's RET:
+
+```text
+14_:b! `E1D1E3C54BEBCD0500C1D1E5D5 ;
+[B b@` ]
+```
+
+| Bytes | Instruction | Does |
+| --- | --- | --- |
+| `E1` | `POP HL` | The return address |
+| `D1` | `POP DE` | fn |
+| `E3` | `EX (SP),HL` | arg into HL, the return address back on the stack |
+| `C5` | `PUSH BC` | Keep the reading position, as the contract asks |
+| `4B` | `LD C,E` | The function number |
+| `EB` | `EX DE,HL` | arg into DE |
+| `CD0500` | `CALL 0005h` | The BDOS, which returns its result in HL (and A) |
+| `C1` | `POP BC` | |
+| `D1` | `POP DE` | The return address |
+| `E5` `D5` | `PUSH HL`, `PUSH DE` | The result becomes TOS |
+| `C9` | `RET` | Written by the loader |
+
+A function that returns a byte gives it in L, and H need not be zero: mask the result with `255&` where it is tested.
+
+**The kit.** N puts a name in an FCB, with the help of C; A finds the name on the command line:
+
+```text
+[C 1( t@,:33<{:}%46=|:{(;0)}\ :96>{:}%123<&32&- %:0>:{(1-{{:}%.1+}0)}0=(%;0) t@1+t! 1);;]
+[N c! t!
+  36 1(1-:c@+0%.:);
+  11 1(:c@+32%.1-:);
+  t@1+,58=( t@,95&64-c@. t@2+t! 0)
+  c@1+ 8C
+  t@,46=( t@1+t! c@9+ 3C 0)]
+[A 129 1(:,32=:(%1+%0)) 1(:,32>:(%1+%0)) 1(:,32=:(%1+%0)) :,33<(;0 0)]
+```
+
+| Word | Effect | Does |
+| --- | --- | --- |
+| N | `( text fcb -- )` | Name to FCB: all 36 bytes zeroed, an optional `d:` drive, up to 8 and 3 characters in capitals, blank-padded, extra characters dropped. The name ends at any character at or below space |
+| C | `( dst n -- )` | For N: copies one part of the name from t, in capitals, up to n characters, and stops at a dot or the name's end |
+| A | `( -- text )` | The first name after the program's own in the command tail, or 0 if there is none |
+
+With no name on the command line, HEXDUMP asks for one: `A :0=( ; "File: "$ -14? 13'10' 0) f@N`. Its variables: b the gateway's code, f the FCB (36 bytes), d the record buffer, and t, i and c as scratch.
+
+**The calls HEXDUMP makes**, each one line:
+
+| Call | Code | Does |
+| --- | --- | --- |
+| Set the DMA (26) | `26B;` | With the buffer's address under it |
+| Open (15) | `f@15B255&255=` | True if there is no such file |
+| The size (35) | `f@35B; f@33+@s!` | The size in records, at FCB+33 |
+| Read a random record (33) | `[R f@33+! 26B; f@33B;]` | `( buf rec -- )`: the record number is a cell at FCB+33, and FCB+35 stays zero |
+
+- **The FCB and the buffer go on the heap.** A checked build stops with `O` on any `!` or `.` below the letter page, so 005Ch and 0080h may be read but not written.
+- **Set the DMA before the first read.** The runner's loader leaves it just past the program text, where the heap starts.
+- **Take the name from the command tail.** The loader's open of the program file overwrites the second FCB at 006Ch, so a name given on the command line is parsed from 0080h: a length byte, then the text, ending in NUL. `B8S HEXDUMP.B8S FILE.COM` leaves ` HEXDUMP.B8S FILE.COM` there.
+- **The code must keep BC,** which the gateway does; the grave restores IX and IY after the call.
+
+[↑ Back to top](#b8script-idioms-tips-and-tricks)
+
 ## Making programs small and fast
 
 Every character costs a byte of memory and a dispatch each time it runs, so the same choices make a program both smaller and faster.
@@ -607,6 +678,7 @@ Develop on a checked build, which stops with an error code, the line and column,
 
 - [b8script.md](b8script.md): the spec's Idioms, Tips and Don't rely on
 - [tutorial.md](tutorial.md) and [tweets.md](tweets.md)
+- [programs/cpm/](../programs/cpm/): HEXDUMP, the source of Files under CP/M
 - [games/](../games/): the commented .TXT sources of the 21 full-size games, their README, and the tweet-size games in tweet140 and tweet280
 
 Code quoted from a program was checked against its source; rows that describe a pattern in words have no code to check.

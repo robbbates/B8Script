@@ -5,13 +5,20 @@ BDOS and CCP, on a Z80 that traps undocumented opcodes (-u) or on an 8080
 (-8), so it catches what the models can't.
 
 Needs: z80pack built (https://github.com/udo-munk/z80pack: make in
-z80pack/cpmsim/srcsim), with its cpm22 disks in cpmsim/disks/library, and
+z80pack/cpmsim/srcsim and in z80pack/cpmsim/srctools, whose cpmrecv the
+simulator starts at boot), with its cpm22 disks in cpmsim/disks/library, and
 cpmtools (apt-get install cpmtools). Set Z80PACK to the z80pack folder.
 
   python3 cpmsim.py suite [-8] OUTDIR BUILD...   e.g. suite out B8S B8SU
       every program of the suite (but those that need a clock or another
       CPU's machine code) under the named .COM files, each output compared
       byte for byte with ref.py. Keys are typed as a person types them.
+  python3 cpmsim.py files [-8] OUTDIR BUILD...   e.g. files out B8S B8SU
+      the CP/M file programs (test_cpm.py's cases: HEXDUMP, .B8S and .TXT)
+      under the named .COM files, with their files on drive C and the name
+      on the command line or typed at the prompt; each output is compared
+      byte for byte with test_cpm.py's model. A key is typed only once the
+      output has stopped, as a person would wait for the page.
   python3 cpmsim.py type [-8] OUTDIR STEP...
       type at CP/M: a STEP is text (\\r for Return, \\x03 for Ctrl-C),
       'wait:SECONDS' or 'expect:TEXT'. Prints all the output.
@@ -115,6 +122,16 @@ class Sim:
             os.write(self.fd, bytes([c]))
             self.pump(0.01)
 
+    def settle(self, quiet=0.5, cap=30):
+        """Wait until no output has come for `quiet` seconds."""
+        end = time.time() + cap
+        while time.time() < end:
+            n = len(self.out)
+            if not self.pump(quiet):
+                return
+            if len(self.out) == n:
+                return
+
     def close(self):
         try:
             os.kill(self.pid, 9)
@@ -167,6 +184,54 @@ def suite(outdir, builds, cpu8):
     return fails
 
 
+def files(outdir, builds, cpu8):
+    import test_cpm
+    c = setup(outdir, cpu8)
+    for p in test_cpm.PROGS:
+        put(c, p, open(os.path.join(test_cpm.CPM, p), 'rb').read())
+    for k, (what, data, typed, keys) in enumerate(test_cpm.CASES):
+        if data is not None:
+            put(c, 'T%d.COM' % k, data)
+    fails = 0
+    for b in builds:
+        sim, bad, ran = Sim(cpu8), [], 0
+        for p in test_cpm.PROGS:
+            for k, (what, data, typed, keys) in enumerate(test_cpm.CASES):
+                # a typed name gets a drive and lower case, which HEXDUMP's N folds
+                typed = b'c:t%d.com' % k if typed is not None else None
+                cmd = b'B:%s %s' % (b.encode(), p.encode()) + (b'' if typed else b' T%d.COM' % k)
+                ran += 1
+                sim.out = bytearray()
+                sim.type(cmd + b'\r')
+                sim.until(b'\r\n', 5)
+                start = sim.out.index(b'\r\n') + 2
+                sim.settle()
+                if typed:
+                    sim.type(typed + b'\r')
+                    sim.settle()
+                for ch in keys:
+                    sim.type(bytes([ch]))
+                    sim.settle()
+                ok = sim.until(b'\r\nC>', 30, start)
+                got = bytes(sim.out[start:])
+                got = got[:got.rfind(b'C>')] if ok else got
+                exp = test_cpm.hexdump(data, keys, typed)
+                g = got[:-2] if got.endswith(b'\r\n') else got    # the CCP's new line
+                if not ok:
+                    bad.append((p, what, 'HUNG', got[-80:]))
+                    sim.close()
+                    sim = Sim(cpu8)
+                elif g != exp and got != exp:
+                    d = next((i for i in range(min(len(g), len(exp))) if g[i] != exp[i]), min(len(g), len(exp)))
+                    bad.append((p, what, d, g[d:d + 40], exp[d:d + 40]))
+        sim.close()
+        print(f'{b}{" (8080)" if cpu8 else ""}: {ran} runs, {len(bad)} differ')
+        for x in bad:
+            print('   ', x)
+        fails += len(bad)
+    return fails
+
+
 def type_steps(outdir, steps, cpu8):
     setup(outdir, cpu8)
     sim = Sim(cpu8)
@@ -192,8 +257,10 @@ if __name__ == '__main__':
     a = sys.argv[1:]
     cpu8 = '-8' in a
     a = [x for x in a if x != '-8']
-    if len(a) < 2 or a[0] not in ('suite', 'type'):
+    if len(a) < 2 or a[0] not in ('suite', 'files', 'type'):
         sys.exit(__doc__)
     if a[0] == 'suite':
         sys.exit(1 if suite(a[1], a[2:], cpu8) else 0)
+    if a[0] == 'files':
+        sys.exit(1 if files(a[1], a[2:], cpu8) else 0)
     type_steps(a[1], a[2:], cpu8)

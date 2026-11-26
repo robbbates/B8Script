@@ -442,10 +442,10 @@ def play(path, keys, steps=20_000_000):
 if __name__ == '__main__':
     want = [a.upper() for a in sys.argv[1:]]
     bad = 0
-    # the stripped NAME.B8S of every game, and of every program in programs/, must
-    # hold the same code as its NAME.TXT
+    # the stripped NAME.B8S of every game, and of every program in programs/ and
+    # programs/cpm/, must hold the same code as its NAME.TXT
     PROGS = os.path.normpath(os.path.join(here, '..', '..', 'programs'))
-    for d, txt in sorted((d, t) for d in (GAMES, PROGS) for t in os.listdir(d)):
+    for d, txt in sorted((d, t) for d in (GAMES, PROGS, os.path.join(PROGS, 'cpm')) for t in os.listdir(d)):
         name, ext = os.path.splitext(txt)
         if ext != '.TXT' or (want and name not in want):
             continue

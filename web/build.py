@@ -6,7 +6,9 @@ usage: build.py            write b8script.html
        build.py --check    only check that b8script.html is up to date
 
 Each program's line of help comes from the tables in games/README.md and
-programs/README.md: the bold name, what it is, and how to play."""
+programs/README.md: the bold name, what it is, and how to play. Each program's
+NAME.TXT, its commented source, goes in too, for the Source button. The CP/M
+programs in programs/cpm/ are left out, as machine code can't run here."""
 import os, re, sys, json, html
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -120,7 +122,9 @@ def build():
             how = HOW.get(pid, how)
             info = (md(what) + (' <i>' + md(how) + '</i>' if how else '')) if what else ''
             src = open(os.path.join(ROOT, folder, f), 'rb').read().decode('latin-1')
-            items.append(dict(id=pid, name=f + (' — ' + title if title else ''), info=info, src=src,
+            t = os.path.join(ROOT, folder, f[:-4] + '.TXT')         # the commented source, for Source
+            txt = open(t, 'rb').read().decode('latin-1') if os.path.exists(t) else ''
+            items.append(dict(id=pid, name=f + (' — ' + title if title else ''), info=info, src=src, txt=txt,
                               keys=KEYS.get(pid, ([], []))))
         groups.append(dict(group=name, items=items))
     page = open(os.path.join(HERE, 'template.html'), encoding='utf-8').read()

@@ -163,6 +163,7 @@ There are no shift commands and no hex literals; these idioms make them from `:+
 | All bits of a mask set? | `[V:w@&=\|]` | `( flag mask -- flag' )` ORs in "every bit of mask is in w" (TICTAC) |
 | Self-inverse scramble | XOR each byte with a seeded random stream | Running it again restores the data (IDOL save codes) |
 | Rolling checksum | `0 0i! 1( 3* h@1032+i@+,+63& i@1+:i! 47<)` | c = 3c + byte, mod 64; any changed byte shows (IDOL) |
+| A six-digit offset | `n@1-H i@16*X` | With 256-byte pages, the page in four hex digits and the row's offset in two make the offset in the file (HEXDUMP) |
 
 [↑ Back to top](#b8script-idioms-tips-and-tricks)
 
@@ -240,6 +241,7 @@ v 1(
 | Why the loop ended | `0q! 1( ... q@0=) q@1=( ... 0) q@2=( ... 0)` | One variable is both the loop test and the reason (IDOL, LIGHTS) |
 | Check everything, decide at the end | `1n@1(%0?:'D=&%1-:);` | Each test is ANDed into one flag under the counter (SIMON) |
 | Error code, not unwinding | `(2x!0) x@\` | Set a code, keep the stack balanced, and leave at the next `x@\` (TINYBAS) |
+| Sort a command, then leave | `1( test:( act 0)\ test:( act 0)\ ... 0)` | A block run once: each test that holds acts, and its `\` leaves the block, so later tests aren't made (LEDIT) |
 | Look for a key every 16 passes | `k@1+:k!15&0=(K(4x!0)0)`, with `[K1?2=]` | A masked counter makes a one-in-16 test; K is "is Ctrl-B down?". Use a key of your own for a program's own break: Ctrl-C belongs to the interpreter (TINYBAS) |
 | Neighbourhood scan | `y@1-j! 1( x@1-i! 1( ... i@1+:i! x@2+<) j@1+:j! y@2+<)` | The 3×3 around x, y with no offset table (SUPERTRK) |
 
@@ -311,7 +313,7 @@ The 26 variables hold one cell each; anything bigger lives on the heap, reached 
 | Allocate and clear in one loop | `0_g!1024 1(0 1_.1-:);` | Takes the heap a byte at a time, storing 0 (TRON, SNAKE, DUEL) |
 | Fixed-width records in a string | `"Sol     Vega    Rigel   "u!` and `%8*+` | The data stays in the program text (TRADER, IDOL, HANGMAN) |
 | Several tables in one block | `996_v!`, then `v@356+`, `v@990+@` | One allocation for everything, addressed as v plus a constant (TINYBAS, IDOL) |
-| Use the heap top without allocating | `0_:p!e!` | Memory above the top still belongs to the program (TINYBAS) |
+| Use the heap top without allocating | `0_:p!e!` | Memory above the top still belongs to the program (TINYBAS; LEDIT keeps a whole text file there, with `0_:d!e!`) |
 | Stack in the heap | push `d@z@p@+! p@2+p!`, pop `p@2-:p! z@+@c!` | A flood fill with no recursion (MINES); TINYBAS keeps a byte stack the same way |
 | Swap two buffers | `g@h@g!h!` | Double-buffering for Life (LIFE) |
 | Shadow copy | Keep what the screen shows; draw only the cells that differ | Start it at an impossible value to force a full first draw (G2048, REVERSI, IDOL) |
@@ -357,6 +359,7 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | n spaces | `[S1(:1<\32'1- 1);]` | `( n -- )`, safe for 0 (SKI, COPTER, G2048) |
 | n of any character | `[ %1(%:'%1-:);;]` | `( n c -- )` for borders and rules (IDOL) |
 | Leading zeros | `y@:1000<("0"$0):100<("0"$0):10<("0"$0)#` | One zero for each power of ten the value is below (G2048, IDOL) |
+| Right-aligned in four columns | `[U :1000<(32'0):100<(32'0):10<(32'0)#32']` | A space for each power of ten the number is below, then a space after: line numbers in a listing (LEDIT) |
 | Exactly three digits | `[U :100/;48+' :10/;10M48+' 10M48+']` | No loop (SUPERTRK) |
 | Right-aligned | `[A 1-%:{:9>%:99>%:999>%9999>++++ 6%-"      "+$ }#]` | `( n w -- )` counts digits with flags and prints the tail of a string of six spaces (IDOL) |
 | Digits without a buffer | `[N -1% 1(10/ 48+% :0=0=); 1(E :0<0=);]` | Stacks the digits above a −1 marker, then prints them back (IDOL) |
@@ -393,6 +396,8 @@ A string stays where it is in the program text: `"` pushes its address and `$` p
 | Number reader with no variable | `[N0 1(0?:13=\:'48-%10*+1);]` | The total rides on the stack; Return ends it (HILO) |
 | Number reader that ignores other keys | `[N 0n! 1( K :c!47> c@58<&( c@' n@10*c@48-+n! 0) c@13= ~) n@]` | Only digits echo; K stirs the random seed while waiting (TRADER, SUPERTRK) |
 | Number from a typed line | `[N -3?a! 0n! 1( a@,48- :d!-1> d@10<& :( n@10*d@+n! a@1+a! 0) ) L n@]` | Walks the line until a non-digit (WUMPUS) |
+| A number, then a command letter | `t@,48- 32767&10<:h!( V n! 0)` then `t@,95&c! t@1+,13=x!` | h: a number came; c: the next character, in capitals; x: the line ends after it, so `5L` is a command and `5Lunch` isn't (LEDIT) |
+| Digits at a place in the text | `[V 0 1( t@,48-:32767&10<0=:{(;0)}\ %10*+ t@1+t! 1)]` | `( -- n )`, leaving t just after the digits (LEDIT) |
 | Key to a number by position | `"wasd"i@+, c@=` in a loop | The index where the key matches is the command (G2048, ROBOTS, FIFTEEN) |
 | Keypad to a step | `v@1- 3/ 1-d! 1-o!` | Position 0–8 to dy and dx of −1…+1 (ROBOTS) |
 | i j k l as arrow keys | `0?3&"Q'Oy"+,80-` | The step for a 41-wide grid: +1, −41, −1 or +41 (MAZE in tweet280). See below |
@@ -433,6 +438,7 @@ B8Script's screen commands are five escapes inside the strings that `$` prints. 
 | Name | Code | What it does |
 | --- | --- | --- |
 | Home, don't clear | `0 0"/~"$` at the top of the draw | Overwrites the old picture in place, with no flicker (LIFE, TETRIS) |
+| A page drawn in place | `0 0"/~"$`, the rows, `"/}"$` for a row with nothing in it, and a status line that ends in `/}` | Clear once at the start; every page after overwrites the last, and nothing scrolls (HEXDUMP) |
 | Index straight to the cursor | `[P64/"/~"$]` | `/` leaves the quotient (the row) under the remainder (the column): the order `/~` takes them in (SNAKE, TRON, DUEL, DUNGEON) |
 | Cell to screen place | `[Q2*5+%4*29+Y]` | Scale and offset each half for Y (LIGHTS, BATTLE, G2048) |
 | Clear, then draw | `"/{IDOL/M/J/M/J..."$` | The clear and the first text in one string (IDOL) |
@@ -651,6 +657,7 @@ Every character costs a byte of memory and a dispatch each time it runs, so the 
 | Fast path first | Print to the screen with one `$`; copy a byte at a time only into a buffer (IDOL) |
 | Spend letters on the hot words | Rarely used routines go in a numbered table (IDOL) |
 | Push the identity before a fold | Start at 0 for OR or −1 for AND under the loop, so no result variable is needed (G2048, LIGHTS) |
+| Hot byte loops in machine code | On a CP/M build, LEDIT's move and scanner take about 60 clock cycles a byte, against about 2,600 for the same loop in B8Script (LEDIT) |
 
 [↑ Back to top](#b8script-idioms-tips-and-tricks)
 
@@ -662,6 +669,7 @@ The minus before a digit is the one that bites most, especially in the small gam
 | --- | --- |
 | `5-3` pushes 5 and −3 | Write `5- 3`; it applies after any operator, so `0>-10*` pushes −10. Search outside strings for `-` before a digit |
 | `39-0)` is 39, −0, close | Write `39- 0)` |
+| `48-32767&` is 48, then −32767 | The same slip after any operator: write `48- 32767&`, and `e@=` rather than `e@-0=` (LEDIT) |
 | Variables start with garbage | Store before you read; a checked build hides this by zeroing them |
 | `x#` prints an address | You meant `x@#` (tutorial) |
 | `{` and `}` unpaired inside a block | `)` jumps to whatever is on top of the return stack |
@@ -691,6 +699,7 @@ Develop on a checked build, which stops with an error code, the line and column,
 | Stack-leak sentinel | `12345` first, then `12345=0=("Stack leak"$0)` last |
 | Trace a value | `:#" "$` |
 | Mark a place | `"@3"$` |
+| Test machine code by itself | A scrap program that loads it, calls it with known values and prints what it leaves, before the program relies on it (LEDIT's move and scanner) |
 
 - **Take the sentinel out** before the program goes into a pipe, since it prints.
 - **A checked run is not proof.** Checked builds zero the variables, so a program that reads before it stores can work there and fail unchecked.

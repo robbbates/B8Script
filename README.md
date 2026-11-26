@@ -17,7 +17,7 @@ A postfix stack language for 64 KB 8-bit computers, by Robb Bates. Every instruc
 | [`B8Script-interpreters/`](B8Script-interpreters/) | Interpreters for the Z80, 8080, 6502 and 6809 (generic ROM images and CP/M .COM files) and for the Windows command shell (32-bit .EXE files), checked and unchecked, with and without a line editor, in three tiers for every CPU: small, base and fast (about twice as fast as small). Its README covers sizes, speed and building |
 | [`web/`](web/) | The web player: [`b8script.html`](web/b8script.html) runs B8Script and every game and program in a browser, on a computer or a phone. One file: download it and open it |
 | [`games/`](games/) | Forty-two games, from Star Trek and Klondike to twenty-one that each fit in a tweet. Its README says how to run and play each one |
-| [`programs/`](programs/) | Programs that aren't games: Tiny BASIC, a memory monitor, the BYTE sieve benchmark, the digits of pi and the Mandelbrot set |
+| [`programs/`](programs/) | Programs that aren't games: Tiny BASIC, a memory monitor, the BYTE sieve benchmark, the digits of pi and the Mandelbrot set, and for CP/M a file viewer and a line editor |
 | [`B8Script-interpreters/testing/`](B8Script-interpreters/testing/) | The reference interpreter, the test suite and emulator harnesses, which also run the games |
 | [`docs/tweets.md`](docs/tweets.md) | Twenty-one tiny games, each in a tweet: ten in 140 characters and eleven in 280, with how each one fits |
 | [`editors/vscode-b8script/`](editors/vscode-b8script/) | Syntax highlighting for Visual Studio Code: words, variables, numbers, strings and their escapes, comments, and the command groups each in their own color |

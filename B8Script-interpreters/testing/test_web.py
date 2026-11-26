@@ -89,7 +89,7 @@ for folder, tests in test_tweets.TESTS.items():
 section('the scripted games')
 
 INP = b'y12345 nswe\rabc\r3\r7\r' * 20
-for g in sorted(glob.glob(f'{ROOT}/games/*.B8S') + glob.glob(f'{ROOT}/games/*.TXT') + glob.glob(f'{ROOT}/games/*/*.B8S')
+for g in sorted(glob.glob(f'{ROOT}/games/*.B8S') + glob.glob(f'{ROOT}/games/*.TXT') + glob.glob(f'{ROOT}/games/*/*.B8S') + glob.glob(f'{ROOT}/games/*/*.TXT')
                 + glob.glob(f'{ROOT}/programs/*.B8S') + glob.glob(f'{ROOT}/programs/*.TXT')):
     if os.path.basename(g) == 'IDOL.TXT':        # documentation only
         continue

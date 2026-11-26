@@ -5,7 +5,7 @@
 // The interpreter itself is checked against ref.py by test_web.py; this checks
 // what the page adds: the screen (its rows must be the program's output lines),
 // the keyboard (a computer's keys, a phone's text input, the on-screen keys),
-// n?'s clock, the break key, checked reports, Edit and the menu.
+// n?'s clock, the break key, checked reports, Edit, Source and the menu.
 'use strict';
 const path = require('path');
 const { chromium, devices } = require('playwright');
@@ -73,6 +73,20 @@ async function runSrc(page, src) {
   ok('MANDEL: the screen shows its picture', JSON.stringify(got.slice(0, 22)) === JSON.stringify(want.slice(0, 22)),
      JSON.stringify(got.slice(0, 3)));
   if (shots) await page.screenshot({ path: path.join(shots, 'desktop-mandel.png') });
+
+  // Source shows the commented NAME.TXT, for the games, the programs and the tiny games;
+  // an edited program has none
+  for (const prog of ['programs/MANDEL.B8S', 'games/LIFE.B8S', 'games/tweet140/HILO.B8S', 'games/tweet280/MAZE.B8S']) {
+    await page.selectOption('#prog', prog);
+    await page.click('#txtb');
+    const txt = fs.readFileSync(path.join(ROOT, prog.replace(/\.B8S$/, '.TXT')), 'latin1').replace(/\r\n?/g, '\n');
+    const shown = await page.$eval('#src', e => e.value), title = await page.$eval('#ename', e => e.textContent);
+    ok(`Source shows ${prog.replace(/\.B8S$/, '.TXT')}`, shown === txt && /\.TXT/.test(title), title);
+    await page.click('#eclose');
+  }
+  await runSrc(page, '"x"$');
+  await until(page, /^Ended/);
+  ok('Source is off for an edited program', await page.$eval('#txtb', e => e.disabled));
 
   await page.selectOption('#prog', 'programs/PI.B8S');
   await page.click('#run');

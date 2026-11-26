@@ -3,10 +3,12 @@
 
 usage: test_tweets.py [--all] [NAME...]
 
-Every game must fit its folder's limit. Each test types a fixed key sequence at
+Every game must fit its folder's limit, and its commented NAME.TXT must hold the
+same code as the NAME.B8S (b8strip.py --same). Each test types a fixed key sequence at
 a checked reference build, as test_games.py does (a NUL is a key that hasn't
 come yet), and checks that the run prints the expected texts and stops without
-an error report. A test marked 'end' must also reach the end of the program,
+an error report, on both versions, which must print exactly the same. A test
+marked 'end' must also reach the end of the program,
 not just run out of keys, and leave the data stack empty. --all adds the slow
 check that Tic-tac-toe never loses: it plays every legal line against it.
 See docs/tweets.md for the games themselves.
@@ -16,6 +18,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 GAMES = os.path.normpath(os.path.join(here, '..', '..', 'games'))   # games/ at the root of the repository
 sys.path.insert(0, here)
 from ref import Ref, NeedKey
+from b8strip import strip
 
 LIMITS = {'tweet140': 140, 'tweet280': 280}
 
@@ -31,12 +34,12 @@ class Play(Ref):
         super().step()
 
 
-def path(folder, game):
-    return os.path.join(GAMES, folder, game + '.B8S')
+def path(folder, game, ext='.B8S'):
+    return os.path.join(GAMES, folder, game + ext)
 
 
-def play(folder, game, keys, steps=200_000_000):
-    r = Play(open(path(folder, game), 'rb').read(), keys, checked=True)
+def play(folder, game, keys, steps=200_000_000, ext='.B8S'):
+    r = Play(open(path(folder, game, ext), 'rb').read(), keys, checked=True)
     return r, r.run(steps)
 
 
@@ -199,13 +202,20 @@ if __name__ == '__main__':
             ok = n <= limit
             bad += not ok
             print(f'{"PASS" if ok else "FAIL"}  {name:8} {n} characters')
+            t = path(folder, name, '.TXT')
+            ok = os.path.exists(t) and strip(open(t, 'rb').read()) == strip(open(path(folder, name), 'rb').read())
+            bad += not ok
+            print(f'{"PASS" if ok else "FAIL"}  {name:8} {name}.B8S is {name}.TXT stripped')
         for game, what, keys, texts, end in TESTS[folder]:
             if want and game not in want:
                 continue
             r, out = play(folder, game, keys)
+            r2, out2 = play(folder, game, keys, ext='.TXT') if os.path.exists(path(folder, game, '.TXT')) else (r, out)
             miss = [t for t in texts if t not in out]
             ended = not r.waiting and not r.ds
-            ok = not miss and r.error is None and (ended or end != 'end')
+            ok = not miss and r.error is None and (ended or end != 'end') and r2.error is None and out == out2
+            if out != out2:
+                print('      B8S and TXT differ')
             bad += not ok
             print(f'{"PASS" if ok else "FAIL"}  {game:8} {what}')
             if r.error:
